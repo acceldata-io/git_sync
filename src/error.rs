@@ -11,8 +11,6 @@ pub enum GitError {
 
     #[error("Invalid repository URL: {0}")]
     InvalidRepository(String),
-    #[error("Path not found: {0}")]
-    PathNotFound(String),
 
     #[error("Regex error: {0}")]
     RegexError(#[from] regex::Error),
@@ -29,17 +27,11 @@ pub enum GitError {
     #[error("Repository is not a fork")]
     NotAFork,
 
-    #[error("Missing parent repository owner info")]
-    MissingParentOwner,
-
     #[error("Missing repository name")]
     MissingRepositoryName,
 
     #[error("No such branch: {0}")]
     NoSuchBranch(String),
-
-    #[error("Missing owner for repo: {0}")]
-    MissingOwner(String),
 
     #[error("No owner or repo specified")]
     NoOwnerOrRepo,

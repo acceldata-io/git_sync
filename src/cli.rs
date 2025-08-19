@@ -206,8 +206,6 @@ pub enum BranchCommand {
     Create(CreateBranchCommand),
 }
 
-/// This defines the command line interface
-/// To add a new command, 
 #[derive(Subcommand, Debug)]
 pub enum Command {
     /// Manage tags

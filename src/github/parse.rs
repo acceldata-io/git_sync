@@ -15,6 +15,9 @@ pub async fn match_arguments(command: &Command, token: &str, repositories: Optio
  
                 if compare_cmd.all && !repos.is_empty() {
                     client.diff_all_tags(repos).await?
+
+                } else if compare_cmd.all {
+                    return Err(GitError::NoReposConfigured);
                 } else if let Some(repository) = repository{
                     client.diff_tags(repository).await?
                 } else {

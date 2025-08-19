@@ -1,3 +1,4 @@
 /target
 git-manage.toml
-Cargo.lock
+.DS_Store
+.license_report.md

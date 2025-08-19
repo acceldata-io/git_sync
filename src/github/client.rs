@@ -51,7 +51,7 @@ impl GithubClient {
 
         let parent = repo_info.parent.ok_or(GitError::NotAFork)?;
 
-        let parent_owner = parent.owner.ok_or(GitError::MissingParentOwner)?.login;
+        let parent_owner = parent.owner.ok_or(GitError::NoUpstreamRepo)?.login;
 
         let url = parent.html_url.ok_or_else(|| GitError::InvalidRepository(url.to_string()))?.to_string();
 
