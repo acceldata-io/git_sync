@@ -1,5 +1,5 @@
 use crate::error::GitError;
-use crate::utils::UserDetails;
+use crate::utils::user::UserDetails;
 use dirs::home_dir;
 use serde::Deserialize;
 use std::fs;
@@ -46,11 +46,6 @@ pub struct RepoConfig {
     pub private: Option<Vec<String>>,
     pub public: Option<Vec<String>>,
 }
-/*#[derive(Debug, Deserialize, Default)]
-pub struct Repo {
-    pub repos: Option<Vec<String>>,
-}
-*/
 
 impl Config {
     /// Load config from a toml file

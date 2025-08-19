@@ -2,6 +2,8 @@ use thiserror::Error;
 
 #[derive(Error, Debug)]
 pub enum GitError {
+    #[error("Multiple errors: {0:?}")]
+    MultipleErrors(Vec<GitError>),
     #[error("Github API error: {0}")]
     GithubApiError(#[from] octocrab::Error),
     #[error("Upstream not found for fork")]
@@ -31,7 +33,10 @@ pub enum GitError {
     MissingParentOwner,
 
     #[error("Missing repository name")]
-    MissingRepoName,
+    MissingRepositoryName,
+
+    #[error("No such branch: {0}")]
+    NoSuchBranch(String),
 
     #[error("Missing owner for repo: {0}")]
     MissingOwner(String),
@@ -42,6 +47,12 @@ pub enum GitError {
     #[error("TOML parsing error: {0}")]
     TomlError(#[from] toml::de::Error),
 
+    #[error("License missing for {0}")]
+    MissingLicense(String),
+
+    #[error("No main branch protection for {0}")]
+    NoMainBranchProtection(String),
+
     #[error(
         "Missing GitHub token. Please provide a token via --token, GITHUB_TOKEN environment variable, or in your config file."
     )]
@@ -49,6 +60,9 @@ pub enum GitError {
 
     #[error("IO error: {0}")]
     IoError(#[from] std::io::Error),
+
+    #[error("Error: {0}")]
+    Other(String),
 }
 
 

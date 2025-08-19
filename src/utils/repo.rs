@@ -1,6 +1,5 @@
 use regex::Regex;
 use crate::error::GitError;
-use std::process::Command;
 
 /// Hold basic information about a github url
 #[derive(Debug)]
@@ -15,16 +14,25 @@ pub struct RepoInfo {
     pub main_branch: Option<String>,
 }
 
-/// Hold information about the git user
+/// A holder for things that can be checked for a repository
 #[derive(Debug)]
-pub struct UserDetails {
-    /// Name of the user
-    pub name: String,
-    /// Email of the user
-    pub email: String,
+pub struct RepoChecks {
+    /// Check if the main branch is protected
+    pub protected: bool,
+    /// Check the license of the repository
+    pub license: bool
 }
+
+pub enum CheckResult {
+    /// Whether the main branch is protected
+    Protected(bool),
+    /// The license of the repository
+    License(String),
+}
+
 /// Parse the owner and repository name from a github repository url.
 pub fn get_repo_info_from_url(url: &str) -> Result<RepoInfo, GitError> {
+    // Named capture groups for the owner and the repo
     let repo_re = Regex::new(r"^https://github.com/(?<owner>[^/].+)/(?<repo>[^/].+)(\.git)?/?.*");
     let repo_regex = match repo_re {
         Ok(re) => re,
@@ -45,28 +53,26 @@ pub fn get_repo_info_from_url(url: &str) -> Result<RepoInfo, GitError> {
     }
     Err(GitError::InvalidRepository(url.to_string()))
 }
-
-impl UserDetails {
-    /// Create a new UserDetails instance
-    pub fn new(name: String, email: String) -> Self {
-        UserDetails { name, email }
-    }
-    /// Try to load user information from the environment through git
-    pub fn new_from_git() -> Result<Self, std::io::Error> {
-        let name_output = Command::new("git").arg("config").arg("get").arg("user.name").output()?;
-        let email_output = Command::new("git").arg("config").arg("get").arg("user.email").output()?;
-
-        match (name_output.status.success(), email_output.status.success()) {
-            (true, true) => {
-                let name = String::from_utf8_lossy(&name_output.stdout).trim().to_string();
-                let email = String::from_utf8_lossy(&email_output.stdout).trim().to_string();
-                Ok(UserDetails { name, email })
-            }
-            (false, _) => Err(std::io::Error::other("Failed to get git user name")),
-            (_, false) => Err(std::io::Error::other("Failed to get git email address")),
-        }
+/*
+/// Handle responses to api calls
+pub fn handle_response<T, F, E>(
+    response: Result<T, E>,
+    context: &str,
+    ok: F,
+) -> Result<(), GitError>
+where
+    F: FnOnce(T) -> Result<(), GitError>,
+    E: std::fmt::Display,
+{
+    match response {
+        Ok(data) => ok(data),
+        Err(e) => Err(GitError::ApiError(format!(
+            "Failed to {}: {}",
+            context, e
+        ))),
     }
 }
+*/
 
 #[cfg(test)]
 mod tests {
@@ -87,3 +93,4 @@ mod tests {
         }
     }
 }
+

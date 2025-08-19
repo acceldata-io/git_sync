@@ -8,12 +8,9 @@ mod utils;
 use cli::*;//{Command, SyncCommand, parse_args};
 use config::Config;
 use error::GitError;
-use github::{diff_tags, diff_tags_all};
-use octocrab::Octocrab;
+use github::parse;
 
-use init::generate_config;
 
-use crate::github::get_branch_protection;
 
 #[tokio::main]
 async fn main() -> Result<(), GitError> {
@@ -31,19 +28,11 @@ async fn main() -> Result<(), GitError> {
         .or_else(|| config.get_github_token())
         .ok_or(GitError::MissingToken)?;
 
-    let repos = config.get_fork_repositories().unwrap_or_default();
+    let repos = config.get_fork_repositories();
+    //let client = GithubClient::new(token)?;
+    parse::match_arguments(&args.command, &token, repos).await?;
+    //client.get_branch_protection("https://github.com/JeffreySmith/qmk_firmware", "main").await?;
 
-    let octocrab = Octocrab::builder()
-        .personal_token(token)
-        .build()
-        .map_err(GitError::GithubApiError)?;
-    get_branch_protection(&octocrab, "https://github.com/acceldata-io/kudu", "ODP-main").await?;
-    match &args.command{
-        Command::InitConfig {path, force} => {
-            generate_config(path.clone(), *force)?;
-        }
-        _ => {}
-    }
     /*match &args.command {
         Command::Compare { cmd, owner, repo } => match cmd {
             None => {

@@ -19,9 +19,9 @@ pub struct AppArgs {
 
     #[command(subcommand)]
     pub command: Command,
-
 }
 
+/// Options for the 'create' tag command
 #[derive(Args, Clone, Debug)]
 #[command(group(
     ArgGroup::new("target")
@@ -31,39 +31,63 @@ pub struct AppArgs {
 pub struct CreateTagCommand {
     /// The new tag's name
     #[arg(short, long, required = true)]
-    tag: String,
+    pub tag: String,
     /// The target branch
     #[arg(short, long, required = true)]
-    branch: String,
+    pub branch: String,
     /// The url of the repository to create the tag in. If --all is specified, this is
     /// not a valid option.
     #[arg(short, long, required = false)]
-    repository: String,
+    pub repository: Option<String>,
     /// Create this tag for all configured repositories, all using the same branch.
     /// If --repository is specified, this is not a valid option.
     #[arg(short, long,default_value_t = false)]
-    all: bool,
+    pub all: bool,
 }
+/// Options for the 'comparison' tag command
 #[derive(Args, Clone, Debug)]
 pub struct CompareTagCommand {
     /// The base repository to compare against
     #[arg(short, long, required = false)]
-    repository: Option<String>,
+    pub repository: Option<String>,
     #[arg(short, long, required = false)]
-    parent: Option<String>,
+    pub parent: Option<String>,
+    /// Apply to all configured repositories
     #[arg(short, long, default_value_t = false)]
-    all: bool,
+    pub all: bool,
 }
  impl CompareTagCommand {
+    /// Validate that both --repository and --parent are specified, or that --all is.
+    /// We have to use a user defined function for this since clap doesn't have a way
+    /// to enforce this through the type system or macros.
     pub fn validate(&self) -> Result<(), String> {
         match (&self.repository, &self.parent, self.all) {
             (Some(_), Some(_), _) => Ok(()),
             (None, None, true) => Ok(()),
-            _ => Err("Must specify either --repository or --parent, or use --all".to_string())
+            _ => Err("Must specify --repository and --parent, or use --all".to_string())
         }
     }
 }
 
+#[derive(Args, Clone, Debug)]
+#[command(group(
+    ArgGroup::new("target")
+    .required(true)
+    .args(&["all", "repository"])
+))]
+pub struct DeleteTagCommand {
+    /// The target repository. Not a valid option if 'all' is set
+    #[arg(short, long, required = false)]
+    pub repository: Option<String>,
+    /// The tag to delete
+    #[arg(short, long, required = true)]
+    pub tag: String,
+    /// Apply to all configured repositories. Not a valid if 'repository' is set
+    #[arg(short, long, default_value_t = false)]
+    pub all: bool,
+}
+
+/// Define the arguments for the 'sync' command for repositories
 #[derive(Args, Clone, Debug)]
 #[command(group(
     ArgGroup::new("sync")
@@ -73,10 +97,11 @@ pub struct CompareTagCommand {
 pub struct SyncRepoCommand {
     /// The repository to sync
     #[arg(short, long, required = false)]
-    repository: Option<String>,
+    pub repository: Option<String>,
     #[arg(short, long, default_value_t = false)]
-    all: bool,
+    pub all: bool,
 }
+/// Define the arguments for the 'check' repository command
 #[derive(Args, Clone, Debug)]
 #[command(
     group(
@@ -94,15 +119,63 @@ pub struct SyncRepoCommand {
 pub struct CheckRepoCommand {
     /// The repository to check
     #[arg(short, long, required = false)]
-    repository: Option<String>,
+    pub repository: Option<String>,
+    /// Check all repositories
     #[arg(short, long, default_value_t = false)]
-    all: bool,
+    pub all: bool,
+    /// Enable checking the license of target repositories
     #[arg(short, long, default_value_t = false)]
-    license: bool,
+    pub license: bool,
+    /// Enable checking the protected status of the main branch for target repositories
     #[arg(short, long, default_value_t = false)]
-    protected: bool
+    pub protected: bool
 }
 
+/// Define the arguments for the 'delete' branch command
+#[derive(Args, Clone, Debug)]
+#[command(
+    group(
+        ArgGroup::new("target")
+        .required(true)
+        .args(&["all", "repository"])
+    )
+)]
+pub struct DeleteBranchCommand {
+    /// Delete a branch from a repository
+    #[arg(short, long, required=false)]
+    pub repository: Option<String>,
+    /// Branch to delete
+    #[arg(short, long, required=true)]
+    pub branch: String,
+    /// Delete the specified branch for all configured repositories
+    #[arg(short, long, default_value_t = false)]
+    pub all: bool,
+}
+
+#[derive(Args, Clone, Debug)]
+#[command(
+    group(
+        ArgGroup::new("target")
+        .required(true)
+        .args(&["all", "repository"])
+    )
+)]
+pub struct CreateBranchCommand {
+    /// Create a branch in this repository
+    #[arg(short, long, required=false)]
+    pub repository: Option<String>,
+    /// New branch to create
+    #[arg(short, long, required=true)]
+    pub new_branch: String,
+    /// The base branch for the new branch
+    #[arg(short, long, required=true)]
+    pub base_branch: String,
+    /// Create the branch for all configured repositories
+    #[arg(short, long, default_value_t = false)]
+    pub all: bool,
+}
+
+/// Define all the valid commands for acting on Tags
 #[derive(Subcommand, Clone, Debug)]
 pub enum TagCommand {
     /// Sync tags
@@ -111,26 +184,41 @@ pub enum TagCommand {
     Compare(CompareTagCommand),
     /// Create a new tag
     Create(CreateTagCommand),
+    /// Delete a tag
+    Delete(DeleteTagCommand),
 }
 
+/// Define all the valid commands for acting on repositories
 #[derive(Subcommand, Clone, Debug)]
 pub enum RepoCommand {
     /// Sync repoositories
     Sync(SyncRepoCommand),
+    /// Check repositories
     Check(CheckRepoCommand),
 }
 
+/// Define all the valid commands for acting on branches
+#[derive(Subcommand, Clone, Debug)]
+pub enum BranchCommand {
+    /// Delete a branch in repositories
+    Delete(DeleteBranchCommand),
+    /// Create a branch for repositories
+    Create(CreateBranchCommand),
+}
+
+/// This defines the command line interface
+/// To add a new command, 
 #[derive(Subcommand, Debug)]
 pub enum Command {
     /// Manage tags
     #[command(arg_required_else_help = true)]
-    Tags {
+    Tag {
         /// Repository to act upon
-        #[arg(short, long, global = true)]
+        #[arg(short, long, global = true, required=false)]
         repository: Option<String>,
         /// Command to run
         #[command(subcommand)]
-        cmd: Option<TagCommand>,
+        cmd: TagCommand,
     },
 
     /// Generate a default config
@@ -139,20 +227,30 @@ pub enum Command {
         #[arg(short, long)]
         path: Option<PathBuf>,
 
-        /// Overwrite existing config file if it existing
+        /// Overwrite existing config file if it exists
         #[arg(long, default_value_t = false)]
         force: bool,
     },
     /// Manage repositories
     #[command(arg_required_else_help = true)]
-    Repos {
+    Repo {
         /// Sync a repository with its upstream parent
         #[arg(short, long, global = true)]
         repository: Option<String>,
         /// Sync all configured repositories
         #[command(subcommand)]
-        cmd: Option<RepoCommand>,
+        cmd: RepoCommand,
     },
+    /// Manage branches
+    #[command(arg_required_else_help = true)]
+    Branch {
+        /// Manage a branches for this repository
+        #[arg(short, long, global = true)]
+        repository: Option<String>,
+        /// Manage branches
+        #[command(subcommand)]
+        cmd: BranchCommand,
+    }
 }
 
 pub fn parse_args() -> AppArgs {
@@ -164,7 +262,7 @@ pub fn parse_args() -> AppArgs {
             std::process::exit(1);
         }
     };
-    if let Command::Tags { repository: Some(_),cmd: Some(TagCommand::Compare( compare)) } = &app.command {
+    if let Command::Tag { repository: Some(_),cmd: TagCommand::Compare( compare) } = &app.command {
         if let Err(e) = compare.validate() {
             eprintln!("Error validating compare command: {e}");
 
