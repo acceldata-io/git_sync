@@ -7,6 +7,20 @@ pub enum GitError {
     #[error("Upstream not found for fork")]
     NoUpstreamRepo,
 
+    #[error("Invalid repository URL: {0}")]
+    InvalidRepository(String),
+    #[error("Path not found: {0}")]
+    PathNotFound(String),
+
+    #[error("Regex error: {0}")]
+    RegexError(#[from] regex::Error),
+
+    #[error("Repository not found: {0}")]
+    RepoNotFound(String),
+
+    #[error("No repos configured")]
+    NoReposConfigured,
+
     #[error("Failed to get repository info: {0}")]
     RepoInfoError(String),
 
@@ -16,8 +30,14 @@ pub enum GitError {
     #[error("Missing parent repository owner info")]
     MissingParentOwner,
 
-    #[error("Missing owner for forked repos")]
-    MissingOwner,
+    #[error("Missing repository name")]
+    MissingRepoName,
+
+    #[error("Missing owner for repo: {0}")]
+    MissingOwner(String),
+
+    #[error("No owner or repo specified")]
+    NoOwnerOrRepo,
 
     #[error("TOML parsing error: {0}")]
     TomlError(#[from] toml::de::Error),
@@ -31,8 +51,4 @@ pub enum GitError {
     IoError(#[from] std::io::Error),
 }
 
-/*impl From<GitError> for Box<dyn std::error::Error> {
-    fn from(err: GitError) -> Self {
-        Box::new(err)
-    }
-}*/
+

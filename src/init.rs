@@ -23,8 +23,11 @@ pub fn generate_config(path: Option<PathBuf>, force: bool) -> Result<PathBuf, Gi
 #Use shallow clones by default to use less disk space,
 #bandwidth, and decrease processing time
 shallow_by_default = true
-
 #owner="set owner organization/user here"
+
+[info]
+#name="set the name of who is commiting changes"
+#email="set the email of who is commiting changes"
 
 #repos is just the name of a repository, not including the owner.
 #ex: https://github.com/apache/hadoop/ -> just "hadoop"
@@ -39,7 +42,11 @@ shallow_by_default = true
             fs::create_dir_all(parent)?;
         }
     }
-
+    if config_path.exists() {
+        let mut backup = config_path.clone().into_os_string();
+        backup.push(".bak");
+        fs::copy(&config_path, backup)?;
+    }
     fs::write(&config_path, sample_config)?;
     println!("Config file created at {}", config_path.display());
     Ok(config_path)

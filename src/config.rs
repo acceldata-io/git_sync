@@ -1,4 +1,5 @@
 use crate::error::GitError;
+use crate::utils::UserDetails;
 use dirs::home_dir;
 use serde::Deserialize;
 use std::fs;
@@ -6,7 +7,9 @@ use std::path::{Path, PathBuf};
 
 pub const CONFIG_NAME: &str = "git-manage.toml";
 
-#[derive(Debug, Default, Deserialize)]
+
+/// This is the root level of the configuration file
+#[derive(Default, Deserialize)]
 pub struct Config {
     #[serde(default)]
     pub github: GithubConfig,
@@ -16,6 +19,9 @@ pub struct Config {
 
     #[serde(default)]
     pub repos: RepoConfig,
+
+    #[serde(default)]
+    pub info: InfoConfig,
 }
 
 #[derive(Debug, Deserialize, Default)]
@@ -23,22 +29,28 @@ pub struct GithubConfig {
     pub token: Option<String>,
 }
 
-#[derive(Debug, Deserialize, Default)]
+#[derive(Deserialize, Default)]
 pub struct GitConfig {
     pub default_directory: Option<PathBuf>,
     pub shallow_by_default: Option<bool>,
     pub owner: Option<String>,
 }
-
 #[derive(Debug, Deserialize, Default)]
-pub struct RepoConfig {
-    pub fork_repos: Repo,
-    pub private_repos: Repo,
+pub struct InfoConfig {
+    pub name: Option<String>,
+    pub email: Option<String>,
 }
 #[derive(Debug, Deserialize, Default)]
+pub struct RepoConfig {
+    pub fork: Option<Vec<String>>,
+    pub private: Option<Vec<String>>,
+    pub public: Option<Vec<String>>,
+}
+/*#[derive(Debug, Deserialize, Default)]
 pub struct Repo {
     pub repos: Option<Vec<String>>,
 }
+*/
 
 impl Config {
     /// Load config from a toml file
@@ -55,7 +67,6 @@ impl Config {
     /// Try to load the config from expected locations
     pub fn load() -> Self {
         if let Ok(local_config) = Config::from_file(Path::new(CONFIG_NAME)) {
-            println!("Checking local...");
             return local_config;
         }
         if let Some(home_dir) = home_dir() {
@@ -66,7 +77,7 @@ impl Config {
             }
         }
         // Config not found, return the default
-        eprintln!("Unable to find {}, setting default", CONFIG_NAME);
+        eprintln!("Unable to find {CONFIG_NAME}, setting values to their default");
         Config::default()
     }
 
@@ -80,25 +91,45 @@ impl Config {
         // Use the config file value if the above isn't defined
         self.github.token.clone()
     }
+    /// Get git information about the current user, first from the environment,
+    /// then from the toml configuration, and as a last resort, from git itself.
+    pub fn get_user_info(&self) -> Option<UserDetails> {
+
+        let name = if let Ok(name) = std::env::var("GIT_USER") {
+            Some(name)
+        } else {
+            self.info.name.clone()
+        };
+        let email= if let Ok(email) = std::env::var("GIT_EMAIL") {
+            Some(email)
+        } else {
+            self.info.email.clone()
+        };
+
+        match (name, email) {
+            (Some(name), Some(email)) => Some(UserDetails::new(name, email)),
+            _ => {
+                UserDetails::new_from_git().ok()
+            }
+        }
+    }
 
     /// Get the repo owner
     pub fn get_owner(&self) -> Option<String> {
         if let Ok(name) = std::env::var("GIT_OWNER") {
             return Some(name);
         }
-        println!("{:?}", self.git.owner.clone());
         self.git.owner.clone()
     }
-
-    pub fn get_repositories(&self) -> Option<Vec<(String, String)>> {
-        let repo_list = self.repos.fork_repos.repos.as_ref()?;
-        let owner = self.get_owner()?;
-
-        Some(
-            repo_list
-                .iter()
-                .map(|repo| (owner.to_string(), repo.to_string()))
-                .collect(),
-        )
+    /// Get a vector of repositories defined in the config file that are forks
+    pub fn get_fork_repositories(&self) -> Option<Vec<String>> {
+        self.repos.fork.clone()
     }
-}
+    /// Get a vector of private repositories defined in the config file
+    pub fn get_private_repositories(&self) -> Option<Vec<String>> {
+        self.repos.private.clone()
+    }
+    pub fn get_public_repositories(&self) -> Option<Vec<String>> {
+        self.repos.public.clone()
+
+    }}
