@@ -1,3 +1,22 @@
+use octocrab::models::Repository;
+/*
+Licensed to the Apache Software Foundation (ASF) under one
+or more contributor license agreements.  See the NOTICE file
+distributed with this work for additional information
+regarding copyright ownership.  The ASF licenses this file
+to you under the Apache License, Version 2.0 (the
+"License"); you may not use this file except in compliance
+with the License.  You may obtain a copy of the License at
+
+  http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing,
+software distributed under the License is distributed on an
+"AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+KIND, either express or implied.  See the License for the
+specific language governing permissions and limitations
+under the License.    
+*/
 use regex::Regex;
 use crate::error::GitError;
 
@@ -33,7 +52,7 @@ pub enum CheckResult {
 /// Parse the owner and repository name from a github repository url.
 pub fn get_repo_info_from_url(url: &str) -> Result<RepoInfo, GitError> {
     // Named capture groups for the owner and the repo
-    let repo_re = Regex::new(r"^https://github.com/(?<owner>[^/].+)/(?<repo>[^/].+)(\.git)?/?.*");
+    let repo_re = Regex::new(r"^https://github.com/(?<owner>[^/].+)/(?<repo>[^/].+[^/])/?(\.git)?/?.*");
     let repo_regex = match repo_re {
         Ok(re) => re,
         Err(e) => return Err(GitError::RegexError(e)),
@@ -42,7 +61,6 @@ pub fn get_repo_info_from_url(url: &str) -> Result<RepoInfo, GitError> {
         if captures.len() > 2 {
             let owner = captures["owner"].to_string();
             let repo = captures["repo"].to_string().replace(".git", "");
-            println!("Owner: {owner}, repo: {repo}");
             return Ok(RepoInfo {
                 owner,
                 repo_name: repo,
@@ -53,26 +71,6 @@ pub fn get_repo_info_from_url(url: &str) -> Result<RepoInfo, GitError> {
     }
     Err(GitError::InvalidRepository(url.to_string()))
 }
-/*
-/// Handle responses to api calls
-pub fn handle_response<T, F, E>(
-    response: Result<T, E>,
-    context: &str,
-    ok: F,
-) -> Result<(), GitError>
-where
-    F: FnOnce(T) -> Result<(), GitError>,
-    E: std::fmt::Display,
-{
-    match response {
-        Ok(data) => ok(data),
-        Err(e) => Err(GitError::ApiError(format!(
-            "Failed to {}: {}",
-            context, e
-        ))),
-    }
-}
-*/
 
 #[cfg(test)]
 mod tests {
@@ -82,6 +80,7 @@ mod tests {
     fn test_get_repo_info_from_url() {
         let test_cases = vec![
             ("https://github.com/acceldata-io/kudu", "acceldata-io", "kudu"),
+            ("https://github.com/acceldata-io/kudu/", "acceldata-io", "kudu"),
             ("https://github.com/acceldata-io/hadoop","acceldata-io", "hadoop"),
             ("https://github.com/acceldata-io/trino","acceldata-io", "trino"),
             ("https://github.com/acceldata-io/airflow.git","acceldata-io", "airflow"),
@@ -91,6 +90,20 @@ mod tests {
             assert_eq!(u.1, info.owner);
             assert_eq!(u.2, info.repo_name);
         }
+    }
+    #[test]
+    fn test_get_repo_info_from_bad_url() {
+        let bad_tests = vec![
+            "https://github.com/",
+            "github.com",
+            "abcdefg",
+            "https://github.com/acceldata-io/"
+        ];
+        for test in bad_tests{
+            let info = get_repo_info_from_url(test);
+            assert!(info.is_err())
+        }
+
     }
 }
 

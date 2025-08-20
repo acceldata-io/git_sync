@@ -1,3 +1,21 @@
+/*
+Licensed to the Apache Software Foundation (ASF) under one
+or more contributor license agreements.  See the NOTICE file
+distributed with this work for additional information
+regarding copyright ownership.  The ASF licenses this file
+to you under the Apache License, Version 2.0 (the
+"License"); you may not use this file except in compliance
+with the License.  You may obtain a copy of the License at
+
+  http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing,
+software distributed under the License is distributed on an
+"AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+KIND, either express or implied.  See the License for the
+specific language governing permissions and limitations
+under the License.    
+*/
 use clap::{Args, ArgGroup,Parser, Subcommand};
 use std::path::PathBuf;
 
@@ -208,20 +226,19 @@ pub enum BranchCommand {
 
 #[derive(Subcommand, Debug)]
 pub enum Command {
-    /// Manage tags
+    /// Manage branches
     #[command(arg_required_else_help = true)]
-    Tag {
-        /// Repository to act upon
-        #[arg(short, long, global = true, required=false)]
+    Branch {
+        /// Manage a branches for this repository
+        #[arg(short, long, global = true)]
         repository: Option<String>,
-        /// Command to run
+        /// Manage branches
         #[command(subcommand)]
-        cmd: TagCommand,
+        cmd: BranchCommand,
     },
-
     /// Generate a default config
-    InitConfig {
-        /// Path to save the config file
+    Config {
+        /// Path to save the config file.
         #[arg(short, long)]
         path: Option<PathBuf>,
 
@@ -239,16 +256,16 @@ pub enum Command {
         #[command(subcommand)]
         cmd: RepoCommand,
     },
-    /// Manage branches
+    /// Manage tags
     #[command(arg_required_else_help = true)]
-    Branch {
-        /// Manage a branches for this repository
-        #[arg(short, long, global = true)]
+    Tag {
+        /// Repository to act upon
+        #[arg(short, long, global = true, required=false)]
         repository: Option<String>,
-        /// Manage branches
+        /// Command to run
         #[command(subcommand)]
-        cmd: BranchCommand,
-    }
+        cmd: TagCommand,
+    },
 }
 
 pub fn parse_args() -> AppArgs {
