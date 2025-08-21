@@ -15,10 +15,10 @@ software distributed under the License is distributed on an
 "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
 KIND, either express or implied.  See the License for the
 specific language governing permissions and limitations
-under the License.    
+under the License.
 */
-use regex::Regex;
 use crate::error::GitError;
+use regex::Regex;
 
 /// Hold basic information about a github url
 #[derive(Debug)]
@@ -39,7 +39,7 @@ pub struct RepoChecks {
     /// Check if the main branch is protected
     pub protected: bool,
     /// Check the license of the repository
-    pub license: bool
+    pub license: bool,
 }
 
 pub enum CheckResult {
@@ -52,7 +52,8 @@ pub enum CheckResult {
 /// Parse the owner and repository name from a github repository url.
 pub fn get_repo_info_from_url(url: &str) -> Result<RepoInfo, GitError> {
     // Named capture groups for the owner and the repo
-    let repo_re = Regex::new(r"^https://github.com/(?<owner>[^/].+)/(?<repo>[^/].+[^/])/?(\.git)?/?.*");
+    let repo_re =
+        Regex::new(r"^https://github.com/(?<owner>[^/].+)/(?<repo>[^/].+[^/])/?(\.git)?/?.*");
     let repo_regex = match repo_re {
         Ok(re) => re,
         Err(e) => return Err(GitError::RegexError(e)),
@@ -79,13 +80,33 @@ mod tests {
     #[test]
     fn test_get_repo_info_from_url() {
         let test_cases = vec![
-            ("https://github.com/acceldata-io/kudu", "acceldata-io", "kudu"),
-            ("https://github.com/acceldata-io/kudu/", "acceldata-io", "kudu"),
-            ("https://github.com/acceldata-io/hadoop","acceldata-io", "hadoop"),
-            ("https://github.com/acceldata-io/trino","acceldata-io", "trino"),
-            ("https://github.com/acceldata-io/airflow.git","acceldata-io", "airflow"),
+            (
+                "https://github.com/acceldata-io/kudu",
+                "acceldata-io",
+                "kudu",
+            ),
+            (
+                "https://github.com/acceldata-io/kudu/",
+                "acceldata-io",
+                "kudu",
+            ),
+            (
+                "https://github.com/acceldata-io/hadoop",
+                "acceldata-io",
+                "hadoop",
+            ),
+            (
+                "https://github.com/acceldata-io/trino",
+                "acceldata-io",
+                "trino",
+            ),
+            (
+                "https://github.com/acceldata-io/airflow.git",
+                "acceldata-io",
+                "airflow",
+            ),
         ];
-        for u in test_cases{
+        for u in test_cases {
             let info = get_repo_info_from_url(u.0).unwrap();
             assert_eq!(u.1, info.owner);
             assert_eq!(u.2, info.repo_name);
@@ -97,13 +118,11 @@ mod tests {
             "https://github.com/",
             "github.com",
             "abcdefg",
-            "https://github.com/acceldata-io/"
+            "https://github.com/acceldata-io/",
         ];
-        for test in bad_tests{
+        for test in bad_tests {
             let info = get_repo_info_from_url(test);
             assert!(info.is_err())
         }
-
     }
 }
-

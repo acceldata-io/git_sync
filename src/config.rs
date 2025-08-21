@@ -14,7 +14,7 @@ software distributed under the License is distributed on an
 "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
 KIND, either express or implied.  See the License for the
 specific language governing permissions and limitations
-under the License.    
+under the License.
 */
 use crate::error::GitError;
 use crate::utils::user::UserDetails;
@@ -24,7 +24,6 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 pub const CONFIG_NAME: &str = "git-manage.toml";
-
 
 /// This is the root level of the configuration file
 #[derive(Default, Deserialize)]
@@ -107,13 +106,12 @@ impl Config {
     /// Get git information about the current user, first from the environment,
     /// then from the toml configuration, and as a last resort, from git itself.
     pub fn get_user_info(&self) -> Option<UserDetails> {
-
         let name = if let Ok(name) = std::env::var("GIT_USER") {
             Some(name)
         } else {
             self.info.name.clone()
         };
-        let email= if let Ok(email) = std::env::var("GIT_EMAIL") {
+        let email = if let Ok(email) = std::env::var("GIT_EMAIL") {
             Some(email)
         } else {
             self.info.email.clone()
@@ -121,9 +119,7 @@ impl Config {
 
         match (name, email) {
             (Some(name), Some(email)) => Some(UserDetails::new(name, email)),
-            _ => {
-                UserDetails::new_from_git().ok()
-            }
+            _ => UserDetails::new_from_git().ok(),
         }
     }
 
@@ -144,5 +140,5 @@ impl Config {
     }
     pub fn get_public_repositories(&self) -> Option<Vec<String>> {
         self.repos.public.clone()
-
-    }}
+    }
+}

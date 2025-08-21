@@ -14,21 +14,21 @@ software distributed under the License is distributed on an
 "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
 KIND, either express or implied.  See the License for the
 specific language governing permissions and limitations
-under the License.    
+under the License.
 */
-use std::collections::HashSet;
 use chrono::{DateTime, Utc};
-use futures::StreamExt;
 use futures::FutureExt;
+use futures::StreamExt;
 use futures::future::try_join;
 use futures::stream::FuturesUnordered;
 use octocrab::Octocrab;
-use octocrab::params::repos::Reference;
 use octocrab::models::repos::ReleaseNotes;
+use octocrab::params::repos::Reference;
+use std::collections::HashSet;
 
 use crate::error::GitError;
 use crate::utils::repo::CheckResult;
-use crate::utils::repo::{get_repo_info_from_url,RepoInfo, RepoChecks};
+use crate::utils::repo::{RepoChecks, RepoInfo, get_repo_info_from_url};
 
 use crate::handle_api_response;
 
@@ -56,25 +56,22 @@ impl GithubClient {
             .build()
             .map_err(GitError::GithubApiError)?;
 
-        Ok(Self {
-            octocrab
-        })
+        Ok(Self { octocrab })
     }
     /// Get the parent repository of a github repository.
-    pub async fn get_parent_repo(
-        &self,
-        url: &str,
-    ) -> Result<RepoInfo, GitError> {
+    pub async fn get_parent_repo(&self, url: &str) -> Result<RepoInfo, GitError> {
         let info = get_repo_info_from_url(url)?;
         let (owner, repo) = (info.owner, info.repo_name);
         let repo_info = self.octocrab.clone().repos(owner, repo).get().await?;
 
         let parent = *repo_info.parent.ok_or(GitError::NotAFork)?;
 
-        
         let parent_owner = parent.owner.ok_or(GitError::NoUpstreamRepo)?.login;
 
-        let url = parent.html_url.ok_or_else(|| GitError::InvalidRepository(url.to_string()))?.to_string();
+        let url = parent
+            .html_url
+            .ok_or_else(|| GitError::InvalidRepository(url.to_string()))?
+            .to_string();
         Ok(RepoInfo {
             owner: parent_owner,
             repo_name: parent.name,
@@ -83,17 +80,16 @@ impl GithubClient {
         })
     }
     /// Get all tags for a repository
-    pub async fn get_tags(
-        &self,
-        url: &str,
-    ) -> Result<Vec<String>, GitError> {
+    pub async fn get_tags(&self, url: &str) -> Result<Vec<String>, GitError> {
         let mut page: u32 = 1;
         let mut all_tags: Vec<String> = Vec::new();
         let per_page = 100;
         let info = get_repo_info_from_url(url)?;
         let (owner, repo) = (info.owner, info.repo_name);
         loop {
-            let tags = self.octocrab.clone()
+            let tags = self
+                .octocrab
+                .clone()
                 .repos(&owner, &repo)
                 .list_tags()
                 .per_page(per_page)
@@ -119,11 +115,8 @@ impl GithubClient {
         fork_url: &str,
         parent_url: &str,
     ) -> Result<ComparisonResult, GitError> {
-        let (fork_tags, parent_tags) = try_join(
-            self.get_tags( fork_url),
-            self.get_tags(parent_url),
-        )
-        .await?;
+        let (fork_tags, parent_tags) =
+            try_join(self.get_tags(fork_url), self.get_tags(parent_url)).await?;
 
         let fork_tags_set: HashSet<_> = fork_tags.iter().collect();
         let parent_tags_set: HashSet<_> = parent_tags.iter().collect();
@@ -144,7 +137,7 @@ impl GithubClient {
         println!("Fetching parent repo info for {url}");
         let info = get_repo_info_from_url(url)?;
         let (owner, repo) = (info.owner, info.repo_name);
-        let parent = self.get_parent_repo( url).await?;
+        let parent = self.get_parent_repo(url).await?;
 
         println!(
             "Comparing tags in {owner}/{repo} and {}/{}",
@@ -173,12 +166,12 @@ impl GithubClient {
         Ok(())
     }
     /// Get a diff of all configured repositories tags, compared against their parent.
-    pub async fn diff_all_tags(
-        &self,
-        repos: Vec<String>,
-    ) -> Result<(), GitError> {
+    pub async fn diff_all_tags(&self, repos: Vec<String>) -> Result<(), GitError> {
         let mut futures = FuturesUnordered::new();
-        let repositories: Vec<Result<RepoInfo,_>> = repos.iter().map(|url| get_repo_info_from_url(url)).collect();
+        let repositories: Vec<Result<RepoInfo, _>> = repos
+            .iter()
+            .map(|url| get_repo_info_from_url(url))
+            .collect();
         for repo in repositories.into_iter().flatten() {
             let url = repo.url.clone();
             let owner = repo.owner.clone();
@@ -187,7 +180,6 @@ impl GithubClient {
                 let result = self.diff_tags(&url).await;
                 (owner, repo, result)
             });
-
         }
         while let Some((owner, repo, result)) = futures.next().await {
             match result {
@@ -202,14 +194,14 @@ impl GithubClient {
         let info = get_repo_info_from_url(url)?;
         let (owner, repo) = (info.owner, info.repo_name);
         println!("Syncing {owner}/{repo} with its parent repository...");
-        
+
         let parent = self.get_parent_repo(url).await?;
         let body = serde_json::json!({"branch": parent.main_branch});
-        let response: Result<serde_json::Value, octocrab::Error> = self.octocrab.clone() 
-            .post(
-            format!("/repos/{owner}/{repo}/merge-upstream"),
-            Some(&body),
-        ).await;
+        let response: Result<serde_json::Value, octocrab::Error> = self
+            .octocrab
+            .clone()
+            .post(format!("/repos/{owner}/{repo}/merge-upstream"), Some(&body))
+            .await;
 
         handle_api_response!(
             response,
@@ -224,14 +216,11 @@ impl GithubClient {
 
     /// Sync all configured repositories. Only repositories that have a parent repository
     /// should be passed to this function
-    pub async fn sync_all_forks(
-        &self,
-        repos: Vec<String>,
-    ) -> Result<(), GitError> {
+    pub async fn sync_all_forks(&self, repos: Vec<String>) -> Result<(), GitError> {
         let mut futures = FuturesUnordered::new();
         for repo in repos {
             futures.push(async move {
-                let result = self.sync_fork( &repo).await;
+                let result = self.sync_fork(&repo).await;
                 (repo, result)
             });
         }
@@ -248,50 +237,62 @@ impl GithubClient {
     async fn get_branch_sha(&self, url: &str, branch: &str) -> Result<String, GitError> {
         let info = get_repo_info_from_url(url)?;
         let (owner, repo) = (info.owner, info.repo_name);
-        let response = self.octocrab.clone()
+        let response = self
+            .octocrab
+            .clone()
             .repos(&owner, &repo)
             .get_ref(&Reference::Branch(branch.to_string()))
             .await?;
 
         let sha = match response.object {
-            octocrab::models::repos::Object::Commit {sha, ..} => sha,
+            octocrab::models::repos::Object::Commit { sha, .. } => sha,
             _ => return Err(GitError::NoSuchBranch(branch.to_string())),
         };
 
         Ok(sha)
-
     }
-    /// Get the sha of a tag 
+    /// Get the sha of a tag
     async fn get_tag_sha(&self, url: &str, tag: &str) -> Result<String, GitError> {
         let info = get_repo_info_from_url(url)?;
         let (owner, repo) = (info.owner, info.repo_name);
-        let response = self.octocrab.clone()
+        let response = self
+            .octocrab
+            .clone()
             .repos(&owner, &repo)
             .get_ref(&Reference::Tag(tag.to_string()))
             .await?;
 
         let sha = match response.object {
-            octocrab::models::repos::Object::Tag {sha, ..} => sha,
+            octocrab::models::repos::Object::Tag { sha, .. } => sha,
             _ => return Err(GitError::NoSuchTag(tag.to_string())),
         };
 
         Ok(sha)
     }
     /// Create a branch from some base branch in a repository
-    pub async fn create_branch(&self, url: &str, base_branch: &str, new_branch: &str) -> Result<(), GitError> {
+    pub async fn create_branch(
+        &self,
+        url: &str,
+        base_branch: &str,
+        new_branch: &str,
+    ) -> Result<(), GitError> {
         let info = get_repo_info_from_url(url)?;
         let (owner, repo) = (info.owner, info.repo_name);
-        let response = self.octocrab.clone()
+        let response = self
+            .octocrab
+            .clone()
             .repos(&owner, &repo)
             .get_ref(&Reference::Branch(base_branch.to_string()))
             .await?;
 
         let sha = match response.object {
-            octocrab::models::repos::Object::Commit {sha, ..} => sha,
+            octocrab::models::repos::Object::Commit { sha, .. } => sha,
             _ => return Err(GitError::NoSuchBranch(base_branch.to_string())),
         };
 
-        let response = self.octocrab.clone()
+        let response = self
+            .octocrab
+            .clone()
             .repos(&owner, &repo)
             .create_ref(&Reference::Branch(new_branch.to_string()), sha)
             .await;
@@ -300,8 +301,8 @@ impl GithubClient {
             Ok(_) => {
                 println!("Successfully created branch '{new_branch}' for {repo}");
                 Ok(())
-            },
-            Err(e) =>{
+            }
+            Err(e) => {
                 eprintln!("Failed to create branch '{new_branch}' for {repo}: {e}");
                 Err(GitError::GithubApiError(e))
             }
@@ -326,11 +327,16 @@ impl GithubClient {
         */
     }
     /// Create all passed branches for each repository provided
-    pub async fn create_all_branches(&self, base_branch: &str, new_branch:&str, repositories: &Vec<String>) -> Result<(), GitError> {
+    pub async fn create_all_branches(
+        &self,
+        base_branch: &str,
+        new_branch: &str,
+        repositories: &Vec<String>,
+    ) -> Result<(), GitError> {
         let mut futures = FuturesUnordered::new();
         for repo in repositories {
             futures.push(async move {
-                let result = self.create_branch( repo, base_branch, new_branch).await;
+                let result = self.create_branch(repo, base_branch, new_branch).await;
                 (repo, result)
             });
         }
@@ -342,14 +348,18 @@ impl GithubClient {
             }
         }
         Ok(())
-
     }
     /// Delete a branch from a repository
     pub async fn delete_branch(&self, url: &str, branch: &str) -> Result<(), GitError> {
         let info = get_repo_info_from_url(url)?;
         let (owner, repo) = (info.owner, info.repo_name);
 
-        let result = self.octocrab.clone().repos(&owner, &repo).delete_ref(&Reference::Branch(branch.to_string())).await;
+        let result = self
+            .octocrab
+            .clone()
+            .repos(&owner, &repo)
+            .delete_ref(&Reference::Branch(branch.to_string()))
+            .await;
         match result {
             Ok(()) => {
                 println!("Successfully deleted branch '{branch}' for {repo}");
@@ -362,7 +372,11 @@ impl GithubClient {
         }
     }
 
-    pub async fn delete_all_branches(&self, branch: &str, repositories: &Vec<String>) -> Result<(), GitError> {
+    pub async fn delete_all_branches(
+        &self,
+        branch: &str,
+        repositories: &Vec<String>,
+    ) -> Result<(), GitError> {
         let mut futures = FuturesUnordered::new();
         for repo in repositories {
             futures.push(async move {
@@ -370,11 +384,11 @@ impl GithubClient {
                 (repo, result)
             });
         }
-        
+
         while let Some((repo, result)) = futures.next().await {
             match result {
                 Ok(_) => println!("Successfully deleted {branch} in {repo}"),
-                Err(e) => eprintln!("Failed to delete {branch} for {repo}: {e}")
+                Err(e) => eprintln!("Failed to delete {branch} for {repo}: {e}"),
             }
         }
         Ok(())
@@ -385,7 +399,12 @@ impl GithubClient {
         let sha = self.get_branch_sha(url, branch).await?;
         let (owner, repo) = (info.owner, info.repo_name);
 
-        let response = self.octocrab.clone().repos(&owner, &repo).create_ref(&Reference::Tag(tag.to_string()), sha ).await;
+        let response = self
+            .octocrab
+            .clone()
+            .repos(&owner, &repo)
+            .create_ref(&Reference::Tag(tag.to_string()), sha)
+            .await;
 
         match response {
             Ok(_) => {
@@ -402,7 +421,7 @@ impl GithubClient {
             .post(
                 format!("/repos/{owner}/{repo}/git/refs"),
                 Some(&serde_json::json!({
-                    "ref": format!("refs/tags/{tag}"), 
+                    "ref": format!("refs/tags/{tag}"),
                     "sha": sha,
                 })),
             ).await;
@@ -416,8 +435,13 @@ impl GithubClient {
         )
         */
     }
-    
-    pub async fn create_all_tags(&self, tag: &str, branch: &str, repositories: Vec<String>) -> Result<(), GitError> {
+
+    pub async fn create_all_tags(
+        &self,
+        tag: &str,
+        branch: &str,
+        repositories: Vec<String>,
+    ) -> Result<(), GitError> {
         let mut futures = FuturesUnordered::new();
         for repo in repositories {
             futures.push(async move {
@@ -441,12 +465,15 @@ impl GithubClient {
 
         //let result = self.octocrab.clone().repos(owner, repo).delete_ref(&Reference::Tag(tag.to_string())).await;
 
-        let response = self.octocrab.clone()
+        let response = self
+            .octocrab
+            .clone()
             ._delete(
                 format!("/repos/{owner}/{repo}/git/refs/tags/{tag}"),
                 None::<&()>,
-            ).await;
-        
+            )
+            .await;
+
         match response {
             Ok(resp) => {
                 if resp.status().is_success() {
@@ -460,17 +487,22 @@ impl GithubClient {
                             println!("Tag '{tag}' does not exist in {repo}. Nothing to delete.");
                             Ok(())
                         }
-                        _ =>  Err(GitError::Other(format!("Cannot delete {tag}: {}", resp.status())))
-
+                        _ => Err(GitError::Other(format!(
+                            "Cannot delete {tag}: {}",
+                            resp.status()
+                        ))),
                     }
                 }
-            },
+            }
             Err(e) => Err(GitError::Other(format!("Cannot delete {tag}: {e}"))),
         }
-
     }
     /// Delete the specified tag for all configured repositories
-    pub async fn delete_all_tags(&self, tag: &str, repositories: &Vec<String>) -> Result<(), GitError> {
+    pub async fn delete_all_tags(
+        &self,
+        tag: &str,
+        repositories: &Vec<String>,
+    ) -> Result<(), GitError> {
         let mut futures = FuturesUnordered::new();
         for repo in repositories {
             futures.push(async move {
@@ -491,71 +523,103 @@ impl GithubClient {
     /// Generate release notes for a particular releaese. It grabs all the commits present in `tag`
     /// that are newer than the latest commit in `previous_tag`.
     /// This needs to be cleaned up, it is a bit of a mess right now.
-    pub async fn generate_release_notes(&self, url: &str, tag: &str, previous_tag: &str) -> Result<ReleaseNotes, GitError> {
+    pub async fn generate_release_notes(
+        &self,
+        url: &str,
+        tag: &str,
+        previous_tag: &str,
+    ) -> Result<ReleaseNotes, GitError> {
         let info = get_repo_info_from_url(url)?;
         let (owner, repo) = (info.owner, info.repo_name);
-        
+
         let mut name = tag.replace("-tag", "").to_string();
         name.insert_str(0, "Release notes for ");
         name.insert_str(0, "## ");
 
-        let tag_info = self.octocrab.clone().repos(&owner, &repo)
-        .get_ref(&Reference::Tag(previous_tag.to_string())).await?;
-        let a = match tag_info.object{
-            octocrab::models::repos::Object::Tag{sha, ..} =>sha,
+        let tag_info = self
+            .octocrab
+            .clone()
+            .repos(&owner, &repo)
+            .get_ref(&Reference::Tag(previous_tag.to_string()))
+            .await?;
+        let a = match tag_info.object {
+            octocrab::models::repos::Object::Tag { sha, .. } => sha,
             octocrab::models::repos::Object::Commit { sha, .. } => sha,
             _ => "".to_string(),
         };
         let mut date: DateTime<Utc> = Utc::now();
-        let c = self.octocrab.clone().repos(&owner, &repo).list_commits().per_page(1).sha(a).send().await?;
+        let c = self
+            .octocrab
+            .clone()
+            .repos(&owner, &repo)
+            .list_commits()
+            .per_page(1)
+            .sha(a)
+            .send()
+            .await?;
         if let Some(commit) = c.items.first() {
-            commit.commit.committer.as_ref().map(|c| {
-                if let Some(d) = c.date {
-                    date = d;
-                } else {
-                    eprintln!("Can't get date of commit, assume things are broken");
-                }
-                println!("Last commit date: {}", date.to_rfc3339());
-            }).unwrap_or_else(|| eprintln!("No commit found"));
+            commit
+                .commit
+                .committer
+                .as_ref()
+                .map(|c| {
+                    if let Some(d) = c.date {
+                        date = d;
+                    } else {
+                        eprintln!("Can't get date of commit, assume things are broken");
+                    }
+                    println!("Last commit date: {}", date.to_rfc3339());
+                })
+                .unwrap_or_else(|| eprintln!("No commit found"));
         }
-        let b = self.octocrab.clone().repos(&owner, &repo).list_commits().per_page(100).since(date)
-            .branch(tag.to_string()).send().await?;
+        let b = self
+            .octocrab
+            .clone()
+            .repos(&owner, &repo)
+            .list_commits()
+            .per_page(100)
+            .since(date)
+            .branch(tag.to_string())
+            .send()
+            .await?;
 
         let mut body = String::new();
         for c in &b {
-            let lines:Vec<&str> = c.commit.message.lines().collect();
+            let lines: Vec<&str> = c.commit.message.lines().collect();
             if lines.len() > 1 {
                 body.push_str(&format!("* {}\n", lines.first().unwrap()));
             } else {
                 body.push_str(&format!("* {}\n", c.commit.message));
-
             }
         }
         println!("{name}");
         println!("{body}");
-        let notes:ReleaseNotes = ReleaseNotes {
-            name,
-            body,
-        };
+        let notes: ReleaseNotes = ReleaseNotes { name, body };
 
         Ok(notes)
     }
 
-    async fn get_branch_protection(&self, url: &str, branch: &str) -> Result<CheckResult, GitError> {
+    async fn get_branch_protection(
+        &self,
+        url: &str,
+        branch: &str,
+    ) -> Result<CheckResult, GitError> {
         let info = get_repo_info_from_url(url)?;
         let get_url = format!(
             "/repos/{}/{}/branches/{branch}/protection",
             info.owner, info.repo_name
         );
-        let response:Result<serde_json::Value, octocrab::Error> = self.octocrab.clone().get(
-            get_url,
-            None::<&()>,
-        ).await;
+        let response: Result<serde_json::Value, octocrab::Error> =
+            self.octocrab.clone().get(get_url, None::<&()>).await;
         handle_api_response!(
             response,
-            format!("Unable to get branch protection for {}/{}:{}", info.owner, info.repo_name, branch),
+            format!(
+                "Unable to get branch protection for {}/{}:{}",
+                info.owner, info.repo_name, branch
+            ),
             |body: serde_json::Value| {
-                let enabled:bool = body.get("enabled")
+                let enabled: bool = body
+                    .get("enabled")
                     .and_then(|e| e.as_bool())
                     .unwrap_or(false);
                 Ok(CheckResult::Protected(enabled))
@@ -572,33 +636,35 @@ impl GithubClient {
         let mut futures = FuturesUnordered::new();
         if protected {
             let url = info.url.clone();
-            let branch = info.main_branch.clone().unwrap_or_else(|| "main".to_string());
-            futures.push(async move {
-                self.get_branch_protection(&url, &branch).await
-            }.boxed());
+            let branch = info
+                .main_branch
+                .clone()
+                .unwrap_or_else(|| "main".to_string());
+            futures.push(async move { self.get_branch_protection(&url, &branch).await }.boxed());
         }
 
         if license {
             let url = info.url.clone();
-            futures.push(
-                async move {
-                    self.get_license(&url).await
-            }.boxed());
+            futures.push(async move { self.get_license(&url).await }.boxed());
         }
 
         let mut errors = Vec::new();
         while let Some(result) = futures.next().await {
             match result {
-                Ok(CheckResult::License(license)) => println!("License for {owner}/{repo} is '{license}'"),
-                Ok(CheckResult::Protected(true)) => println!("Main branch for {owner}/{repo} is protected"),
+                Ok(CheckResult::License(license)) => {
+                    println!("License for {owner}/{repo} is '{license}'")
+                }
+                Ok(CheckResult::Protected(true)) => {
+                    println!("Main branch for {owner}/{repo} is protected")
+                }
                 Ok(CheckResult::Protected(false)) => {
                     eprintln!("Main branch for {owner}/{repo} is not protected");
                     errors.push(GitError::NoMainBranchProtection(format!("{owner}/{repo}")));
-                },
+                }
                 Err(e) => {
                     eprintln!("Check failed for {owner}/{repo}: {e}");
                     errors.push(e);
-                },
+                }
             }
         }
         if !errors.is_empty() {
@@ -606,21 +672,23 @@ impl GithubClient {
         }
         Ok(())
     }
-    pub async fn check_all_repositories(&self, repositories: Vec<String>, checks: &RepoChecks) -> Result<(), GitError> {
+    pub async fn check_all_repositories(
+        &self,
+        repositories: Vec<String>,
+        checks: &RepoChecks,
+    ) -> Result<(), GitError> {
         let mut futures = FuturesUnordered::new();
         for repo in repositories {
-            futures.push(async move {
-                self.check_repository(&repo, checks).await
-            });
+            futures.push(async move { self.check_repository(&repo, checks).await });
         }
 
         let mut errors = Vec::new();
         while let Some(result) = futures.next().await {
             match result {
-                Ok(_) => {},
+                Ok(_) => {}
                 Err(e) => {
                     errors.push(e);
-                },
+                }
             }
         }
         if !errors.is_empty() {
@@ -631,15 +699,17 @@ impl GithubClient {
     }
 
     /// Get a license for a repository
-    async fn get_license(&self, url:&str) -> Result<CheckResult, GitError> {
+    async fn get_license(&self, url: &str) -> Result<CheckResult, GitError> {
         let info = get_repo_info_from_url(url)?;
-        let content = self.octocrab.clone()
+        let content = self
+            .octocrab
+            .clone()
             .repos(&info.owner, &info.repo_name)
             .license()
             .await?;
         if let Some(license) = content.license {
             Ok(CheckResult::License(license.name))
-        }else {
+        } else {
             Err(GitError::MissingLicense(url.to_string()))
         }
     }

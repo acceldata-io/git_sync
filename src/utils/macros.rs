@@ -14,9 +14,8 @@ software distributed under the License is distributed on an
 "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
 KIND, either express or implied.  See the License for the
 specific language governing permissions and limitations
-under the License.    
+under the License.
 */
-
 
 /// Handles the result of an API call using octocrab and maps them
 /// to a GitError. This helps reduce a lot of unnecessary boilerplate.
@@ -39,22 +38,14 @@ macro_rules! handle_api_response {
             Err(err) => {
                 let (status, message) = get_http_status(&err);
                 match (status, message) {
-                    (Some(code), Some(message)) => eprintln!(
-                        "{}: HTTP {:?} - {:?}",
-                        $context, code, message
-                    ),    
-                    (Some(code), None) => eprintln!(
-                        "{}: HTTP {:?}",
-                        $context, code
-                    ),
-                    _ => eprintln!(
-                        "{}: {:?}",
-                        $context, err
-                    ),
+                    (Some(code), Some(message)) => {
+                        eprintln!("{}: HTTP {:?} - {:?}", $context, code, message)
+                    }
+                    (Some(code), None) => eprintln!("{}: HTTP {:?}", $context, code),
+                    _ => eprintln!("{}: {:?}", $context, err),
                 }
                 return Err(GitError::GithubApiError(err));
             }
         }
     };
 }
-

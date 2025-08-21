@@ -14,7 +14,7 @@ software distributed under the License is distributed on an
 "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
 KIND, either express or implied.  See the License for the
 specific language governing permissions and limitations
-under the License.    
+under the License.
 */
 use std::process::Command;
 
@@ -34,13 +34,25 @@ impl UserDetails {
     }
     /// Try to load user information from the environment through git
     pub fn new_from_git() -> Result<Self, std::io::Error> {
-        let name_output = Command::new("git").arg("config").arg("get").arg("user.name").output()?;
-        let email_output = Command::new("git").arg("config").arg("get").arg("user.email").output()?;
+        let name_output = Command::new("git")
+            .arg("config")
+            .arg("get")
+            .arg("user.name")
+            .output()?;
+        let email_output = Command::new("git")
+            .arg("config")
+            .arg("get")
+            .arg("user.email")
+            .output()?;
 
         match (name_output.status.success(), email_output.status.success()) {
             (true, true) => {
-                let name = String::from_utf8_lossy(&name_output.stdout).trim().to_string();
-                let email = String::from_utf8_lossy(&email_output.stdout).trim().to_string();
+                let name = String::from_utf8_lossy(&name_output.stdout)
+                    .trim()
+                    .to_string();
+                let email = String::from_utf8_lossy(&email_output.stdout)
+                    .trim()
+                    .to_string();
                 Ok(UserDetails { name, email })
             }
             (false, _) => Err(std::io::Error::other("Failed to get git user name")),
@@ -48,4 +60,3 @@ impl UserDetails {
         }
     }
 }
-

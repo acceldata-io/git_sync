@@ -14,11 +14,10 @@ software distributed under the License is distributed on an
 "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
 KIND, either express or implied.  See the License for the
 specific language governing permissions and limitations
-under the License.    
+under the License.
 */
-use clap::{Args, ArgGroup,Parser, Subcommand};
+use clap::{ArgGroup, Args, Parser, Subcommand};
 use std::path::PathBuf;
-
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
@@ -30,7 +29,7 @@ pub struct AppArgs {
     /// Path to config file
     #[arg(short = 'f', long)]
     pub file: Option<PathBuf>,
-    
+
     /// The types of repositories to use. Valid options are public, private, or forks.
     #[arg(short, long, default_value = "forks")]
     pub repository_type: String,
@@ -59,7 +58,7 @@ pub struct CreateTagCommand {
     pub repository: Option<String>,
     /// Create this tag for all configured repositories, all using the same branch.
     /// If --repository is specified, this is not a valid option.
-    #[arg(short, long,default_value_t = false)]
+    #[arg(short, long, default_value_t = false)]
     pub all: bool,
 }
 /// Options for the 'comparison' tag command
@@ -74,7 +73,7 @@ pub struct CompareTagCommand {
     #[arg(short, long, default_value_t = false)]
     pub all: bool,
 }
- impl CompareTagCommand {
+impl CompareTagCommand {
     /// Validate that both --repository and --parent are specified, or that --all is.
     /// We have to use a user defined function for this since clap doesn't have a way
     /// to enforce this through the type system or macros.
@@ -82,7 +81,7 @@ pub struct CompareTagCommand {
         match (&self.repository, &self.parent, self.all) {
             (Some(_), Some(_), _) => Ok(()),
             (None, None, true) => Ok(()),
-            _ => Err("Must specify --repository and --parent, or use --all".to_string())
+            _ => Err("Must specify --repository and --parent, or use --all".to_string()),
         }
     }
 }
@@ -146,7 +145,7 @@ pub struct CheckRepoCommand {
     pub license: bool,
     /// Enable checking the protected status of the main branch for target repositories
     #[arg(short, long, default_value_t = false)]
-    pub protected: bool
+    pub protected: bool,
 }
 
 /// Define the arguments for the 'delete' branch command
@@ -160,10 +159,10 @@ pub struct CheckRepoCommand {
 )]
 pub struct DeleteBranchCommand {
     /// Delete a branch from a repository
-    #[arg(short, long, required=false)]
+    #[arg(short, long, required = false)]
     pub repository: Option<String>,
     /// Branch to delete
-    #[arg(short, long, required=true)]
+    #[arg(short, long, required = true)]
     pub branch: String,
     /// Delete the specified branch for all configured repositories
     #[arg(short, long, default_value_t = false)]
@@ -180,13 +179,13 @@ pub struct DeleteBranchCommand {
 )]
 pub struct CreateBranchCommand {
     /// Create a branch in this repository
-    #[arg(short, long, required=false)]
+    #[arg(short, long, required = false)]
     pub repository: Option<String>,
     /// New branch to create
-    #[arg(short, long, required=true)]
+    #[arg(short, long, required = true)]
     pub new_branch: String,
     /// The base branch for the new branch
-    #[arg(short, long, required=true)]
+    #[arg(short, long, required = true)]
     pub base_branch: String,
     /// Create the branch for all configured repositories
     #[arg(short, long, default_value_t = false)]
@@ -260,7 +259,7 @@ pub enum Command {
     #[command(arg_required_else_help = true)]
     Tag {
         /// Repository to act upon
-        #[arg(short, long, global = true, required=false)]
+        #[arg(short, long, global = true, required = false)]
         repository: Option<String>,
         /// Command to run
         #[command(subcommand)]
@@ -277,7 +276,11 @@ pub fn parse_args() -> AppArgs {
             std::process::exit(1);
         }
     };
-    if let Command::Tag { repository: Some(_),cmd: TagCommand::Compare( compare) } = &app.command {
+    if let Command::Tag {
+        repository: Some(_),
+        cmd: TagCommand::Compare(compare),
+    } = &app.command
+    {
         if let Err(e) = compare.validate() {
             eprintln!("Error validating compare command: {e}");
 
