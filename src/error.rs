@@ -18,6 +18,7 @@ under the License.
 */
 use thiserror::Error;
 
+/// Error type to make it easier to handle returning from functions
 #[derive(Error, Debug)]
 pub enum GitError {
     #[error("Multiple errors: {0:?}")]
@@ -33,14 +34,8 @@ pub enum GitError {
     #[error("Regex error: {0}")]
     RegexError(#[from] regex::Error),
 
-    #[error("Repository not found: {0}")]
-    RepoNotFound(String),
-
     #[error("No repos configured")]
     NoReposConfigured,
-
-    #[error("Failed to get repository info: {0}")]
-    RepoInfoError(String),
 
     #[error("Repository is not a fork")]
     NotAFork,
@@ -52,9 +47,6 @@ pub enum GitError {
     NoSuchBranch(String),
     #[error("No such tag: {0}")]
     NoSuchTag(String),
-
-    #[error("No owner or repo specified")]
-    NoOwnerOrRepo,
 
     #[error("TOML parsing error: {0}")]
     TomlError(#[from] toml::de::Error),

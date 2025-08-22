@@ -16,26 +16,41 @@ KIND, either express or implied.  See the License for the
 specific language governing permissions and limitations
 under the License.
 */
-use clap::{ArgGroup, Args, Parser, Subcommand};
+use clap::{ArgGroup, Args, CommandFactory, Parser, Subcommand, ValueEnum};
+use std::fmt;
 use std::path::PathBuf;
-
+/// Root level struct for cli arguments
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
 pub struct AppArgs {
     ///Github Personal Access Token
-    #[arg(short = 't', long, env = "GITHUB_TOKEN")]
+    #[arg(short, long, env = "GITHUB_TOKEN")]
     pub token: Option<String>,
 
     /// Path to config file
-    #[arg(short = 'f', long)]
+    #[arg(short, long, global = true, env = "CONFIG_FILE")]
     pub file: Option<PathBuf>,
 
-    /// The types of repositories to use. Valid options are public, private, or forks.
-    #[arg(short, long, default_value = "forks")]
-    pub repository_type: String,
+    /// The types of repositories to use for any command that targets configured repositories
+    #[arg(short, long, default_value = "fork")]
+    pub repository_type: RepositoryType,
 
+    /// The command that will get run
     #[command(subcommand)]
     pub command: Command,
+
+    /// Make output quiet. This is useful when not running in interactive mode
+    #[arg(short, long, default_value_t = false, global = true)]
+    pub quiet: bool,
+}
+
+/// Valid options for repository_type for cli arguments
+#[derive(Copy, Clone, PartialEq, Eq, Debug, ValueEnum)]
+pub enum RepositoryType {
+    Public,
+    Private,
+    Fork,
+    All,
 }
 
 /// Options for the 'create' tag command
@@ -85,7 +100,7 @@ impl CompareTagCommand {
         }
     }
 }
-
+/// Defines the arguments for the 'delete' tag subcommand
 #[derive(Args, Clone, Debug)]
 #[command(group(
     ArgGroup::new("target")
@@ -104,7 +119,7 @@ pub struct DeleteTagCommand {
     pub all: bool,
 }
 
-/// Define the arguments for the 'sync' command for repositories
+/// Sync a repository. If the repository is already up to date, no error is reported.
 #[derive(Args, Clone, Debug)]
 #[command(group(
     ArgGroup::new("sync")
@@ -130,9 +145,24 @@ pub struct SyncRepoCommand {
         ArgGroup::new("check")
         .required(true)
         .multiple(true)
-        .args(&["license", "protected"])
-    )
+        .args(&["license", "protected", "old_branches"])
+    ),
+    long_about = "Check repositories for various conditions, such as the license used, branch protection status, and stale branches. \
+        You can target a single repository or all configured repositories. Multiple checks can be run is a single commmand.",
+    after_help="\
+EXAMPLES:
+    # Check all repositories for license and branch protection
+    git_sync repo check --all --license --protected
+    # Check a specific repository for old branches inactive for 60 days matching a specific pattern. The pattern is optional, and if not provided, all branches will be checked.
+    git_sync repo check --repository my-repo --old-branches --days-ago --branch-filter \"^ODP\"
+
+NOTES:
+    - At least one of --license, --protected, or --old-branches must be specified.
+    - Use --all to apply checks to all configured repositories, or --repository option to target one repository. You cannot use both at the same time.
+        "
+
 )]
+/// Check repositories for various conditions
 pub struct CheckRepoCommand {
     /// The repository to check
     #[arg(short, long, required = false)]
@@ -146,6 +176,15 @@ pub struct CheckRepoCommand {
     /// Enable checking the protected status of the main branch for target repositories
     #[arg(short, long, default_value_t = false)]
     pub protected: bool,
+    #[arg(short, long, default_value_t = false)]
+    /// Enable checking for old branches in target repository
+    pub old_branches: bool,
+    /// Number of days of inactivity after which a branch is flagged
+    #[arg(short, long, default_value_t = 30)]
+    pub days_ago: i64,
+    /// Regex that can be used to filter branches
+    #[arg(short, long, required = false)]
+    pub branch_filter: Option<String>,
 }
 
 /// Define the arguments for the 'delete' branch command
@@ -169,6 +208,7 @@ pub struct DeleteBranchCommand {
     pub all: bool,
 }
 
+/// Create a new branch. This will return an error if the branch already exists.
 #[derive(Args, Clone, Debug)]
 #[command(
     group(
@@ -192,6 +232,65 @@ pub struct CreateBranchCommand {
     pub all: bool,
 }
 
+#[derive(Args, Clone, Debug)]
+#[command(
+    group(
+        ArgGroup::new("target")
+        .required(true)
+        .args(&["all", "repository"])
+    ),
+)]
+pub struct CreateReleaseCommand {
+    /// The tag or branch to base the release off of
+    #[arg(short, long, required = true)]
+    pub base: String,
+    /// The previous release tag or branch. This is used to generate the changelog
+    #[arg(short, long, required = true)]
+    pub previous_release: String,
+    /// The repository for which to create the release
+    #[arg(short, long, required = false)]
+    pub repository: Option<String>,
+
+    /// Set this release to the latest
+    #[arg(short, long, default_value_t = MakeLatest::True)]
+    pub latest: MakeLatest,
+    /// Specify whether this release should use 'legacy' to determine if it's the newest release.
+    /// 'legacy' specifies that the latest release should be determined using creation date and a
+    /// higher version number
+
+    /// Create this release for all configured repositories
+    #[arg(short, long, default_value_t = false)]
+    pub all: bool,
+}
+
+/// All valid commands concerning releases
+#[derive(Subcommand, Clone, Debug)]
+pub enum ReleaseCommand {
+    /// Create a new release
+    Create(CreateReleaseCommand),
+    // Delete a release
+    //Delete(DeleteReleaseCommand)
+}
+/// Valid options that can be passed to make_latest in the github api.
+/// True makes this the latest release, false makes it not the latest release,
+/// Legacy looks at both the date, and the semantic version to decide if this should be the latest
+#[derive(Copy, Clone, PartialEq, Eq, Debug, ValueEnum)]
+pub enum MakeLatest {
+    True,
+    False,
+    Legacy,
+}
+/// Implement fmt::Display so this type can be printed to the cli
+impl fmt::Display for MakeLatest {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            MakeLatest::True => write!(f, "true"),
+            MakeLatest::False => write!(f, "false"),
+            MakeLatest::Legacy => write!(f, "legacy"),
+        }
+    }
+}
+
 /// Define all the valid commands for acting on Tags
 #[derive(Subcommand, Clone, Debug)]
 pub enum TagCommand {
@@ -208,9 +307,10 @@ pub enum TagCommand {
 /// Define all the valid commands for acting on repositories
 #[derive(Subcommand, Clone, Debug)]
 pub enum RepoCommand {
-    /// Sync repoositories
+    /// Sync repositories
     Sync(SyncRepoCommand),
-    /// Check repositories
+    /// Check repositories for various conditions, such as branch protection being enabled, stale
+    /// branches, etc.
     Check(CheckRepoCommand),
 }
 
@@ -222,7 +322,7 @@ pub enum BranchCommand {
     /// Create a branch for repositories
     Create(CreateBranchCommand),
 }
-
+/// The top-level command enum for the CLI
 #[derive(Subcommand, Debug)]
 pub enum Command {
     /// Manage branches
@@ -236,10 +336,11 @@ pub enum Command {
         cmd: BranchCommand,
     },
     /// Generate a default config
+    #[command(arg_required_else_help = true)]
     Config {
         /// Path to save the config file.
         #[arg(short, long)]
-        path: Option<PathBuf>,
+        file: Option<PathBuf>,
 
         /// Overwrite existing config file if it exists
         #[arg(long, default_value_t = false)]
@@ -265,8 +366,29 @@ pub enum Command {
         #[command(subcommand)]
         cmd: TagCommand,
     },
+    #[command(arg_required_else_help = true)]
+    Release {
+        /// The repository for which to make the release
+        #[arg(short, long, global = true, required = false)]
+        repository: Option<String>,
+        /// Command to run
+        #[command(subcommand)]
+        cmd: ReleaseCommand,
+    },
+    /// Generate completions or a manpage. This command is hidden by default since it should really
+    /// done at build time
+    #[command(hide = true)]
+    Generate {
+        #[arg(long, value_parser = ["bash", "zsh", "fish", "man"])]
+        kind: String,
+        #[arg(long)]
+        out: Option<std::path::PathBuf>,
+    },
 }
-
+/// Parse the command line arguments and validate them.
+/// This function uses clap to generate the AppArgs struct,
+/// and then runs a small amount of validation on it that can't be
+/// enforced by the type system or macros.
 pub fn parse_args() -> AppArgs {
     let app = AppArgs::try_parse();
     let app = match app {
@@ -288,4 +410,8 @@ pub fn parse_args() -> AppArgs {
         };
     }
     app
+}
+
+pub fn cli() -> clap::Command {
+    AppArgs::command()
 }

@@ -1,0 +1,58 @@
+.ie \n(.g .ds Aq \(aq
+.el .ds Aq '
+.TH git_sync 1  "git_sync 0.1.0" 
+.SH NAME
+git_sync \- Root level struct for cli arguments
+.SH SYNOPSIS
+\fBgit_sync\fR [\fB\-t\fR|\fB\-\-token\fR] [\fB\-f\fR|\fB\-\-file\fR] [\fB\-r\fR|\fB\-\-repository\-type\fR] [\fB\-q\fR|\fB\-\-quiet\fR] [\fB\-h\fR|\fB\-\-help\fR] [\fB\-V\fR|\fB\-\-version\fR] <\fIsubcommands\fR>
+.SH DESCRIPTION
+Root level struct for cli arguments
+.SH OPTIONS
+.TP
+\fB\-t\fR, \fB\-\-token\fR \fI<TOKEN>\fR
+Github Personal Access Token
+.RS
+May also be specified with the \fBGITHUB_TOKEN\fR environment variable. 
+.RE
+.TP
+\fB\-f\fR, \fB\-\-file\fR \fI<FILE>\fR
+Path to config file
+.RS
+May also be specified with the \fBCONFIG_FILE\fR environment variable. 
+.RE
+.TP
+\fB\-r\fR, \fB\-\-repository\-type\fR \fI<REPOSITORY_TYPE>\fR [default: fork]
+The types of repositories to use for any command that targets configured repositories
+.br
+
+.br
+[\fIpossible values: \fRpublic, private, fork, all]
+.TP
+\fB\-q\fR, \fB\-\-quiet\fR
+Make output quiet. This is useful when not running in interactive mode
+.TP
+\fB\-h\fR, \fB\-\-help\fR
+Print help
+.TP
+\fB\-V\fR, \fB\-\-version\fR
+Print version
+.SH SUBCOMMANDS
+.TP
+git_sync\-branch(1)
+Manage branches
+.TP
+git_sync\-config(1)
+Generate a default config
+.TP
+git_sync\-repo(1)
+Manage repositories
+.TP
+git_sync\-tag(1)
+Manage tags
+.TP
+git_sync\-help(1)
+Print this message or the help of the given subcommand(s)
+.SH VERSION
+v0.1.0
+.SH AUTHORS
+Jeffrey Smith <jeffrey.smith7@gmail.com>

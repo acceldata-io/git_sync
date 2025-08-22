@@ -24,7 +24,19 @@ use futures::stream::FuturesUnordered;
 use octocrab::Octocrab;
 use octocrab::models::repos::ReleaseNotes;
 use octocrab::params::repos::Reference;
+use regex::Regex;
+use std::collections::HashMap;
 use std::collections::HashSet;
+
+use tabled::{
+    Table,
+    builder::Builder,
+    settings::{
+        Alignment, Padding, Panel,
+        panel::Header,
+        style::{HorizontalLine, Style},
+    },
+};
 
 use crate::error::GitError;
 use crate::utils::repo::CheckResult;
@@ -47,6 +59,8 @@ pub struct ComparisonResult {
 pub struct GithubClient {
     /// Octocrab client. This can be trivially cloned
     pub octocrab: Octocrab,
+    //pub name: String,
+    //pub email: String,
 }
 
 impl GithubClient {
@@ -115,6 +129,7 @@ impl GithubClient {
         fork_url: &str,
         parent_url: &str,
     ) -> Result<ComparisonResult, GitError> {
+        println!("{fork_url} : {parent_url}");
         let (fork_tags, parent_tags) =
             try_join(self.get_tags(fork_url), self.get_tags(parent_url)).await?;
 
@@ -143,7 +158,7 @@ impl GithubClient {
             "Comparing tags in {owner}/{repo} and {}/{}",
             parent.owner, parent.repo_name
         );
-        let mut comparison = self.compare_tags(url, &info.url).await?;
+        let mut comparison = self.compare_tags(url, &parent.url).await?;
         println!(
             "Fork has {} tags, parent has {} tags",
             comparison.fork_tags.len(),
@@ -307,24 +322,6 @@ impl GithubClient {
                 Err(GitError::GithubApiError(e))
             }
         }
-        /*let response: Result<serde_json::Value, octocrab::Error> = self.octocrab.clone()
-            .post(
-                format!("/repos/{owner}/{repo}/git/refs"),
-                Some(&serde_json::json!({
-                    "ref": format!("refs/heads/{new_branch}"),
-                    "sha": sha,
-                })),
-            )
-            .await;
-        handle_api_response!(
-            response,
-            format!("Can't create {owner}/{repo}:{new_branch}"),
-            |_| {
-                println!("Successfully created branch '{new_branch}' for {repo}");
-                Ok(())
-            },
-        )
-        */
     }
     /// Create all passed branches for each repository provided
     pub async fn create_all_branches(
@@ -371,7 +368,7 @@ impl GithubClient {
             }
         }
     }
-
+    /// Delete the specified branch for each configured repository
     pub async fn delete_all_branches(
         &self,
         branch: &str,
@@ -394,6 +391,7 @@ impl GithubClient {
         Ok(())
     }
 
+    /// Create a tag for a specific repository
     pub async fn create_tag(&self, url: &str, tag: &str, branch: &str) -> Result<(), GitError> {
         let info = get_repo_info_from_url(url)?;
         let sha = self.get_branch_sha(url, branch).await?;
@@ -416,26 +414,9 @@ impl GithubClient {
                 Err(GitError::GithubApiError(e))
             }
         }
-
-        /*let response:Result<serde_json::Value, octocrab::Error> = self.octocrab.clone()
-            .post(
-                format!("/repos/{owner}/{repo}/git/refs"),
-                Some(&serde_json::json!({
-                    "ref": format!("refs/tags/{tag}"),
-                    "sha": sha,
-                })),
-            ).await;
-        handle_api_response!(
-            response,
-            format!("Unable to create '{tag}' for {repo}"),
-            |_| {
-                println!("Successfully created tag '{tag}' for {repo}");
-                Ok(())
-            },
-        )
-        */
     }
 
+    /// Create the tag for all configured repositories
     pub async fn create_all_tags(
         &self,
         tag: &str,
@@ -532,13 +513,9 @@ impl GithubClient {
         let info = get_repo_info_from_url(url)?;
         let (owner, repo) = (info.owner, info.repo_name);
 
-        let mut name = tag.replace("-tag", "").to_string();
-        name.insert_str(0, "Release notes for ");
-        name.insert_str(0, "## ");
+        let octocrab = self.octocrab.clone();
 
-        let tag_info = self
-            .octocrab
-            .clone()
+        let tag_info = octocrab
             .repos(&owner, &repo)
             .get_ref(&Reference::Tag(previous_tag.to_string()))
             .await?;
@@ -547,10 +524,11 @@ impl GithubClient {
             octocrab::models::repos::Object::Commit { sha, .. } => sha,
             _ => "".to_string(),
         };
+        let mut page: u32 = 1;
+        let per_page = 100;
         let mut date: DateTime<Utc> = Utc::now();
-        let c = self
-            .octocrab
-            .clone()
+
+        let c = octocrab
             .repos(&owner, &repo)
             .list_commits()
             .per_page(1)
@@ -572,26 +550,85 @@ impl GithubClient {
                 })
                 .unwrap_or_else(|| eprintln!("No commit found"));
         }
-        let b = self
-            .octocrab
-            .clone()
-            .repos(&owner, &repo)
-            .list_commits()
-            .per_page(100)
-            .since(date)
-            .branch(tag.to_string())
-            .send()
-            .await?;
 
-        let mut body = String::new();
-        for c in &b {
-            let lines: Vec<&str> = c.commit.message.lines().collect();
-            if lines.len() > 1 {
-                body.push_str(&format!("* {}\n", lines.first().unwrap()));
+        let mut new_commits: Vec<String> = Vec::with_capacity(200);
+        loop {
+            let commits = octocrab
+                .repos(&owner, &repo)
+                .list_commits()
+                .page(page)
+                .per_page(per_page)
+                .since(date)
+                .branch(tag.to_string())
+                .send()
+                .await?;
+
+            new_commits.extend(
+                commits
+                    .items
+                    .iter()
+                    .map(|c| c.commit.message.lines().next().unwrap().to_string()),
+            );
+
+            if commits.items.len() < per_page as usize {
+                break;
+            }
+            page += 1;
+        }
+        let component_upper_bracket = format!("[{}", repo.to_uppercase());
+        let component_upper = repo.to_uppercase();
+        let mut c = repo.chars();
+        let capitalized = match c.next() {
+            None => String::new(),
+            Some(f) => f.to_uppercase().collect::<String>() + c.as_str(),
+        };
+        let mut vulnerabilities = Vec::new();
+        let mut odp_changes = Vec::new();
+        let mut component_match = Vec::new();
+        let mut other = Vec::new();
+        for s in &new_commits {
+            let s_upper = s.to_ascii_uppercase();
+            if s_upper.contains("OSV") {
+                vulnerabilities.push(s.clone());
+            } else if s_upper.contains("ODP") {
+                odp_changes.push(s.clone());
+            } else if s_upper.contains(&component_upper) {
+                component_match.push(s.clone());
             } else {
-                body.push_str(&format!("* {}\n", c.commit.message));
+                other.push(s.clone());
             }
         }
+
+        let mut body_commits: Vec<String> = Vec::with_capacity(new_commits.len() + 10);
+        if !odp_changes.is_empty() {
+            body_commits.push("### ODP Changes".to_string());
+            for commit in odp_changes {
+                body_commits.push(format!("* {commit}"));
+            }
+        }
+        if !vulnerabilities.is_empty() {
+            body_commits.push("### CVE related changes".to_string());
+            for commit in vulnerabilities {
+                body_commits.push(format!("* {commit}"));
+            }
+        }
+        if !component_match.is_empty() {
+            body_commits.push(format!("### Changes from {capitalized}"));
+            for commit in component_match {
+                body_commits.push(format!("* {commit}"));
+            }
+        }
+        if !other.is_empty() {
+            body_commits.push("### Other changes".to_string());
+            for commit in other {
+                body_commits.push(format!("* {commit}"));
+            }
+        }
+
+        let body = body_commits.join("\n");
+        let mut name = tag.replace("-tag", "");
+        name = name.replace("ODP-", "");
+        name = format!("# Release Notes for {capitalized} {name}");
         println!("{name}");
         println!("{body}");
         let notes: ReleaseNotes = ReleaseNotes { name, body };
@@ -599,6 +636,7 @@ impl GithubClient {
         Ok(notes)
     }
 
+    /// Determine if a specific branch is protected
     async fn get_branch_protection(
         &self,
         url: &str,
@@ -627,10 +665,17 @@ impl GithubClient {
         )
     }
 
-    pub async fn check_repository(&self, url: &str, checks: &RepoChecks) -> Result<(), GitError> {
+    /// Run the selected checks against a specific repository
+    pub async fn check_repository(
+        &self,
+        url: &str,
+        checks: &RepoChecks,
+        blacklist: &HashSet<String>,
+    ) -> Result<(), GitError> {
         let info = get_repo_info_from_url(url)?;
         let (owner, repo) = (info.owner, info.repo_name);
-        let (protected, license) = (checks.protected, checks.license);
+        let (protected, license, (old, days_ago)) =
+            (checks.protected, checks.license, checks.old_branches);
 
         println!("Checking repository {owner}/{repo}");
         let mut futures = FuturesUnordered::new();
@@ -640,12 +685,31 @@ impl GithubClient {
                 .main_branch
                 .clone()
                 .unwrap_or_else(|| "main".to_string());
-            futures.push(async move { self.get_branch_protection(&url, &branch).await }.boxed());
+            futures.push(
+                async move { self.get_branch_protection(url.as_str(), &branch).await }.boxed(),
+            );
         }
 
         if license {
             let url = info.url.clone();
-            futures.push(async move { self.get_license(&url).await }.boxed());
+            futures.push(async move { self.get_license(url.as_str()).await }.boxed());
+        }
+
+        if old {
+            let url = info.url.clone();
+            futures.push(
+                async move {
+                    self.get_old_branches(
+                        url.as_str(),
+                        days_ago,
+                        blacklist.clone(),
+                        &checks.branch_filter,
+                    )
+                    .await
+                    .map(CheckResult::OldBranches)
+                }
+                .boxed(),
+            )
         }
 
         let mut errors = Vec::new();
@@ -661,6 +725,35 @@ impl GithubClient {
                     eprintln!("Main branch for {owner}/{repo} is not protected");
                     errors.push(GitError::NoMainBranchProtection(format!("{owner}/{repo}")));
                 }
+                Ok(CheckResult::OldBranches(branches)) => {
+                    if !branches.is_empty() {
+                        if branches.len() == 1 {
+                            println!(
+                                "Found {} matching old branch in {owner}/{repo}",
+                                branches.len()
+                            );
+                        } else {
+                            println!(
+                                "Found {} matching old branches in {owner}/{repo}",
+                                branches.len()
+                            );
+                        }
+                        let mut builder = Builder::default();
+                        builder.push_record(vec!["Name", "Last Modified"]);
+                        for (name, date) in branches {
+                            builder.push_record(vec![name, date]);
+                        }
+
+                        let mut table = builder.build();
+
+                        table.with(
+                            Style::ascii()
+                                .horizontals([(1, HorizontalLine::inherit(Style::ascii()))]),
+                        );
+                        table.with((Alignment::center(), Padding::new(1, 1, 0, 0)));
+                        println!("{table}");
+                    }
+                }
                 Err(e) => {
                     eprintln!("Check failed for {owner}/{repo}: {e}");
                     errors.push(e);
@@ -672,14 +765,16 @@ impl GithubClient {
         }
         Ok(())
     }
+    /// Run the selected checks against all configured repositories
     pub async fn check_all_repositories(
         &self,
         repositories: Vec<String>,
         checks: &RepoChecks,
+        blacklist: &HashSet<String>,
     ) -> Result<(), GitError> {
         let mut futures = FuturesUnordered::new();
         for repo in repositories {
-            futures.push(async move { self.check_repository(&repo, checks).await });
+            futures.push(async move { self.check_repository(&repo, checks, blacklist).await });
         }
 
         let mut errors = Vec::new();
@@ -698,7 +793,7 @@ impl GithubClient {
         }
     }
 
-    /// Get a license for a repository
+    /// Get the license for a repository
     async fn get_license(&self, url: &str) -> Result<CheckResult, GitError> {
         let info = get_repo_info_from_url(url)?;
         let content = self
@@ -712,6 +807,86 @@ impl GithubClient {
         } else {
             Err(GitError::MissingLicense(url.to_string()))
         }
+    }
+    /// Get branches that are older than a certain number of days
+    /// A blacklist should be passed to ignore certain branches, since some of them are static and
+    /// will never change.
+    async fn get_old_branches(
+        &self,
+        url: &str,
+        days_ago: i64,
+        blacklist: HashSet<String>,
+        branch_filter: &Option<Regex>,
+    ) -> Result<Vec<(String, String)>, GitError> {
+        let info = get_repo_info_from_url(url)?;
+        let (owner, repo) = (info.owner, info.repo_name);
+        let per_page = 100;
+        let mut page: u32 = 1;
+        let octocrab = self.octocrab.clone();
+        let mut all_branches: Vec<String> = Vec::new();
+        loop {
+            let branches = octocrab
+                .repos(&owner, &repo)
+                .list_branches()
+                .per_page(per_page)
+                .page(page)
+                .send()
+                .await?;
+
+            all_branches.extend(branches.items.iter().filter_map(|b| {
+                if branch_filter
+                    .as_ref()
+                    .map(|re| re.is_match(b.name.as_str()))
+                    .unwrap_or(true)
+                {
+                    Some(b.name.clone())
+                } else {
+                    None
+                }
+            }));
+            if branches.items.len() < per_page as usize {
+                break;
+            }
+            page += 1;
+        }
+        let mut ages = HashMap::<String, DateTime<Utc>>::new();
+        let now = Utc::now();
+        for branch in all_branches {
+            let commits = octocrab
+                .repos(&owner, &repo)
+                .list_commits()
+                .sha(&branch)
+                .per_page(1)
+                .send()
+                .await?;
+
+            if let Some(commit) = commits.items.first() {
+                if let Some(commit_date) = commit.commit.committer.as_ref().and_then(|c| c.date) {
+                    if let Some(re) = branch_filter {
+                        re.is_match(&branch)
+                            .then(|| branch.clone())
+                            .map(|b| ages.insert(b, commit_date));
+                    } else {
+                        ages.insert(branch.clone(), commit_date);
+                    }
+                } else {
+                    eprintln!("No commit date found for branch {branch}");
+                }
+            }
+        }
+        let mut old_branches: Vec<_> = ages
+            .into_iter()
+            .filter(|(_, age)| (now - age).num_days() >= days_ago)
+            .filter(|(branch, _)| !blacklist.contains(branch))
+            .collect();
+        old_branches.sort_by_key(|(_, age)| *age);
+
+        let old_branches: Vec<(String, String)> = old_branches
+            .into_iter()
+            .map(|(branch, age)| (branch, age.format("%Y-%m-%d").to_string()))
+            .collect();
+
+        Ok(old_branches)
     }
 }
 

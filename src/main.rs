@@ -32,17 +32,8 @@ use github::parse;
 async fn main() -> Result<(), GitError> {
     let args = parse_args();
 
-    let config = if let Some(config_path) = &args.file {
-        Config::from_file(config_path)?
-    } else {
-        Config::load()
-    };
+    let config = Config::new(&args.file)?;
 
-    let token = args
-        .token
-        .or_else(|| config.get_github_token())
-        .ok_or(GitError::MissingToken)?;
-
-    parse::match_arguments(&args.command, &token, config).await?;
+    parse::match_arguments(&args, config).await?;
     Ok(())
 }

@@ -1,0 +1,22 @@
+.ie \n(.g .ds Aq \(aq
+.el .ds Aq '
+.TH delete 1  "delete " 
+.SH NAME
+delete \- Delete a tag
+.SH SYNOPSIS
+\fBdelete\fR [\fB\-r\fR|\fB\-\-repository\fR] <\fB\-t\fR|\fB\-\-tag\fR> [\fB\-a\fR|\fB\-\-all\fR] [\fB\-h\fR|\fB\-\-help\fR] 
+.SH DESCRIPTION
+Delete a tag
+.SH OPTIONS
+.TP
+\fB\-r\fR, \fB\-\-repository\fR \fI<REPOSITORY>\fR
+The target repository. Not a valid option if \*(Aqall\*(Aq is set
+.TP
+\fB\-t\fR, \fB\-\-tag\fR \fI<TAG>\fR
+The tag to delete
+.TP
+\fB\-a\fR, \fB\-\-all\fR
+Apply to all configured repositories. Not a valid if \*(Aqrepository\*(Aq is set
+.TP
+\fB\-h\fR, \fB\-\-help\fR
+Print help

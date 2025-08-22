@@ -6,8 +6,6 @@ authors = ["Jeffrey Smith <jeffrey.smith7@gmail.com>"]
 license = "Apache-2.0"
 
 
-[lib]
-path = "src/lib.rs"
 
 [dependencies]
 tokio = { version = "1.47", features=["macros", "rt-multi-thread"]}

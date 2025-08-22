@@ -22,76 +22,33 @@ use crate::config::Config;
 use crate::github::client::GithubClient;
 use crate::init::generate_config;
 use crate::utils::repo::RepoChecks;
-use chrono::{DateTime, Utc};
-use octocrab::params::repos::Reference;
+use clap_complete::{
+    generate_to,
+    shells::{Bash, Fish, Zsh},
+};
+use clap_mangen::Man;
+use regex::Regex;
+use std::fs::File;
+use std::path::PathBuf;
 
 /// Parse the argument that gets passed, and run their associated methods
-pub async fn match_arguments(
-    command: &Command,
-    token: &str,
-    config: Config,
-) -> Result<(), GitError> {
-    let repositories = config.get_fork_repositories();
+pub async fn match_arguments(app: &AppArgs, config: Config) -> Result<(), GitError> {
+    let token = app
+        .token
+        .clone()
+        .or_else(|| config.get_github_token().clone())
+        .ok_or(GitError::MissingToken)?;
+
+    let repos = match app.repository_type {
+        RepositoryType::Public => config.get_public_repositories(),
+        RepositoryType::Private => config.get_private_repositories(),
+        RepositoryType::Fork => config.get_fork_repositories(),
+        RepositoryType::All => config.get_all_repositories(),
+    };
     let client = GithubClient::new(token.to_string())?;
 
-    let res = client
-        .generate_release_notes(
-            "https://github.com/acceldata-io/kudu/",
-            "ODP-3.3.6.2-1-tag",
-            "ODP-3.3.6.1-1-tag",
-        )
-        .await?;
-    println!("{res:#?}");
-    /*for r in &c {
-        let date = r.commit.committer.as_ref().map(|c| &c.date).unwrap().unwrap();
-        println!("{} ", date.to_rfc3339());
-
-        let lines = r.commit.message.lines().collect::<Vec<&str>>();
-        if lines.len() > 1 {
-            println!("* {}", lines.first().unwrap());
-        } else {
-            println!("* {}", r.commit.message);
-        }
-    }
-    */
-    /*
-    let t = DateTime::parse_from_rfc3339("2025-05-12T00:00:00Z").unwrap().with_timezone(&Utc);
-    let commits = client.octocrab.clone().repos("acceldata-io", "kudu")
-        .list_commits()
-        .branch("ODP-3.3.6.2-1-tag")
-        .since(t)
-        .per_page(100)
-        .send().await?;
-
-    for c in commits {
-        let lines:Vec<&str> = c.commit.message.lines().collect();
-        if lines.len() > 1 {
-            println!("* {}", lines.first().unwrap());
-        } else {
-            println!("* {}", c.commit.message);
-
-        }
-    }
-    */
-
-    //let note = client.generate_release_notes("https://github.com/acceldata-io/kudu/", "ODP-3.3.6.2-1-tag", "ODP-3.3.6.1-1-tag").await?;
-
-    /*let abc = client.octocrab.clone().repos("acceldata-io","kudu")
-        .releases()
-        .generate_release_notes("3.3.6.2-1006-tag").send().await?;
-
-    let lines: Vec<&str>= abc.body.lines().map(|l| {
-        match l.find(" by @"){
-            Some(idx) => &l[..idx],
-            None => l,
-        }})
-        .filter(|l| !l.starts_with("**Full Changelog**"))
-        .collect::<Vec<&str>>();
-    println!("{lines:?}");
-    */
-    //println!("{}\n{}", note.name, note.body);
-    let repos: Vec<String> = repositories.unwrap_or_default();
-    match &command {
+    println!("{repos:#?}");
+    match &app.command {
         Command::Tag { cmd, repository } => match cmd {
             TagCommand::Compare(compare_cmd) => {
                 compare_cmd.validate().map_err(GitError::Other)?;
@@ -141,13 +98,39 @@ pub async fn match_arguments(
             }
             RepoCommand::Check(check_cmd) => {
                 let (protected, license) = (check_cmd.protected, check_cmd.license);
+                let old_branches = (check_cmd.old_branches, check_cmd.days_ago);
+                let blacklist = config.misc.branch_blacklist.unwrap_or_default();
+                let filter = check_cmd.branch_filter.clone();
+                let branch_filter = if let Some(filter) = filter {
+                    Some(Regex::new(&filter).map_err(GitError::RegexError)?)
+                } else {
+                    None
+                };
                 if check_cmd.all {
                     client
-                        .check_all_repositories(repos, &RepoChecks { protected, license })
+                        .check_all_repositories(
+                            repos,
+                            &RepoChecks {
+                                protected,
+                                license,
+                                old_branches,
+                                branch_filter,
+                            },
+                            &blacklist,
+                        )
                         .await?
                 } else if let Some(repository) = repository {
                     client
-                        .check_repository(repository, &RepoChecks { protected, license })
+                        .check_repository(
+                            repository,
+                            &RepoChecks {
+                                protected,
+                                license,
+                                old_branches,
+                                branch_filter,
+                            },
+                            &blacklist,
+                        )
                         .await?
                 } else {
                     return Err(GitError::MissingRepositoryName);
@@ -176,9 +159,78 @@ pub async fn match_arguments(
                 }
             }
         },
-        Command::Config { path, force } => {
-            generate_config(path.clone(), *force)?;
+        Command::Release { repository, cmd } => match cmd {
+            ReleaseCommand::Create(create_cmd) => {
+                if create_cmd.all {
+                    {}
+                } else if let Some(repository) = repository {
+                    let out = client
+                        .generate_release_notes(
+                            &repository,
+                            &create_cmd.base,
+                            &create_cmd.previous_release,
+                        )
+                        .await;
+                    println!("{out:#?}");
+                }
+            }
+            _ => {}
+        },
+        Command::Config { file, force } => {
+            generate_config(file, *force)?;
+        }
+        Command::Generate { kind, out } => {
+            let mut cmd = cli();
+
+            let out_dir = out
+                .clone()
+                .unwrap_or_else(|| std::env::current_dir().unwrap());
+            match kind.as_str() {
+                "bash" => {
+                    generate_to(Bash, &mut cmd, "git_sync", out_dir)?;
+                }
+                "zsh" => {
+                    generate_to(Zsh, &mut cmd, "git_sync", out_dir)?;
+                }
+                "fish" => {
+                    generate_to(Fish, &mut cmd, "git_sync", out_dir)?;
+                }
+                "man" => {
+                    let out_dir = out
+                        .clone()
+                        .unwrap_or_else(|| std::env::current_dir().unwrap());
+                    let cmd = cli();
+                    generate_manpages(cmd, &out_dir, None);
+                    println!("Manpages generated");
+                }
+                _ => {}
+            }
         }
     }
     Ok(())
+}
+
+/// Helper to write manpages
+fn write_man(cmd: &mut clap::Command, out_dir: &PathBuf, name: &str) {
+    let man = Man::new(cmd.clone());
+    let mut file = File::create(out_dir.join(name)).unwrap();
+    man.render(&mut file).unwrap();
+}
+
+/// Generate manpages for all subcommands
+fn generate_manpages(mut cmd: clap::Command, out_dir: &PathBuf, parent: Option<String>) {
+    let name = if let Some(parent) = parent {
+        format!("git_sync-{parent}.1")
+    } else {
+        "git_sync.1".to_string()
+    };
+    write_man(&mut cmd, out_dir, &name);
+
+    for sub in cmd.get_subcommands() {
+        if sub.is_hide_set() {
+            continue;
+        }
+        let sub_name = sub.get_name().to_string().replace('_', "-");
+        generate_manpages(sub.clone(), out_dir, Some(sub_name));
+    }
 }

@@ -1,4 +1,3 @@
-use octocrab::models::Repository;
 /*
 Licensed to the Apache Software Foundation (ASF) under one
 or more contributor license agreements.  See the NOTICE file
@@ -40,6 +39,11 @@ pub struct RepoChecks {
     pub protected: bool,
     /// Check the license of the repository
     pub license: bool,
+    /// Check for old branches.
+    /// The tuple is whether to enable it, and the minimum number of days of inactivity
+    pub old_branches: (bool, i64),
+    /// A regex filter for the branches
+    pub branch_filter: Option<Regex>,
 }
 
 pub enum CheckResult {
@@ -47,6 +51,8 @@ pub enum CheckResult {
     Protected(bool),
     /// The license of the repository
     License(String),
+    /// Old branches
+    OldBranches(Vec<(String, String)>),
 }
 
 /// Parse the owner and repository name from a github repository url.

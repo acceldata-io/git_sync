@@ -1,0 +1,25 @@
+.ie \n(.g .ds Aq \(aq
+.el .ds Aq '
+.TH create 1  "create " 
+.SH NAME
+create \- Create a new tag
+.SH SYNOPSIS
+\fBcreate\fR <\fB\-t\fR|\fB\-\-tag\fR> <\fB\-b\fR|\fB\-\-branch\fR> [\fB\-r\fR|\fB\-\-repository\fR] [\fB\-a\fR|\fB\-\-all\fR] [\fB\-h\fR|\fB\-\-help\fR] 
+.SH DESCRIPTION
+Create a new tag
+.SH OPTIONS
+.TP
+\fB\-t\fR, \fB\-\-tag\fR \fI<TAG>\fR
+The new tag\*(Aqs name
+.TP
+\fB\-b\fR, \fB\-\-branch\fR \fI<BRANCH>\fR
+The target branch
+.TP
+\fB\-r\fR, \fB\-\-repository\fR \fI<REPOSITORY>\fR
+The url of the repository to create the tag in. If \-\-all is specified, this is not a valid option
+.TP
+\fB\-a\fR, \fB\-\-all\fR
+Create this tag for all configured repositories, all using the same branch. If \-\-repository is specified, this is not a valid option
+.TP
+\fB\-h\fR, \fB\-\-help\fR
+Print help

@@ -20,9 +20,12 @@ use crate::error::GitError;
 use crate::utils::user::UserDetails;
 use dirs::home_dir;
 use serde::Deserialize;
+use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 
+/// The currently defined name of the config file.
+/// This may change in the future.
 pub const CONFIG_NAME: &str = "git-manage.toml";
 
 /// This is the root level of the configuration file
@@ -39,24 +42,36 @@ pub struct Config {
 
     #[serde(default)]
     pub info: InfoConfig,
+
+    #[serde(default)]
+    pub misc: MiscSettings,
 }
 
+#[derive(Debug, Deserialize, Default)]
+pub struct MiscSettings {
+    pub branch_blacklist: Option<HashSet<String>>,
+}
+
+/// Github configuration struct
 #[derive(Debug, Deserialize, Default)]
 pub struct GithubConfig {
     pub token: Option<String>,
 }
 
+/// Options for git. This may be removed
 #[derive(Deserialize, Default)]
 pub struct GitConfig {
     pub default_directory: Option<PathBuf>,
     pub shallow_by_default: Option<bool>,
     pub owner: Option<String>,
 }
+/// This should probably be moved to git config
 #[derive(Debug, Deserialize, Default)]
 pub struct InfoConfig {
     pub name: Option<String>,
     pub email: Option<String>,
 }
+/// The configuration for the different types of repositories
 #[derive(Debug, Deserialize, Default)]
 pub struct RepoConfig {
     pub fork: Option<Vec<String>>,
@@ -65,7 +80,17 @@ pub struct RepoConfig {
 }
 
 impl Config {
-    /// Load config from a toml file
+    /// Create a new config from an optional path. If None, then it tries to load the config.
+    /// If it can't be loaded, the default values are loaded, which probably won't work as
+    /// expected.
+    pub fn new(path: &Option<PathBuf>) -> Result<Self, GitError> {
+        if let Some(config_path) = path {
+            Ok(Config::from_file(config_path)?)
+        } else {
+            Ok(Config::load())
+        }
+    }
+    /// Load config from an existing toml file.
     pub fn from_file(path: &Path) -> Result<Self, GitError> {
         let config_str = fs::read_to_string(path)?;
         match toml::from_str(&config_str) {
@@ -76,7 +101,12 @@ impl Config {
             }
         }
     }
-    /// Try to load the config from expected locations
+    /// Try to load the config from expected locations. Checks in the current directory first,
+    /// then checks for the configuration file in ~/.config/ next. If all else fails, it sets
+    /// everything to the default.
+    /// In the default case, as long as you have the GITHUB_TOKEN defined as an environment
+    /// variable, you can still perform operations through the github api.
+    /// If not, this tool will fail to run and tell you you're missing the token.
     pub fn load() -> Self {
         if let Ok(local_config) = Config::from_file(Path::new(CONFIG_NAME)) {
             return local_config;
@@ -131,14 +161,24 @@ impl Config {
         self.git.owner.clone()
     }
     /// Get a vector of repositories defined in the config file that are forks
-    pub fn get_fork_repositories(&self) -> Option<Vec<String>> {
-        self.repos.fork.clone()
+    pub fn get_fork_repositories(&self) -> Vec<String> {
+        self.repos.fork.clone().unwrap_or_default()
     }
     /// Get a vector of private repositories defined in the config file
-    pub fn get_private_repositories(&self) -> Option<Vec<String>> {
-        self.repos.private.clone()
+    pub fn get_private_repositories(&self) -> Vec<String> {
+        self.repos.private.clone().unwrap_or_default()
     }
-    pub fn get_public_repositories(&self) -> Option<Vec<String>> {
-        self.repos.public.clone()
+    pub fn get_public_repositories(&self) -> Vec<String> {
+        self.repos.public.clone().unwrap_or_default()
+    }
+    pub fn get_all_repositories(&self) -> Vec<String> {
+        self.repos
+            .public
+            .clone()
+            .unwrap_or_default()
+            .into_iter()
+            .chain(self.get_fork_repositories())
+            .chain(self.get_private_repositories())
+            .collect()
     }
 }
