@@ -33,11 +33,16 @@ use std::path::PathBuf;
 
 /// Parse the argument that gets passed, and run their associated methods
 pub async fn match_arguments(app: &AppArgs, config: Config) -> Result<(), GitError> {
-    let token = app
-        .token
-        .clone()
-        .or_else(|| config.get_github_token().clone())
-        .ok_or(GitError::MissingToken)?;
+    // If we're trying to generate man pages or shell completion, we don't need
+    // a github token
+    let token = match &app.command {
+        Command::Generate { .. } | Command::Config { .. } => "".to_string(),
+        _ => app
+            .token
+            .clone()
+            .or_else(|| config.get_github_token().clone())
+            .ok_or(GitError::MissingToken)?,
+    };
 
     let repos = match app.repository_type {
         RepositoryType::Public => config.get_public_repositories(),
