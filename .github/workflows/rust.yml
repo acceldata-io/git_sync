@@ -77,13 +77,32 @@ jobs:
       - name: Install cargo-audit
         run: cargo install cargo-auditable cargo-audit
 
-      - name: Build release binary
-        run: cargo auditable build --release --target ${{ matrix.target }}
-      - name: Run tests
-        run: cargo test --verbose --target ${{ matrix.target }}
+      - name: Build release binary, manpages, shell completion
+        run: |
+          cargo auditable build --release --target ${{ matrix.target }}
+          cargo test --release --verbose --target ${{ matrix.target }}
+          mkdir -p man
+          mkdir -p shell_completion
+          cargo run -- generate --kind man --out man/ 
+          cargo run -- generate --kind bash --out shell_completion/
+          cargo run -- generate --kind fish --out shell_completion/
+          cargo run -- generate --kind zsh --out shell_completion/
+
+      - name: Package release assets
+        run: |
+          mkdir -p dist
+          TARBALL="git_sync-${{ matrix.target }}.tar.gz"
+          tar -czvf dist/$TARBALL \
+            target/${{matrix.target}}/release/git_sync \
+            README.md \
+            LICENSE \
+            THIRDPARTY \
+            man \
+            shell_completion
+
       - name: Upload release assets
         uses: softprops/action-gh-release@v2
         with:
-          files: target/${{ matrix.target }}/release/git_sync
+          files: dist/git_sync-${{matrix.target}}.tar.gz
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
