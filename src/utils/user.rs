@@ -19,6 +19,7 @@ under the License.
 use std::process::Command;
 
 /// Hold information about the git user
+#[allow(dead_code)]
 #[derive(Debug)]
 pub struct UserDetails {
     /// Name of the user

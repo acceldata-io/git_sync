@@ -45,6 +45,7 @@ pub enum GitError {
 
     #[error("No such branch: {0}")]
     NoSuchBranch(String),
+    #[allow(dead_code)]
     #[error("No such tag: {0}")]
     NoSuchTag(String),
 

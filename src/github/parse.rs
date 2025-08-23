@@ -166,7 +166,7 @@ pub async fn match_arguments(app: &AppArgs, config: Config) -> Result<(), GitErr
                 } else if let Some(repository) = repository {
                     let out = client
                         .generate_release_notes(
-                            &repository,
+                            repository,
                             &create_cmd.base,
                             &create_cmd.previous_release,
                         )
@@ -174,7 +174,6 @@ pub async fn match_arguments(app: &AppArgs, config: Config) -> Result<(), GitErr
                     println!("{out:#?}");
                 }
             }
-            _ => {}
         },
         Command::Config { file, force } => {
             generate_config(file, *force)?;

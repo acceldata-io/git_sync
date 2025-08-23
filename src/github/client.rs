@@ -29,11 +29,9 @@ use std::collections::HashMap;
 use std::collections::HashSet;
 
 use tabled::{
-    Table,
     builder::Builder,
     settings::{
-        Alignment, Padding, Panel,
-        panel::Header,
+        Alignment, Padding,
         style::{HorizontalLine, Style},
     },
 };
@@ -267,6 +265,7 @@ impl GithubClient {
         Ok(sha)
     }
     /// Get the sha of a tag
+    #[allow(dead_code)]
     async fn get_tag_sha(&self, url: &str, tag: &str) -> Result<String, GitError> {
         let info = get_repo_info_from_url(url)?;
         let (owner, repo) = (info.owner, info.repo_name);
@@ -575,7 +574,6 @@ impl GithubClient {
             }
             page += 1;
         }
-        let component_upper_bracket = format!("[{}", repo.to_uppercase());
         let component_upper = repo.to_uppercase();
         let mut c = repo.chars();
         let capitalized = match c.next() {

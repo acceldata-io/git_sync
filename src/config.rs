@@ -34,12 +34,14 @@ pub struct Config {
     #[serde(default)]
     pub github: GithubConfig,
 
+    #[allow(dead_code)]
     #[serde(default)]
     pub git: GitConfig,
 
     #[serde(default)]
     pub repos: RepoConfig,
 
+    #[allow(dead_code)]
     #[serde(default)]
     pub info: InfoConfig,
 
@@ -59,6 +61,7 @@ pub struct GithubConfig {
 }
 
 /// Options for git. This may be removed
+#[allow(dead_code)]
 #[derive(Deserialize, Default)]
 pub struct GitConfig {
     pub default_directory: Option<PathBuf>,
@@ -66,6 +69,7 @@ pub struct GitConfig {
     pub owner: Option<String>,
 }
 /// This should probably be moved to git config
+#[allow(dead_code)]
 #[derive(Debug, Deserialize, Default)]
 pub struct InfoConfig {
     pub name: Option<String>,
@@ -83,6 +87,7 @@ impl Config {
     /// Create a new config from an optional path. If None, then it tries to load the config.
     /// If it can't be loaded, the default values are loaded, which probably won't work as
     /// expected.
+    #[allow(dead_code)]
     pub fn new(path: &Option<PathBuf>) -> Result<Self, GitError> {
         if let Some(config_path) = path {
             Ok(Config::from_file(config_path)?)
@@ -91,6 +96,7 @@ impl Config {
         }
     }
     /// Load config from an existing toml file.
+    #[allow(dead_code)]
     pub fn from_file(path: &Path) -> Result<Self, GitError> {
         let config_str = fs::read_to_string(path)?;
         match toml::from_str(&config_str) {
@@ -135,6 +141,7 @@ impl Config {
     }
     /// Get git information about the current user, first from the environment,
     /// then from the toml configuration, and as a last resort, from git itself.
+    #[allow(dead_code)]
     pub fn get_user_info(&self) -> Option<UserDetails> {
         let name = if let Ok(name) = std::env::var("GIT_USER") {
             Some(name)
@@ -154,6 +161,7 @@ impl Config {
     }
 
     /// Get the repo owner
+    #[allow(dead_code)]
     pub fn get_owner(&self) -> Option<String> {
         if let Ok(name) = std::env::var("GIT_OWNER") {
             return Some(name);
