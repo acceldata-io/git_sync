@@ -43,6 +43,7 @@ jobs:
   test:
     runs-on: ubuntu-latest
     name: Build and test
+    if: github.event_name != 'release'
     steps:
       - uses: actions/checkout@v4
       - name: Set up Rust
@@ -73,12 +74,14 @@ jobs:
         with:
           toolchain: stable
           components: rustfmt
-          targets: ${{ matrix.target }}
+          target: ${{ matrix.target }}
       - name: Install cargo-audit
         run: cargo install cargo-auditable cargo-audit
 
       - name: Build release binary
         run: cargo auditable build --release --target ${{ matrix.target }}
+      - name: Run tests
+        run: cargo test --verbose --target ${{ matrix.target }}
       - name: Upload release assets
         uses: softprops/action-gh-release@v2
         with:
