@@ -92,8 +92,9 @@ jobs:
         run: |
           mkdir -p dist
           TARBALL="git_sync-${{ matrix.target }}.tar.gz"
+          cp target/${{matrix.target}}/release/git_sync .
           tar -czvf dist/$TARBALL \
-            target/${{matrix.target}}/release/git_sync \
+            git_sync \
             README.md \
             LICENSE \
             THIRDPARTY \
