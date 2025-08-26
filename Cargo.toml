@@ -35,6 +35,10 @@ tabled = {version = "0.20", features = ["ansi", "macros","std"]}
 clap_mangen = "0.2.29"
 clap_complete = "4.5.57"
 iana-time-zone = "0.1.63"
+reqwest = { version = "0.12.23", default-features = false, features = ["json", "rustls-tls"]}
+rustls = {version = "0.23", features = ["aws-lc-rs", "zlib"] }
+aws-lc-rs = "1.13.3"
+temp-dir = "0.1.16"
 
 [dev-dependencies]
 httpmock = { version = "0.7.0" }

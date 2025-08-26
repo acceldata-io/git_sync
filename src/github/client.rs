@@ -16,18 +16,24 @@ KIND, either express or implied.  See the License for the
 specific language governing permissions and limitations
 under the License.
 */
-use chrono::{DateTime, Utc};
+use crate::config::Config;
+use crate::error::GitError;
+use crate::utils::repo::{CheckResult, http_to_ssh_repo};
+use crate::utils::repo::{RepoChecks, RepoInfo, TagInfo, TagType, get_repo_info_from_url};
+use chrono::{DateTime, Duration, Utc};
+use chrono::{Local, TimeZone};
 use futures::FutureExt;
 use futures::StreamExt;
 use futures::future::try_join;
 use futures::stream::FuturesUnordered;
 use octocrab::Octocrab;
-use octocrab::models::repos::ReleaseNotes;
+use octocrab::models::repos::{ReleaseNotes, Tag};
 use octocrab::params::repos::Reference;
 use regex::Regex;
+use reqwest::Client;
 use std::collections::HashMap;
 use std::collections::HashSet;
-
+use std::process::Command;
 use tabled::{
     builder::Builder,
     settings::{
@@ -35,40 +41,39 @@ use tabled::{
         style::{HorizontalLine, Style},
     },
 };
+use temp_dir::TempDir;
 
-use crate::error::GitError;
-use crate::utils::repo::CheckResult;
-use crate::utils::repo::{RepoChecks, RepoInfo, get_repo_info_from_url};
-
-use crate::handle_api_response;
+use crate::{handle_api_response, handle_futures_unordered};
+use serde_json::json;
 
 /// Contains information about tags for a forked repo, its parent,
 /// and the tags that are missing from the fork
 pub struct ComparisonResult {
     /// All tags found in the forked repository
-    pub fork_tags: Vec<String>,
+    pub fork_tags: Vec<Tag>,
     /// All tags found in the parent repository
-    pub parent_tags: Vec<String>,
+    pub parent_tags: Vec<Tag>,
     /// All tags missing in the forked repository
-    pub missing_in_fork: Vec<String>,
+    pub missing_in_fork: Vec<(String, String)>,
 }
 
 /// Github api entry point
 pub struct GithubClient {
     /// Octocrab client. This can be trivially cloned
     pub octocrab: Octocrab,
-    //pub name: String,
-    //pub email: String,
+    token: String,
 }
 
 impl GithubClient {
-    pub fn new(github_token: String) -> Result<Self, GitError> {
+    pub fn new(github_token: String, _config: &Config) -> Result<Self, GitError> {
         let octocrab = Octocrab::builder()
-            .personal_token(github_token)
+            .personal_token(github_token.clone())
             .build()
             .map_err(GitError::GithubApiError)?;
-
-        Ok(Self { octocrab })
+        Ok(Self {
+            octocrab,
+            token: github_token,
+        })
     }
     /// Get the parent repository of a github repository.
     pub async fn get_parent_repo(&self, url: &str) -> Result<RepoInfo, GitError> {
@@ -92,9 +97,9 @@ impl GithubClient {
         })
     }
     /// Get all tags for a repository
-    pub async fn get_tags(&self, url: &str) -> Result<Vec<String>, GitError> {
+    pub async fn get_tags(&self, url: &str) -> Result<Vec<Tag>, GitError> {
         let mut page: u32 = 1;
-        let mut all_tags: Vec<String> = Vec::new();
+        let mut all_tags: Vec<Tag> = Vec::new();
         let per_page = 100;
         let info = get_repo_info_from_url(url)?;
         let (owner, repo) = (info.owner, info.repo_name);
@@ -114,11 +119,321 @@ impl GithubClient {
                 break;
             }
             for tag in items {
-                all_tags.push(tag.name);
+                all_tags.push(tag);
             }
             page += 1;
         }
         Ok(all_tags)
+    }
+
+    /// This can be used to fetch tags in a more api-call efficient way than using the rest api.
+    /// It does mean we have to manually query the graphql endpoint and manually parse the json
+    /// output, rather than having it done for us by octocrab.
+    /// We can't actually get all the information required for an annotated tag, but we can use it
+    /// to distinguish between lightweight and annotated tags
+    pub async fn get_tags_new(&self, url: &str) -> Result<Vec<TagInfo>, GitError> {
+        let client = Client::builder().use_rustls_tls().build()?;
+        let info = get_repo_info_from_url(url)?;
+        let (owner, repo) = (info.owner, info.repo_name);
+        let mut all_tags: Vec<TagInfo> = Vec::new();
+        let mut has_next_page = true;
+        let mut after: Option<String> = None;
+        let per_page = 100;
+        println!("My URL is {url}");
+        let query = r#"
+        query($owner: String!, $repo: String!, $first: Int!, $after: String) {
+            repository(owner: $owner, name: $repo) {
+                parent {
+                    url
+                }
+                refs(refPrefix: "refs/tags/", first: $first, after: $after) {
+                    nodes {
+                        name
+                        target {
+                            __typename
+                            oid
+                            ... on Tag {
+                                message
+                                tagger {
+                                    name
+                                    email
+                                    date
+                                }
+                            }
+                        }
+                    }
+                    pageInfo {
+                        hasNextPage
+                        endCursor
+                    }
+                }
+            }
+        }
+        "#;
+
+        while has_next_page {
+            let variables = json!({
+                "owner": owner,
+                "repo": repo,
+                "first": per_page,
+                "after": after,
+            });
+
+            let res = client
+                .post("https://api.github.com/graphql")
+                .bearer_auth(self.token.clone())
+                .header("User-Agent", "github-client")
+                .json(&json!({ "query": query, "variables": variables }))
+                .send()
+                .await?
+                .json::<serde_json::Value>()
+                .await?;
+
+            let refs = &res["data"]["repository"]["refs"];
+            let nodes = refs["nodes"]
+                .as_array()
+                .ok_or_else(|| GitError::Other("Invalid response structure".to_string()))?;
+
+            for tag in nodes {
+                let name = tag["name"].as_str().unwrap_or("").to_string();
+                let typename = tag["target"]["__typename"]
+                    .as_str()
+                    .unwrap_or("")
+                    .to_string();
+                let sha = tag["target"]["oid"].as_str().unwrap_or("").to_string();
+                let (message, tagger_name, tagger_email, tagger_date, parent_url) =
+                    if typename == "Tag" {
+                        (
+                            tag["target"]["message"].as_str().map(|s| s.to_string()),
+                            tag["target"]["tagger"]["name"]
+                                .as_str()
+                                .map(|s| s.to_string()),
+                            tag["target"]["tagger"]["email"]
+                                .as_str()
+                                .map(|s| s.to_string()),
+                            tag["target"]["tagger"]["date"]
+                                .as_str()
+                                .map(|s| s.to_string()),
+                            res["data"]["repository"]["parent"]["url"]
+                                .as_str()
+                                .map(|s| s.to_string()),
+                        )
+                    } else {
+                        (None, None, None, None, None)
+                    };
+
+                let tag_type = if typename == "Tag" {
+                    TagType::Annotated
+                } else if typename == "Commit" {
+                    TagType::Lightweight
+                } else {
+                    return Err(GitError::Other(format!("Unknown tag type: {typename}")));
+                };
+
+                let ssh_url = http_to_ssh_repo(url)?;
+                all_tags.push(TagInfo {
+                    name,
+                    tag_type,
+                    sha,
+                    message,
+                    tagger_name,
+                    tagger_email,
+                    tagger_date,
+                    parent_url,
+                    ssh_url,
+                });
+            }
+            let page_info = &refs["pageInfo"];
+            has_next_page = page_info["hasNextPage"].as_bool().unwrap_or(false);
+            after = page_info["endCursor"].as_str().map(|s| s.to_string());
+        }
+
+        Ok(all_tags)
+    }
+    pub async fn compare_tags_new(
+        &self,
+        url: &str,
+        parent: &RepoInfo,
+    ) -> Result<Vec<TagInfo>, GitError> {
+        let (fork_tags, parent_tags) =
+            try_join(self.get_tags_new(url), self.get_tags_new(&parent.url)).await?;
+        let fork_tags_set: HashSet<_> = fork_tags.into_iter().collect();
+        let parent_tags_set: HashSet<_> = parent_tags.into_iter().collect();
+
+        println!(
+            "Fork tags: {}\nParent tags: {}",
+            fork_tags_set.len(),
+            parent_tags_set.len()
+        );
+
+        let missing_in_fork: Vec<TagInfo> = parent_tags_set
+            .difference(&fork_tags_set)
+            .cloned()
+            .collect();
+        Ok(missing_in_fork)
+    }
+    /// Sync many tags asynchronously. We can use the github api to sync lightweight tags, but to
+    /// sync annotated tags we need to use git. Unfortunately there's no way around that.
+    pub async fn sync_tags(&self, url: &str) -> Result<(), GitError> {
+        let info = get_repo_info_from_url(url)?;
+        let parent = self.get_parent_repo(url).await?;
+        let (owner, repo) = (info.owner, info.repo_name);
+        let missing: Vec<TagInfo> = self.compare_tags_new(url, &parent).await?;
+        let lightweight: Vec<TagInfo> = missing
+            .iter()
+            .filter(|t| t.tag_type == TagType::Lightweight)
+            .cloned()
+            .collect();
+
+        let annotated: Vec<TagInfo> = missing
+            .iter()
+            .filter(|t| t.tag_type == TagType::Annotated)
+            .cloned()
+            .collect();
+
+        handle_futures_unordered!(
+            lightweight.into_iter().map(|tag| {
+                let owner = owner.clone();
+                let repo = repo.clone();
+                let name = tag.name.clone();
+                (repo, name, owner, tag)
+            }),
+            |repo, name, owner, tag| self.sync_lightweight_tag(&owner, &repo.clone(), &tag).map(|result|(repo, name, result)),
+            (repo, name, result) {
+                match result {
+                    Ok(_) => println!("Successfully synced tag '{name}' in '{repo}'"),
+                    Err(e) => eprintln!("Failed to sync '{name}' for '{repo}': {e}")
+                }
+            }
+        );
+
+        let ssh_url = http_to_ssh_repo(url)?;
+        self.sync_annotated_tags(annotated.as_slice(), &parent.url, &ssh_url)
+            .await?;
+
+        Ok(())
+    }
+    pub async fn sync_all_tags(&self, repositories: Vec<String>) -> Result<(), GitError> {
+        handle_futures_unordered!(
+            repositories.into_iter().map(|url| {
+                let url = url.clone();
+                let info = get_repo_info_from_url(&url).unwrap();
+                let (owner, repo) = (info.owner, info.repo_name);
+                (owner, repo, url)
+            }),
+            |owner, repo , url| self.sync_tags(&url.clone()).map(move |result| (url, owner, repo, result)),
+            (url, owner, repo, result) {
+                match result {
+                    Ok(_) => println!("Successfully synced tags for {owner}/{repo}: {url}"),
+                    Err(e) => eprintln!("Failed to sync tags for repo {owner}/{repo}: {e}"),
+                }
+            }
+        );
+
+        Ok(())
+    }
+    /// Sync lightweight tags from the parent repo to the forked repo. This can be trivially done
+    /// using the github api, so we don't need to call out to
+    pub async fn sync_lightweight_tag(
+        &self,
+        owner: &str,
+        repo: &str,
+        tag: &TagInfo,
+    ) -> Result<(), GitError> {
+        let body = json!({
+            "ref": format!("refs/tags/{}", tag.name),
+            "sha": tag.sha,
+        });
+        let response: Result<serde_json::Value, octocrab::Error> = self
+            .octocrab
+            .clone()
+            .post::<serde_json::Value, _>(format!("/repos/{owner}/{repo}/git/refs"), Some(&body))
+            .await;
+
+        handle_api_response!(
+            response,
+            format!("Unable to sync tag {} in {owner}/{repo}", tag.name),
+            |_| {
+                println!(
+                    "Successfully synced lightweight tag '{}' {owner}/{repo}",
+                    tag.name
+                );
+                Ok::<(), GitError>(())
+            },
+        )?;
+        Ok(())
+    }
+
+    /// Sync all new annotated tags from a forked repo with its parent.
+    pub async fn sync_annotated_tags(
+        &self,
+        tags: &[TagInfo],
+        parent_url: &str,
+        ssh_url: &str,
+    ) -> Result<(), GitError> {
+        if tags.is_empty() {
+            return Ok(());
+        }
+        println!("{tags:#?}");
+
+        // Use a temp directory for the git repository so it's cleaned up automatically
+        let tmp_dir = TempDir::new()
+            .map_err(|e| GitError::Other(format!("Failed to create temp dir: {e}")))?;
+        let tmp = tmp_dir.path();
+        let tmp_str = tmp
+            .to_str()
+            .ok_or_else(|| GitError::Other("Temp dir not valid UTF-8".to_string()))?;
+
+        println!("{parent_url} - {ssh_url}");
+
+        // Clone with the bare minimum information to reduce the amount we download
+        Command::new("git")
+            .args([
+                "clone",
+                "--bare",
+                "--filter=blob:none",
+                "--depth=1",
+                ssh_url,
+                tmp_str,
+            ])
+            .status()?;
+
+        let output = Command::new("git")
+            .args(["-C", tmp_str, "remote", "get-url", "upstream"])
+            .output()?;
+        if output.status.success() {
+            Command::new("git")
+                .args(["-C", tmp_str, "remote", "set-url", "upstream", parent_url])
+                .status()?;
+        } else {
+            Command::new("git")
+                .args(["-C", tmp_str, "remote", "add", "upstream", parent_url])
+                .status()?;
+        }
+
+        // Only fetch the annotated tags that we're interested in adding to our fork.
+        // Lightweight tags can be synced automatically with github
+        let mut fetch_args = vec![
+            "-C",
+            tmp_str,
+            "fetch",
+            "--filter=blob:none",
+            "--depth=1",
+            "upstream",
+        ];
+        for tag in tags {
+            fetch_args.push("tag");
+            fetch_args.push(tag.name.as_str());
+        }
+
+        Command::new("git").args(&fetch_args).status()?;
+
+        // Only push the newly added annotated tags
+        let mut push_args = vec!["-C", tmp_str, "push", "origin"];
+        push_args.extend(tags.iter().map(|tag| tag.name.as_str()));
+
+        Command::new("git").args(&push_args).status()?;
+        Ok(())
     }
 
     /// Compare tags against a repository and its parent
@@ -127,16 +442,27 @@ impl GithubClient {
         fork_url: &str,
         parent_url: &str,
     ) -> Result<ComparisonResult, GitError> {
-        println!("{fork_url} : {parent_url}");
+        let repo_info = get_repo_info_from_url(fork_url)?;
+        let (owner, repo) = (repo_info.owner, repo_info.repo_name);
+
+        let parent = self.get_parent_repo(fork_url).await?;
+
+        println!("{owner}/{repo} : {}/{}", parent.owner, parent.repo_name);
         let (fork_tags, parent_tags) =
-            try_join(self.get_tags(fork_url), self.get_tags(parent_url)).await?;
+            try_join(self.get_tags(fork_url), self.get_tags(&parent.url)).await?;
 
-        let fork_tags_set: HashSet<_> = fork_tags.iter().collect();
-        let parent_tags_set: HashSet<_> = parent_tags.iter().collect();
+        let fork_tags_set: HashSet<_> = fork_tags
+            .iter()
+            .map(|t| (t.name.clone(), t.commit.sha.clone()))
+            .collect();
+        let parent_tags_set: HashSet<_> = parent_tags
+            .iter()
+            .map(|t| (t.name.clone(), t.commit.sha.clone()))
+            .collect();
 
-        let missing_in_fork: Vec<_> = parent_tags_set
+        let missing_in_fork: Vec<(String, String)> = parent_tags_set
             .difference(&fork_tags_set)
-            .map(|&s| s.to_string())
+            .map(|(name, sha)| (name.to_string(), sha.to_string()))
             .collect();
 
         Ok(ComparisonResult {
@@ -169,8 +495,8 @@ impl GithubClient {
                 "\nTags missing in fork: {}",
                 comparison.missing_in_fork.len()
             );
-            for tag in &comparison.missing_in_fork {
-                println!(" - {tag}");
+            for (name, _) in &comparison.missing_in_fork {
+                println!(" - {name}");
             }
         } else {
             println!("{repo} up to date");
@@ -180,28 +506,29 @@ impl GithubClient {
     }
     /// Get a diff of all configured repositories tags, compared against their parent.
     pub async fn diff_all_tags(&self, repos: Vec<String>) -> Result<(), GitError> {
-        let mut futures = FuturesUnordered::new();
+        //let mut futures = FuturesUnordered::new();
         let repositories: Vec<Result<RepoInfo, _>> = repos
             .iter()
             .map(|url| get_repo_info_from_url(url))
             .collect();
-        for repo in repositories.into_iter().flatten() {
-            let url = repo.url.clone();
-            let owner = repo.owner.clone();
-            let repo = repo.repo_name.clone();
-            futures.push(async move {
-                let result = self.diff_tags(&url).await;
-                (owner, repo, result)
-            });
-        }
-        while let Some((owner, repo, result)) = futures.next().await {
-            match result {
-                Ok(()) => println!("OK: {owner}/{repo}"),
-                Err(e) => eprintln!("FAILED: {owner}/{repo}: {e}"),
+        handle_futures_unordered!(
+            repositories.into_iter().flatten().map(|repo|{
+                let url = repo.url.clone();
+                let owner = repo.owner.clone();
+                let repo_name = repo.repo_name.clone();
+                (owner, repo_name, url)
+            }),
+            |owner, repo, url| self.diff_tags(&url).map(|result| (owner, repo, result)),
+            (owner, repo, result) {
+                match result {
+                    Ok(()) => println!("Ok: {owner}/{repo}"),
+                    Err(e) => eprintln!("Error: {owner}/{repo}: {e}"),
+                }
             }
-        }
+        );
         Ok(())
     }
+
     /// Sync a single repository with its parent repository.
     pub async fn sync_fork(&self, url: &str) -> Result<(), GitError> {
         let info = get_repo_info_from_url(url)?;
@@ -500,6 +827,39 @@ impl GithubClient {
         Ok(())
     }
 
+    pub async fn create_release(
+        &self,
+        url: &str,
+        current_tag: &str,
+        previous_tag: &str,
+        release_name: Option<&str>,
+    ) -> Result<(), GitError> {
+        let info = get_repo_info_from_url(url)?;
+        let (owner, repo) = (info.owner, info.repo_name);
+
+        let release_notes = self
+            .generate_release_notes(url, current_tag, previous_tag)
+            .await?;
+
+        let name = if let Some(release_name) = release_name {
+            release_name.to_string()
+        } else {
+            current_tag.to_string()
+        };
+        println!("This is the current name: {name}");
+        self.octocrab
+            .clone()
+            .repos(&owner, &repo)
+            .releases()
+            .create(current_tag)
+            .name(&name)
+            .body(&release_notes.body)
+            .send()
+            .await?;
+
+        Ok(())
+    }
+
     /// Generate release notes for a particular releaese. It grabs all the commits present in `tag`
     /// that are newer than the latest commit in `previous_tag`.
     /// This needs to be cleaned up, it is a bit of a mess right now.
@@ -518,7 +878,7 @@ impl GithubClient {
             .repos(&owner, &repo)
             .get_ref(&Reference::Tag(previous_tag.to_string()))
             .await?;
-        let a = match tag_info.object {
+        let tag_sha = match tag_info.object {
             octocrab::models::repos::Object::Tag { sha, .. } => sha,
             octocrab::models::repos::Object::Commit { sha, .. } => sha,
             _ => "".to_string(),
@@ -531,7 +891,7 @@ impl GithubClient {
             .repos(&owner, &repo)
             .list_commits()
             .per_page(1)
-            .sha(a)
+            .sha(tag_sha)
             .send()
             .await?;
         if let Some(commit) = c.items.first() {
@@ -541,7 +901,9 @@ impl GithubClient {
                 .as_ref()
                 .map(|c| {
                     if let Some(d) = c.date {
-                        date = d;
+                        // Set the oldest commits we're going to look for to just a little bit
+                        // after the most recent commit in the old tag, so that we get no overlap
+                        date = d + Duration::days(1);
                     } else {
                         eprintln!("Can't get date of commit, assume things are broken");
                     }
@@ -574,7 +936,6 @@ impl GithubClient {
             }
             page += 1;
         }
-        let component_upper = repo.to_uppercase();
         let mut c = repo.chars();
         let capitalized = match c.next() {
             None => String::new(),
@@ -584,20 +945,32 @@ impl GithubClient {
         let mut odp_changes = Vec::new();
         let mut component_match = Vec::new();
         let mut other = Vec::new();
+
+        println!("Upper case: {}", repo.to_ascii_uppercase());
+        let re = Regex::new(&format!("{}-[0-9]+", repo.to_ascii_uppercase()))?;
+        let cve = Regex::new(r"OSV|CVE")?;
+        let odp = Regex::new(r"ODP-[0-9]*")?;
+
         for s in &new_commits {
             let s_upper = s.to_ascii_uppercase();
-            if s_upper.contains("OSV") {
+            if cve.is_match(&s_upper) {
                 vulnerabilities.push(s.clone());
-            } else if s_upper.contains("ODP") {
-                odp_changes.push(s.clone());
-            } else if s_upper.contains(&component_upper) {
+            // We don't want to match not upper case names for components, so take the line as is
+            } else if re.is_match(s) {
                 component_match.push(s.clone());
+            } else if odp.is_match(&s_upper) {
+                odp_changes.push(s.clone());
             } else {
                 other.push(s.clone());
             }
         }
 
+        let mut body_header = tag.replace("-tag", "");
+        body_header = body_header.replace("ODP-", "");
+        body_header = format!("# Release Notes for {capitalized} {body_header}");
+
         let mut body_commits: Vec<String> = Vec::with_capacity(new_commits.len() + 10);
+        body_commits.push(body_header.clone());
         if !odp_changes.is_empty() {
             body_commits.push("### ODP Changes".to_string());
             for commit in odp_changes {
@@ -624,12 +997,10 @@ impl GithubClient {
         }
 
         let body = body_commits.join("\n");
-        let mut name = tag.replace("-tag", "");
-        name = name.replace("ODP-", "");
-        name = format!("# Release Notes for {capitalized} {name}");
-        println!("{name}");
-        println!("{body}");
-        let notes: ReleaseNotes = ReleaseNotes { name, body };
+        let notes: ReleaseNotes = ReleaseNotes {
+            name: body_header,
+            body,
+        };
 
         Ok(notes)
     }
@@ -809,7 +1180,7 @@ impl GithubClient {
     /// Get branches that are older than a certain number of days
     /// A blacklist should be passed to ignore certain branches, since some of them are static and
     /// will never change.
-    async fn get_old_branches(
+    pub async fn get_old_branches(
         &self,
         url: &str,
         days_ago: i64,
@@ -885,6 +1256,22 @@ impl GithubClient {
             .collect();
 
         Ok(old_branches)
+    }
+    /// Get the number of api calls left at the moment. Generally, the maximum number is 5000 in
+    /// one hour.
+    pub async fn get_rate_limit(&self) -> Result<(), GitError> {
+        let rate = self.octocrab.clone().ratelimit().get().await?.rate;
+
+        let (remaining, limit) = (rate.remaining, rate.limit);
+
+        let reset_time = Utc
+            .timestamp_opt(rate.reset.try_into().unwrap(), 0)
+            .unwrap();
+        let local_time = reset_time.with_timezone(&Local).format("%H:%M %Y-%m-%d");
+
+        let time_zone = iana_time_zone::get_timezone()?;
+        println!("Rate limit: {remaining}/{limit} remaining. Resets at {local_time} {time_zone}");
+        Ok(())
     }
 }
 

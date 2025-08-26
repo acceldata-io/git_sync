@@ -29,7 +29,7 @@ use clap_complete::{
 use clap_mangen::Man;
 use regex::Regex;
 use std::fs::File;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 /// Parse the argument that gets passed, and run their associated methods
 pub async fn match_arguments(app: &AppArgs, config: Config) -> Result<(), GitError> {
@@ -50,9 +50,16 @@ pub async fn match_arguments(app: &AppArgs, config: Config) -> Result<(), GitErr
         RepositoryType::Fork => config.get_fork_repositories(),
         RepositoryType::All => config.get_all_repositories(),
     };
-    let client = GithubClient::new(token.to_string())?;
 
-    println!("{repos:#?}");
+    let client = GithubClient::new(token.to_string(), &config)?;
+    if !token.is_empty() {
+        client.get_rate_limit().await?;
+        /*let t = client
+            .compare_tags_new("https://github.com/acceldata-io/kudu")
+            .await?;
+        println!("{t:#?}");
+        */
+    }
     match &app.command {
         Command::Tag { cmd, repository } => match cmd {
             TagCommand::Compare(compare_cmd) => {
@@ -86,6 +93,15 @@ pub async fn match_arguments(app: &AppArgs, config: Config) -> Result<(), GitErr
                     client.delete_all_tags(&delete_cmd.tag, &repos).await?
                 } else if let Some(repository) = repository {
                     client.delete_tag(repository, &delete_cmd.tag).await?
+                } else {
+                    return Err(GitError::MissingRepositoryName);
+                }
+            }
+            TagCommand::Sync(sync_cmd) => {
+                if sync_cmd.all {
+                    client.sync_all_tags(repos).await?
+                } else if let Some(repository) = repository {
+                    client.sync_tags(repository).await?
                 } else {
                     return Err(GitError::MissingRepositoryName);
                 }
@@ -169,14 +185,22 @@ pub async fn match_arguments(app: &AppArgs, config: Config) -> Result<(), GitErr
                 if create_cmd.all {
                     {}
                 } else if let Some(repository) = repository {
-                    let out = client
+                    /*let out = client
                         .generate_release_notes(
                             repository,
-                            &create_cmd.base,
+                            &create_cmd.current_release,
                             &create_cmd.previous_release,
                         )
-                        .await;
-                    println!("{out:#?}");
+                        .await?;
+                    */
+                    client
+                        .create_release(
+                            repository,
+                            &create_cmd.current_release,
+                            &create_cmd.previous_release,
+                            Some("Kudu - ODP-3.3.6.2-1"),
+                        )
+                        .await?;
                 }
             }
         },
@@ -215,13 +239,13 @@ pub async fn match_arguments(app: &AppArgs, config: Config) -> Result<(), GitErr
 }
 
 /// Helper to write manpages
-fn write_man(cmd: &mut clap::Command, out_dir: &PathBuf, name: &str) {
+fn write_man(cmd: &mut clap::Command, out_dir: &Path, name: &str) {
     let man = Man::new(cmd.clone());
     let mut file = File::create(out_dir.join(name)).unwrap();
     man.render(&mut file).unwrap();
 }
 
-/// Generate manpages for all subcommands
+/// Generate manpages for all subcommands. Otherwise we only get a manpage for the root command.
 fn generate_manpages(mut cmd: clap::Command, out_dir: &PathBuf, parent: Option<String>) {
     let name = if let Some(parent) = parent {
         format!("git_sync-{parent}.1")
@@ -230,11 +254,11 @@ fn generate_manpages(mut cmd: clap::Command, out_dir: &PathBuf, parent: Option<S
     };
     write_man(&mut cmd, out_dir, &name);
 
-    for sub in cmd.get_subcommands() {
-        if sub.is_hide_set() {
+    for subcommand in cmd.get_subcommands() {
+        if subcommand.is_hide_set() {
             continue;
         }
-        let sub_name = sub.get_name().to_string().replace('_', "-");
-        generate_manpages(sub.clone(), out_dir, Some(sub_name));
+        let sub_name = subcommand.get_name().to_string().replace('_', "-");
+        generate_manpages(subcommand.clone(), out_dir, Some(sub_name));
     }
 }

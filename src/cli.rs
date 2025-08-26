@@ -119,6 +119,19 @@ pub struct DeleteTagCommand {
     pub all: bool,
 }
 
+#[derive(Args, Clone, Debug)]
+#[command(group(
+    ArgGroup::new("target")
+    .required(true)
+    .args(&["all", "repository"])
+))]
+pub struct SyncTagCommand {
+    #[arg(short, long, required = false)]
+    pub repository: Option<String>,
+    #[arg(short, long, default_value_t = false)]
+    pub all: bool,
+}
+
 /// Sync a repository. If the repository is already up to date, no error is reported.
 #[derive(Args, Clone, Debug)]
 #[command(group(
@@ -243,13 +256,17 @@ pub struct CreateBranchCommand {
 pub struct CreateReleaseCommand {
     /// The tag or branch to base the release off of
     #[arg(short, long, required = true)]
-    pub base: String,
+    pub current_release: String,
     /// The previous release tag or branch. This is used to generate the changelog
     #[arg(short, long, required = true)]
     pub previous_release: String,
     /// The repository for which to create the release
     #[arg(short, long, required = false)]
     pub repository: Option<String>,
+
+    /// The name of the release. If not specified, the tag name will be used
+    #[arg(short, long, required = false)]
+    pub release_name: Option<String>,
 
     /// Set this release to the latest
     #[arg(short, long, default_value_t = MakeLatest::True)]
@@ -261,6 +278,10 @@ pub struct CreateReleaseCommand {
     /// Create this release for all configured repositories
     #[arg(short, long, default_value_t = false)]
     pub all: bool,
+
+    /// Disable release note generation. This decreases the number of api calls
+    #[arg(short, long, default_value_t = false)]
+    pub no_release_notes: bool,
 }
 
 /// All valid commands concerning releases
@@ -302,6 +323,8 @@ pub enum TagCommand {
     Create(CreateTagCommand),
     /// Delete a tag
     Delete(DeleteTagCommand),
+    /// Sync tags for a forked repository with its parent
+    Sync(SyncTagCommand),
 }
 
 /// Define all the valid commands for acting on repositories

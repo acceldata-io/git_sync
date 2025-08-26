@@ -18,6 +18,8 @@ under the License.
 */
 use crate::error::GitError;
 use regex::Regex;
+use serde::{Deserialize, Serialize};
+use std::hash::{Hash, Hasher};
 
 /// Hold basic information about a github url
 #[derive(Debug)]
@@ -30,6 +32,43 @@ pub struct RepoInfo {
     pub url: String,
     /// The main branch of the repository, if known
     pub main_branch: Option<String>,
+}
+
+/// Struct for holding tag information.
+/// This is for both annotated and lightweight tags.
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct TagInfo {
+    pub name: String,
+    pub tag_type: TagType,
+    pub sha: String,
+    pub message: Option<String>,
+    pub tagger_name: Option<String>,
+    pub tagger_email: Option<String>,
+    pub tagger_date: Option<String>,
+    pub parent_url: Option<String>,
+    pub ssh_url: String,
+}
+
+/// Implements checking for equality based on the tag name only. This is needed for
+/// Taginfo to be used in a HashSet
+impl PartialEq for TagInfo {
+    fn eq(&self, other: &Self) -> bool {
+        self.name == other.name
+    }
+}
+impl Eq for TagInfo {}
+
+/// Implements hashing for name only. This is needed to use TagInfo in a HashSet
+impl Hash for TagInfo {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.name.hash(state);
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq, Hash, Clone)]
+pub enum TagType {
+    Annotated,
+    Lightweight,
 }
 
 /// A holder for things that can be checked for a repository
@@ -77,6 +116,12 @@ pub fn get_repo_info_from_url(url: &str) -> Result<RepoInfo, GitError> {
         }
     }
     Err(GitError::InvalidRepository(url.to_string()))
+}
+
+pub fn http_to_ssh_repo(url: &str) -> Result<String, GitError> {
+    let repo_info = get_repo_info_from_url(url)?;
+    let (owner, repo) = (repo_info.owner, repo_info.repo_name);
+    Ok(format!("git@github.com:{owner}/{repo}.git"))
 }
 
 #[cfg(test)]

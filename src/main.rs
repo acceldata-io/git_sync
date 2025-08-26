@@ -27,9 +27,19 @@ use cli::*;
 use config::Config;
 use error::GitError;
 use github::parse;
-
+use rustls::crypto::aws_lc_rs;
 #[tokio::main]
 async fn main() -> Result<(), GitError> {
+    // This needs to be here to make sure we're using aws-lc-rs.
+    // aws-lc-rs is actively being developed.
+    // One or two crates default to ring, so we override it here.
+    let provider = aws_lc_rs::default_provider().install_default();
+    if provider.is_err() {
+        return Err(GitError::Other(
+            "Failed to install AWS-LC-RS as default TLS provider".to_string(),
+        ));
+    }
+
     let args = parse_args();
 
     let config = Config::new(&args.file)?;

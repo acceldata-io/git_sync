@@ -67,6 +67,11 @@ pub enum GitError {
     IoError(#[from] std::io::Error),
     #[error("JSON error: {0}")]
     JsonError(#[from] serde_json::Error),
+    #[error("Timezone error: {0}")]
+    GetTimezoneError(#[from] iana_time_zone::GetTimezoneError),
+
+    #[error("reqwest error: {0}")]
+    ReqwestError(#[from] reqwest::Error),
 
     #[error("Error: {0}")]
     Other(String),

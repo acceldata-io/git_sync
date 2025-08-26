@@ -22,10 +22,33 @@ under the License.
 /// This is used for api calls that don't already have a high level
 /// function provided by Octocrab.
 ///
-/// #arguments
+/// # Parameters
 /// * `$response` -- The result to match.
 /// * `$context` -- A string describing the context of what you're trying to handle, for logging.
 /// * `$ok` -- The closure to run if the result is Ok.
+///
+/// # Returns
+/// Returns the result of `$ok` if successful, or a `GitError` if the API call fails.
+/// You can use '?' to propagate the error to your function.
+///
+/// ```rust
+/// async fn sync_fork(owner: &str, repo: &str, parent_owner: &str, parent_repo: &str, main_branch: &str) -> Result<(), GitError> {
+///     let octocrab = octocrab::instance();
+///     let body = serde_json::json!({"branch": main_branch.to_string()});
+///     let response: Result<serde_json::Value, octocrab::Error> = octocrab
+///         .post(format!("/repos/{owner}/{repo}/merge-upstream"), Some(&body))
+///         .await;
+///
+///     handle_api_response!(
+///         response,
+///         format!("Unable to sync {owner}/{repo} with {parent_owner}/{parent_repo}"),
+///         |_| {
+///             println!("Successfully synced {owner}/{repo} with {parent_owner}/{parent_repo}");
+///             Ok::<(), GitError>(())
+///         })?;
+///        Ok(())
+///    }
+/// ```
 #[macro_export]
 macro_rules! handle_api_response {
     (
@@ -48,4 +71,62 @@ macro_rules! handle_api_response {
             }
         }
     };
+}
+
+/// Handles reducing some of the boiler plate for defining these unordered futures.
+///
+/// # Parameters
+/// `$iter`` is some iterable collection
+/// `|$($arg:ident),*| $future:expr`: Closure-like syntax where you specify the variable(s)
+/// `($($pat:pat),*) $body:block`: Pattern(s) to destructure the resulting tuple from the completed future
+/// and a block of code to process each result.
+///
+/// # Example
+/// ```rust
+/// handle_futures_unordered!(
+///     vec.iter().map(|x| (x.clone(),)), |x| async move {
+///         (x, async_function(x).await)
+///     },
+///     (x, result) {
+///         match result {
+///             Ok(val) => println!("Success: {x}: {val}"),
+///             Err(e) => eprintln!("Error: {x}: {e}"),
+///         }
+///     }
+/// );
+/// pub async fn sync_all_forks(&self, repos: Vec<String>) -> Result<(), GitError> {
+///     handle_futures_unordered!(
+///         repos.iter().map(|repo| (repo.clone(),)),
+///         |repo| self.sync_fork(&repo),
+///         (repo, result) {
+///             match result {
+///                 Ok(_) => println!("Successfully synced fork: {}", repo),
+///                 Err(e) => eprintln!("Error syncing fork {}: {}", repo, e),
+///             }
+///         }
+///     );
+/// }
+///
+/// ```
+/// # Notes
+/// - The macro requires the `futures` crate.
+/// - The async block must return a tuple matching the destructuring pattern used in the `while let Some(...)`.
+/// - All generated futures must have the same return type.
+///
+/// # See also
+/// - [`FuturesUnordered`](https://docs.rs/futures/latest/futures/stream/struct.FuturesUnordered.html)
+#[macro_export]
+macro_rules! handle_futures_unordered {
+    (
+        $iter:expr, |$($arg:ident),*| $future:expr, ($($pattern:pat),*) $body:expr
+    ) => {{
+        let mut futures = ::futures::stream::FuturesUnordered::new();
+        for ($($arg),*) in $iter {
+            futures.push(async move {$future.await});
+        }
+        while let Some(($($pattern),*)) = futures.next().await {
+            $body
+        }
+
+    }};
 }
