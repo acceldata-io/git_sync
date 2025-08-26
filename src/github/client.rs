@@ -437,11 +437,7 @@ impl GithubClient {
     }
 
     /// Compare tags against a repository and its parent
-    pub async fn compare_tags(
-        &self,
-        fork_url: &str,
-        parent_url: &str,
-    ) -> Result<ComparisonResult, GitError> {
+    pub async fn compare_tags(&self, fork_url: &str) -> Result<ComparisonResult, GitError> {
         let repo_info = get_repo_info_from_url(fork_url)?;
         let (owner, repo) = (repo_info.owner, repo_info.repo_name);
 
@@ -482,7 +478,7 @@ impl GithubClient {
             "Comparing tags in {owner}/{repo} and {}/{}",
             parent.owner, parent.repo_name
         );
-        let mut comparison = self.compare_tags(url, &parent.url).await?;
+        let mut comparison = self.compare_tags(url).await?;
         println!(
             "Fork has {} tags, parent has {} tags",
             comparison.fork_tags.len(),
