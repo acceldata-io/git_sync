@@ -53,18 +53,21 @@ pub async fn match_arguments(app: &AppArgs, config: Config) -> Result<(), GitErr
 
     let client = GithubClient::new(token.to_string(), &config)?;
     if !token.is_empty() {
-        client.get_rate_limit().await?;
-        /*let t = client
-            .compare_tags_new("https://github.com/acceldata-io/kudu")
-            .await?;
-        println!("{t:#?}");
-        */
+        let (rest_limit, graphql_limit) =
+            tokio::join!(client.get_rate_limit(), client.get_graphql_limit());
+
+        if rest_limit.is_err() {
+            eprintln!("Warning: Could not fetch REST API rate limit");
+        }
+        if graphql_limit.is_err() {
+            eprintln!("Warning: Could not fetch GraphQL API rate limit");
+        }
     }
     match &app.command {
-        Command::Tag { cmd, repository } => match cmd {
+        Command::Tag { cmd } => match cmd {
             TagCommand::Compare(compare_cmd) => {
                 compare_cmd.validate().map_err(GitError::Other)?;
-
+                let repository = compare_cmd.repository.as_ref();
                 if compare_cmd.all && !repos.is_empty() {
                     client.diff_all_tags(repos).await?
                 } else if compare_cmd.all {
@@ -78,6 +81,8 @@ pub async fn match_arguments(app: &AppArgs, config: Config) -> Result<(), GitErr
             TagCommand::Create(create_cmd) => {
                 let tag = &create_cmd.tag;
                 let branch = &create_cmd.branch;
+                let repository = create_cmd.repository.as_ref();
+
                 if create_cmd.all {
                     client.create_all_tags(tag, branch, repos).await?
                 } else if let Some(repository) = repository {
@@ -89,6 +94,8 @@ pub async fn match_arguments(app: &AppArgs, config: Config) -> Result<(), GitErr
                 }
             }
             TagCommand::Delete(delete_cmd) => {
+                let repository = delete_cmd.repository.as_ref();
+
                 if delete_cmd.all {
                     client.delete_all_tags(&delete_cmd.tag, &repos).await?
                 } else if let Some(repository) = repository {
@@ -98,17 +105,21 @@ pub async fn match_arguments(app: &AppArgs, config: Config) -> Result<(), GitErr
                 }
             }
             TagCommand::Sync(sync_cmd) => {
+                let repository = sync_cmd.repository.as_ref();
+                // By default, this is false
+                let process_annotated_tags = sync_cmd.without_annotated;
                 if sync_cmd.all {
-                    client.sync_all_tags(repos).await?
+                    client.sync_all_tags(process_annotated_tags, repos).await?
                 } else if let Some(repository) = repository {
-                    client.sync_tags(repository).await?
+                    client.sync_tags(repository, process_annotated_tags).await?
                 } else {
                     return Err(GitError::MissingRepositoryName);
                 }
             }
         },
-        Command::Repo { cmd, repository } => match cmd {
+        Command::Repo { cmd } => match cmd {
             RepoCommand::Sync(sync_cmd) => {
+                let repository = sync_cmd.repository.as_ref();
                 if sync_cmd.all {
                     client.sync_all_forks(repos).await?
                 } else if let Some(repository) = repository {
@@ -118,6 +129,7 @@ pub async fn match_arguments(app: &AppArgs, config: Config) -> Result<(), GitErr
                 }
             }
             RepoCommand::Check(check_cmd) => {
+                let repository = check_cmd.repository.as_ref();
                 let (protected, license) = (check_cmd.protected, check_cmd.license);
                 let old_branches = (check_cmd.old_branches, check_cmd.days_ago);
                 let blacklist = config.misc.branch_blacklist.unwrap_or_default();
@@ -127,39 +139,40 @@ pub async fn match_arguments(app: &AppArgs, config: Config) -> Result<(), GitErr
                 } else {
                     None
                 };
+                let checks = &RepoChecks {
+                    protected,
+                    license,
+                    old_branches,
+                    branch_filter: branch_filter.clone(),
+                };
+
                 if check_cmd.all {
-                    client
-                        .check_all_repositories(
-                            repos,
-                            &RepoChecks {
-                                protected,
-                                license,
-                                old_branches,
-                                branch_filter,
-                            },
-                            &blacklist,
-                        )
-                        .await?
+                    let result = client
+                        .check_all_repositories(repos, checks, &blacklist)
+                        .await?;
+                    for res in &result {
+                        let (_, rules, _, repo) = res;
+                        for rule in rules {
+                            rule.print(repo)
+                        }
+                    }
                 } else if let Some(repository) = repository {
-                    client
-                        .check_repository(
-                            repository,
-                            &RepoChecks {
-                                protected,
-                                license,
-                                old_branches,
-                                branch_filter,
-                            },
-                            &blacklist,
-                        )
-                        .await?
+                    let result = client
+                        .check_repository(repository, blacklist, checks)
+                        .await?;
+                    let (_, rules, license, repo) = &result;
+                    for rule in rules {
+                        rule.print(repo);
+                    }
+                    println!("License: {license:?}")
                 } else {
                     return Err(GitError::MissingRepositoryName);
                 }
             }
         },
-        Command::Branch { cmd, repository } => match cmd {
+        Command::Branch { cmd } => match cmd {
             BranchCommand::Create(create_cmd) => {
+                let repository = create_cmd.repository.as_ref();
                 let (base, new) = (
                     create_cmd.base_branch.clone(),
                     create_cmd.new_branch.clone(),
@@ -171,6 +184,7 @@ pub async fn match_arguments(app: &AppArgs, config: Config) -> Result<(), GitErr
                 }
             }
             BranchCommand::Delete(delete_cmd) => {
+                let repository = delete_cmd.repository.as_ref();
                 if delete_cmd.all {
                     client
                         .delete_all_branches(&delete_cmd.branch, &repos)
@@ -180,30 +194,27 @@ pub async fn match_arguments(app: &AppArgs, config: Config) -> Result<(), GitErr
                 }
             }
         },
-        Command::Release { repository, cmd } => match cmd {
+        Command::Release { cmd } => match cmd {
             ReleaseCommand::Create(create_cmd) => {
+                let repository = create_cmd.repository.as_ref();
                 if create_cmd.all {
                     {}
                 } else if let Some(repository) = repository {
-                    /*let out = client
-                        .generate_release_notes(
-                            repository,
-                            &create_cmd.current_release,
-                            &create_cmd.previous_release,
-                        )
-                        .await?;
-                    */
                     client
                         .create_release(
                             repository,
                             &create_cmd.current_release,
                             &create_cmd.previous_release,
-                            Some("Kudu - ODP-3.3.6.2-1"),
+                            create_cmd.release_name.as_deref(),
                         )
                         .await?;
                 }
             }
         },
+        Command::PR { cmd } => {
+            let _ = cmd;
+            todo!()
+        }
         Command::Config { file, force } => {
             generate_config(file, *force)?;
         }
@@ -216,12 +227,15 @@ pub async fn match_arguments(app: &AppArgs, config: Config) -> Result<(), GitErr
             match kind.as_str() {
                 "bash" => {
                     generate_to(Bash, &mut cmd, "git_sync", out_dir)?;
+                    println!("Generated bash completions");
                 }
                 "zsh" => {
                     generate_to(Zsh, &mut cmd, "git_sync", out_dir)?;
+                    println!("Generated zsh completions");
                 }
                 "fish" => {
                     generate_to(Fish, &mut cmd, "git_sync", out_dir)?;
+                    println!("Generated fish completions");
                 }
                 "man" => {
                     let out_dir = out

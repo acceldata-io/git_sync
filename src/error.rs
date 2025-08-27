@@ -28,6 +28,9 @@ pub enum GitError {
     #[error("Upstream not found for fork")]
     NoUpstreamRepo,
 
+    #[error("Date parse error: {0}")]
+    DateParseError(#[from] chrono::ParseError),
+
     #[error("Invalid repository URL: {0}")]
     InvalidRepository(String),
 
@@ -52,12 +55,6 @@ pub enum GitError {
     #[error("TOML parsing error: {0}")]
     TomlError(#[from] toml::de::Error),
 
-    #[error("License missing for {0}")]
-    MissingLicense(String),
-
-    #[error("No main branch protection for {0}")]
-    NoMainBranchProtection(String),
-
     #[error(
         "Missing GitHub token. Please provide a token via --token, GITHUB_TOKEN environment variable, or in your config file."
     )]
@@ -69,9 +66,6 @@ pub enum GitError {
     JsonError(#[from] serde_json::Error),
     #[error("Timezone error: {0}")]
     GetTimezoneError(#[from] iana_time_zone::GetTimezoneError),
-
-    #[error("reqwest error: {0}")]
-    ReqwestError(#[from] reqwest::Error),
 
     #[error("Error: {0}")]
     Other(String),

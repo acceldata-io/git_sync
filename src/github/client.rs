@@ -18,8 +18,11 @@ under the License.
 */
 use crate::config::Config;
 use crate::error::GitError;
-use crate::utils::repo::{CheckResult, http_to_ssh_repo};
-use crate::utils::repo::{RepoChecks, RepoInfo, TagInfo, TagType, get_repo_info_from_url};
+use crate::utils::repo::http_to_ssh_repo;
+use crate::utils::repo::{
+    BranchProtectionRule, Checks, LicenseInfo, RepoChecks, RepoInfo, TagInfo, TagType,
+    get_repo_info_from_url,
+};
 use chrono::{DateTime, Duration, Utc};
 use chrono::{Local, TimeZone};
 use futures::FutureExt;
@@ -30,17 +33,17 @@ use octocrab::Octocrab;
 use octocrab::models::repos::{ReleaseNotes, Tag};
 use octocrab::params::repos::Reference;
 use regex::Regex;
-use reqwest::Client;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::process::Command;
-use tabled::{
+/*use tabled::{
     builder::Builder,
     settings::{
         Alignment, Padding,
         style::{HorizontalLine, Style},
     },
 };
+*/
 use temp_dir::TempDir;
 
 use crate::{handle_api_response, handle_futures_unordered};
@@ -61,7 +64,6 @@ pub struct ComparisonResult {
 pub struct GithubClient {
     /// Octocrab client. This can be trivially cloned
     pub octocrab: Octocrab,
-    token: String,
 }
 
 impl GithubClient {
@@ -70,10 +72,7 @@ impl GithubClient {
             .personal_token(github_token.clone())
             .build()
             .map_err(GitError::GithubApiError)?;
-        Ok(Self {
-            octocrab,
-            token: github_token,
-        })
+        Ok(Self { octocrab })
     }
     /// Get the parent repository of a github repository.
     pub async fn get_parent_repo(&self, url: &str) -> Result<RepoInfo, GitError> {
@@ -130,16 +129,17 @@ impl GithubClient {
     /// It does mean we have to manually query the graphql endpoint and manually parse the json
     /// output, rather than having it done for us by octocrab.
     /// We can't actually get all the information required for an annotated tag, but we can use it
-    /// to distinguish between lightweight and annotated tags
+    /// to distinguish between lightweight and annotated tags. If we don't get any annotated tags,
+    /// we can skip the fairly slow git clone and push process
     pub async fn get_tags_new(&self, url: &str) -> Result<Vec<TagInfo>, GitError> {
-        let client = Client::builder().use_rustls_tls().build()?;
         let info = get_repo_info_from_url(url)?;
         let (owner, repo) = (info.owner, info.repo_name);
         let mut all_tags: Vec<TagInfo> = Vec::new();
         let mut has_next_page = true;
         let mut after: Option<String> = None;
         let per_page = 100;
-        println!("My URL is {url}");
+
+        let octocrab = self.octocrab.clone();
         let query = r#"
         query($owner: String!, $repo: String!, $first: Int!, $after: String) {
             repository(owner: $owner, name: $repo) {
@@ -172,22 +172,17 @@ impl GithubClient {
         "#;
 
         while has_next_page {
-            let variables = json!({
-                "owner": owner,
-                "repo": repo,
-                "first": per_page,
-                "after": after,
+            let payload = json!({
+                "query": query,
+                "variables": {
+                    "owner": owner,
+                    "repo": repo,
+                    "first": per_page,
+                    "after": after,
+                }
             });
 
-            let res = client
-                .post("https://api.github.com/graphql")
-                .bearer_auth(self.token.clone())
-                .header("User-Agent", "github-client")
-                .json(&json!({ "query": query, "variables": variables }))
-                .send()
-                .await?
-                .json::<serde_json::Value>()
-                .await?;
+            let res: serde_json::Value = octocrab.graphql(&payload).await?;
 
             let refs = &res["data"]["repository"]["refs"];
             let nodes = refs["nodes"]
@@ -274,7 +269,7 @@ impl GithubClient {
     }
     /// Sync many tags asynchronously. We can use the github api to sync lightweight tags, but to
     /// sync annotated tags we need to use git. Unfortunately there's no way around that.
-    pub async fn sync_tags(&self, url: &str) -> Result<(), GitError> {
+    pub async fn sync_tags(&self, url: &str, process_annotated: bool) -> Result<(), GitError> {
         let info = get_repo_info_from_url(url)?;
         let parent = self.get_parent_repo(url).await?;
         let (owner, repo) = (info.owner, info.repo_name);
@@ -291,29 +286,56 @@ impl GithubClient {
             .cloned()
             .collect();
 
-        handle_futures_unordered!(
-            lightweight.into_iter().map(|tag| {
-                let owner = owner.clone();
-                let repo = repo.clone();
-                let name = tag.name.clone();
-                (repo, name, owner, tag)
-            }),
-            |repo, name, owner, tag| self.sync_lightweight_tag(&owner, &repo.clone(), &tag).map(|result|(repo, name, result)),
-            (repo, name, result) {
-                match result {
-                    Ok(_) => println!("Successfully synced tag '{name}' in '{repo}'"),
-                    Err(e) => eprintln!("Failed to sync '{name}' for '{repo}': {e}")
+        let lightweight_fut = async {
+            handle_futures_unordered!(
+                lightweight.into_iter().map(|tag| {
+                    let owner = owner.clone();
+                    let repo = repo.clone();
+                    let name = tag.name.clone();
+                    (repo, name, owner, tag)
+                }),
+                |repo, name, owner, tag| self.sync_lightweight_tag(&owner, &repo.clone(), &tag).map(|result|(repo, name, result)),
+                (repo, name, result) {
+                    match result {
+                        Ok(_) => println!("Successfully synced tag '{name}' in '{repo}'"),
+                        Err(e) => eprintln!("Failed to sync '{name}' for '{repo}': {e}")
+                    }
                 }
+            );
+            Ok::<(), GitError>(())
+        };
+        // Run both of these at the same time. Annotated tags are much slower to sync than
+        // ligthweight tags since we need to clone, fetch from upstream, then push.
+        if process_annotated {
+            let ssh_url = http_to_ssh_repo(url)?;
+            let output = tokio::join!(
+                self.sync_annotated_tags(annotated.as_slice(), &parent.url, &ssh_url),
+                lightweight_fut,
+            );
+            let (annotated, lightweight) = output;
+            if annotated.is_err() {
+                eprintln!(
+                    "Failed to sync annotated tags for {owner}/{repo}: {}",
+                    annotated.err().unwrap()
+                );
             }
-        );
-
-        let ssh_url = http_to_ssh_repo(url)?;
-        self.sync_annotated_tags(annotated.as_slice(), &parent.url, &ssh_url)
-            .await?;
+            if lightweight.is_err() {
+                eprintln!(
+                    "Failed to sync lightweight tags for {owner}/{repo}: {}",
+                    lightweight.err().unwrap()
+                );
+            }
+        } else {
+            lightweight_fut.await?;
+        }
 
         Ok(())
     }
-    pub async fn sync_all_tags(&self, repositories: Vec<String>) -> Result<(), GitError> {
+    pub async fn sync_all_tags(
+        &self,
+        process_annotated: bool,
+        repositories: Vec<String>,
+    ) -> Result<(), GitError> {
         handle_futures_unordered!(
             repositories.into_iter().map(|url| {
                 let url = url.clone();
@@ -321,7 +343,7 @@ impl GithubClient {
                 let (owner, repo) = (info.owner, info.repo_name);
                 (owner, repo, url)
             }),
-            |owner, repo , url| self.sync_tags(&url.clone()).map(move |result| (url, owner, repo, result)),
+            |owner, repo , url| self.sync_tags(&url.clone(), process_annotated).map(move |result| (url, owner, repo, result)),
             (url, owner, repo, result) {
                 match result {
                     Ok(_) => println!("Successfully synced tags for {owner}/{repo}: {url}"),
@@ -365,6 +387,9 @@ impl GithubClient {
     }
 
     /// Sync all new annotated tags from a forked repo with its parent.
+    /// Doing this *requires* using git (or some re-implementation of git). Syncing annotated tags
+    /// through the github api with all of its fields, including signing, is currently not
+    /// possible.
     pub async fn sync_annotated_tags(
         &self,
         tags: &[TagInfo],
@@ -645,7 +670,7 @@ impl GithubClient {
             }
         }
     }
-    /// Create all passed branches for each repository provided
+    /// Create the passed branch for each repository provided
     pub async fn create_all_branches(
         &self,
         base_branch: &str,
@@ -761,6 +786,7 @@ impl GithubClient {
         }
         Ok(())
     }
+
     /// Delete the specified tag for a repository
     pub async fn delete_tag(&self, url: &str, tag: &str) -> Result<(), GitError> {
         let info = get_repo_info_from_url(url)?;
@@ -800,6 +826,7 @@ impl GithubClient {
             Err(e) => Err(GitError::Other(format!("Cannot delete {tag}: {e}"))),
         }
     }
+
     /// Delete the specified tag for all configured repositories
     pub async fn delete_all_tags(
         &self,
@@ -823,6 +850,7 @@ impl GithubClient {
         Ok(())
     }
 
+    /// Create a new release for a specific repository. Release notes will also be generated.
     pub async fn create_release(
         &self,
         url: &str,
@@ -908,7 +936,10 @@ impl GithubClient {
                 .unwrap_or_else(|| eprintln!("No commit found"));
         }
 
-        let mut new_commits: Vec<String> = Vec::with_capacity(200);
+        // This is an arbitrary pre-allocation that should speed up pushing to the vec. Most of the
+        // time we can assume that we'll get fewer than 300 commits difference between two
+        // branches/tags. If not, pushing elements after 300 will just take slightly longer.
+        let mut new_commits: Vec<String> = Vec::with_capacity(300);
         loop {
             let commits = octocrab
                 .repos(&owner, &repo)
@@ -1001,245 +1032,176 @@ impl GithubClient {
         Ok(notes)
     }
 
-    /// Determine if a specific branch is protected
-    async fn get_branch_protection(
-        &self,
-        url: &str,
-        branch: &str,
-    ) -> Result<CheckResult, GitError> {
-        let info = get_repo_info_from_url(url)?;
-        let get_url = format!(
-            "/repos/{}/{}/branches/{branch}/protection",
-            info.owner, info.repo_name
-        );
-        let response: Result<serde_json::Value, octocrab::Error> =
-            self.octocrab.clone().get(get_url, None::<&()>).await;
-        handle_api_response!(
-            response,
-            format!(
-                "Unable to get branch protection for {}/{}:{}",
-                info.owner, info.repo_name, branch
-            ),
-            |body: serde_json::Value| {
-                let enabled: bool = body
-                    .get("enabled")
-                    .and_then(|e| e.as_bool())
-                    .unwrap_or(false);
-                Ok(CheckResult::Protected(enabled))
-            },
-        )
-    }
-
-    /// Run the selected checks against a specific repository
-    pub async fn check_repository(
-        &self,
-        url: &str,
-        checks: &RepoChecks,
-        blacklist: &HashSet<String>,
-    ) -> Result<(), GitError> {
-        let info = get_repo_info_from_url(url)?;
-        let (owner, repo) = (info.owner, info.repo_name);
-        let (protected, license, (old, days_ago)) =
-            (checks.protected, checks.license, checks.old_branches);
-
-        println!("Checking repository {owner}/{repo}");
-        let mut futures = FuturesUnordered::new();
-        if protected {
-            let url = info.url.clone();
-            let branch = info
-                .main_branch
-                .clone()
-                .unwrap_or_else(|| "main".to_string());
-            futures.push(
-                async move { self.get_branch_protection(url.as_str(), &branch).await }.boxed(),
-            );
-        }
-
-        if license {
-            let url = info.url.clone();
-            futures.push(async move { self.get_license(url.as_str()).await }.boxed());
-        }
-
-        if old {
-            let url = info.url.clone();
-            futures.push(
-                async move {
-                    self.get_old_branches(
-                        url.as_str(),
-                        days_ago,
-                        blacklist.clone(),
-                        &checks.branch_filter,
-                    )
-                    .await
-                    .map(CheckResult::OldBranches)
-                }
-                .boxed(),
-            )
-        }
-
-        let mut errors = Vec::new();
-        while let Some(result) = futures.next().await {
-            match result {
-                Ok(CheckResult::License(license)) => {
-                    println!("License for {owner}/{repo} is '{license}'")
-                }
-                Ok(CheckResult::Protected(true)) => {
-                    println!("Main branch for {owner}/{repo} is protected")
-                }
-                Ok(CheckResult::Protected(false)) => {
-                    eprintln!("Main branch for {owner}/{repo} is not protected");
-                    errors.push(GitError::NoMainBranchProtection(format!("{owner}/{repo}")));
-                }
-                Ok(CheckResult::OldBranches(branches)) => {
-                    if !branches.is_empty() {
-                        if branches.len() == 1 {
-                            println!(
-                                "Found {} matching old branch in {owner}/{repo}",
-                                branches.len()
-                            );
-                        } else {
-                            println!(
-                                "Found {} matching old branches in {owner}/{repo}",
-                                branches.len()
-                            );
-                        }
-                        let mut builder = Builder::default();
-                        builder.push_record(vec!["Name", "Last Modified"]);
-                        for (name, date) in branches {
-                            builder.push_record(vec![name, date]);
-                        }
-
-                        let mut table = builder.build();
-
-                        table.with(
-                            Style::ascii()
-                                .horizontals([(1, HorizontalLine::inherit(Style::ascii()))]),
-                        );
-                        table.with((Alignment::center(), Padding::new(1, 1, 0, 0)));
-                        println!("{table}");
-                    }
-                }
-                Err(e) => {
-                    eprintln!("Check failed for {owner}/{repo}: {e}");
-                    errors.push(e);
-                }
-            }
-        }
-        if !errors.is_empty() {
-            return Err(GitError::MultipleErrors(errors));
-        }
-        Ok(())
-    }
     /// Run the selected checks against all configured repositories
     pub async fn check_all_repositories(
         &self,
         repositories: Vec<String>,
         checks: &RepoChecks,
         blacklist: &HashSet<String>,
-    ) -> Result<(), GitError> {
+    ) -> Result<Vec<Checks>, GitError> {
         let mut futures = FuturesUnordered::new();
         for repo in repositories {
-            futures.push(async move { self.check_repository(&repo, checks, blacklist).await });
+            futures.push(async move {
+                self.check_repository(&repo, blacklist.clone(), checks)
+                    .await
+            });
         }
 
+        let mut results: Vec<Checks> = Vec::new();
         let mut errors = Vec::new();
         while let Some(result) = futures.next().await {
             match result {
-                Ok(_) => {}
-                Err(e) => {
-                    errors.push(e);
-                }
+                Ok(r) => results.push(r),
+                Err(e) => errors.push(e),
             }
         }
         if !errors.is_empty() {
             Err(GitError::MultipleErrors(errors))
         } else {
-            Ok(())
+            Ok(results)
         }
     }
 
-    /// Get the license for a repository
-    async fn get_license(&self, url: &str) -> Result<CheckResult, GitError> {
-        let info = get_repo_info_from_url(url)?;
-        let content = self
-            .octocrab
-            .clone()
-            .repos(&info.owner, &info.repo_name)
-            .license()
-            .await?;
-        if let Some(license) = content.license {
-            Ok(CheckResult::License(license.name))
-        } else {
-            Err(GitError::MissingLicense(url.to_string()))
-        }
-    }
     /// Get branches that are older than a certain number of days
     /// A blacklist should be passed to ignore certain branches, since some of them are static and
-    /// will never change.
-    pub async fn get_old_branches(
+    /// will never change, nor should they be deleted.
+    pub async fn check_repository(
         &self,
         url: &str,
-        days_ago: i64,
         blacklist: HashSet<String>,
-        branch_filter: &Option<Regex>,
-    ) -> Result<Vec<(String, String)>, GitError> {
+        checks: &RepoChecks,
+    ) -> Result<Checks, GitError> {
         let info = get_repo_info_from_url(url)?;
         let (owner, repo) = (info.owner, info.repo_name);
-        let per_page = 100;
-        let mut page: u32 = 1;
         let octocrab = self.octocrab.clone();
-        let mut all_branches: Vec<String> = Vec::new();
-        loop {
-            let branches = octocrab
-                .repos(&owner, &repo)
-                .list_branches()
-                .per_page(per_page)
-                .page(page)
-                .send()
-                .await?;
+        let (get_branches, days_ago) = checks.old_branches;
+        let get_protection = checks.protected;
+        let get_license = checks.license;
+        let branch_filter = checks.branch_filter.clone();
 
-            all_branches.extend(branches.items.iter().filter_map(|b| {
-                if branch_filter
-                    .as_ref()
-                    .map(|re| re.is_match(b.name.as_str()))
-                    .unwrap_or(true)
-                {
-                    Some(b.name.clone())
-                } else {
-                    None
+        let mut protection_rules: Vec<BranchProtectionRule> = Vec::new();
+        let mut license: Option<LicenseInfo>;
+        // Use a graphql query to drastically reduce the number of api calls (in half) we need to make.
+        // This lets us get the repo name and latest commit date in one call, instead of two.
+        // This makes a huge difference for very large repositories with many branches.
+        let query = r#"
+            query($owner: String!, $repo: String!, $after: String, $getLicenseInfo: Boolean!, $getBranches: Boolean!, $getProtection: Boolean!) {
+                repository(owner: $owner, name: $repo) {
+                    licenseInfo @include(if: $getLicenseInfo) {
+                        name
+                        spdxId
+                        url
+                    }
+                    branchProtectionRules(first: 100) @include(if: $getProtection){
+                        nodes {
+                            pattern
+                            isAdminEnforced
+                            requiresApprovingReviews
+                            requiredApprovingReviewCount
+                            requiresStatusChecks
+                            requiresStrictStatusChecks
+                            requiresConversationResolution
+                            restrictsPushes
+                            restrictsReviewDismissals
+                        }
+                    }
+
+                    refs(refPrefix: "refs/heads/", first: 100, after: $after) @include(if: $getBranches) {
+                        nodes {
+                            name
+                            target {
+                                ... on Commit {
+                                    committedDate
+                                }
+                            }
+                        }
+                        pageInfo {
+                            hasNextPage
+                            endCursor
+                        }
+                    }
                 }
-            }));
-            if branches.items.len() < per_page as usize {
+            }
+        "#;
+
+        let mut branches = HashMap::<String, DateTime<Utc>>::new();
+
+        // Needed for the graphql query
+        let mut after: Option<String> = None;
+        loop {
+            let payload = serde_json::json!({
+                "query": query,
+                "variables": {
+                    "owner": owner,
+                    "repo": repo,
+                    "after": after,
+                    "getBranches": get_branches,
+                    "getProtection": get_protection,
+                    "getLicenseInfo": get_license,
+                }
+            });
+
+            let response: serde_json::Value = octocrab.graphql(&payload).await?;
+            let refs = &response["data"]["repository"]["refs"];
+            license = response["data"]["repository"]["licenseInfo"]
+                .as_object()
+                .and_then(|license| {
+                    serde_json::from_value::<LicenseInfo>(serde_json::Value::Object(
+                        license.clone(),
+                    ))
+                    .ok()
+                });
+
+            if let Some(nodes) = refs["nodes"].as_array() {
+                for branch in nodes {
+                    if let Some(name) = branch.get("name").and_then(|v| v.as_str()) {
+                        if let Some(re) = &branch_filter {
+                            if !re.is_match(name) {
+                                continue;
+                            }
+                        }
+                        let date_str = branch
+                            .pointer("/target/committedDate")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("");
+                        let date = date_str.parse::<DateTime<Utc>>();
+                        match date {
+                            Ok(d) => {
+                                branches.insert(name.to_string(), d);
+                            }
+                            Err(e) => {
+                                eprintln!(
+                                    "Failed to parse date for {owner}/{repo} branch {name}: {e}"
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+            if let Some(protection) =
+                response["data"]["repository"]["branchProtectionRules"]["nodes"].as_array()
+            {
+                for rule in protection {
+                    let parsed_rule: Option<BranchProtectionRule> =
+                        serde_json::from_value(rule.clone()).ok();
+                    if let Some(r) = parsed_rule {
+                        protection_rules.push(r);
+                    }
+                }
+            }
+
+            let page_info = &refs["pageInfo"];
+            let has_next_page = page_info["hasNextPage"].as_bool().unwrap_or(false);
+            after = page_info["endCursor"].as_str().map(|s| s.to_string());
+
+            if !has_next_page {
                 break;
             }
-            page += 1;
         }
-        let mut ages = HashMap::<String, DateTime<Utc>>::new();
-        let now = Utc::now();
-        for branch in all_branches {
-            let commits = octocrab
-                .repos(&owner, &repo)
-                .list_commits()
-                .sha(&branch)
-                .per_page(1)
-                .send()
-                .await?;
 
-            if let Some(commit) = commits.items.first() {
-                if let Some(commit_date) = commit.commit.committer.as_ref().and_then(|c| c.date) {
-                    if let Some(re) = branch_filter {
-                        re.is_match(&branch)
-                            .then(|| branch.clone())
-                            .map(|b| ages.insert(b, commit_date));
-                    } else {
-                        ages.insert(branch.clone(), commit_date);
-                    }
-                } else {
-                    eprintln!("No commit date found for branch {branch}");
-                }
-            }
-        }
-        let mut old_branches: Vec<_> = ages
+        let now = Utc::now();
+
+        let mut old_branches: Vec<_> = branches
             .into_iter()
             .filter(|(_, age)| (now - age).num_days() >= days_ago)
             .filter(|(branch, _)| !blacklist.contains(branch))
@@ -1250,9 +1212,16 @@ impl GithubClient {
             .into_iter()
             .map(|(branch, age)| (branch, age.format("%Y-%m-%d").to_string()))
             .collect();
+        println!("Protection rules: {protection_rules:#?}");
 
-        Ok(old_branches)
+        Ok((
+            old_branches,
+            protection_rules,
+            license,
+            format!("{owner}/{repo}"),
+        ))
     }
+
     /// Get the number of api calls left at the moment. Generally, the maximum number is 5000 in
     /// one hour.
     pub async fn get_rate_limit(&self) -> Result<(), GitError> {
@@ -1266,7 +1235,39 @@ impl GithubClient {
         let local_time = reset_time.with_timezone(&Local).format("%H:%M %Y-%m-%d");
 
         let time_zone = iana_time_zone::get_timezone()?;
-        println!("Rate limit: {remaining}/{limit} remaining. Resets at {local_time} {time_zone}");
+        println!(
+            "REST API Rate limit: {remaining}/{limit} remaining. Resets at {local_time} ({time_zone})"
+        );
+        Ok(())
+    }
+    /// Get the number of graphql api calls left at the moment. Generally, the maximum number is
+    /// 5000. This is trakced separately from the rest api limits.
+    pub async fn get_graphql_limit(&self) -> Result<(), GitError> {
+        let query = r#"
+            {
+                rateLimit {
+                    limit
+                    remaining
+                    resetAt
+                }
+            }"#;
+        let payload = serde_json::json!({ "query": query });
+        let response: serde_json::Value = self.octocrab.clone().graphql(&payload).await?;
+
+        let rate_limit = &response["data"]["rateLimit"];
+
+        let limit = rate_limit["limit"].as_u64().unwrap_or(0);
+        let remaining = rate_limit["remaining"].as_u64().unwrap_or(0);
+        let reset_at_str = rate_limit["resetAt"].as_str().unwrap_or("");
+
+        let reset_at = reset_at_str.parse::<DateTime<Utc>>()?;
+        let local_time = reset_at.with_timezone(&Local).format("%H:%M %Y-%m-%d");
+        let time_zone = iana_time_zone::get_timezone()?;
+
+        println!(
+            "GraphQL API Rate limit: {remaining}/{limit} remaining. Resets at {local_time} ({time_zone})"
+        );
+
         Ok(())
     }
 }

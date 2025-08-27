@@ -19,7 +19,7 @@ under the License.
 use clap::{ArgGroup, Args, CommandFactory, Parser, Subcommand, ValueEnum};
 use std::fmt;
 use std::path::PathBuf;
-/// Root level struct for cli arguments
+/// Top level options to configure git_sync
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
 pub struct AppArgs {
@@ -126,10 +126,16 @@ pub struct DeleteTagCommand {
     .args(&["all", "repository"])
 ))]
 pub struct SyncTagCommand {
+    /// The Repository to sync tags for. Not valid if '--all' is set
     #[arg(short, long, required = false)]
     pub repository: Option<String>,
+    /// Sync tags for all configured repositories. Not valid if '--repository' is set
     #[arg(short, long, default_value_t = false)]
     pub all: bool,
+    /// Disable syncing annotated tags. Syncing annotated tags requires git to be setup with commit access
+    /// to the repositories you are attempting to manage.
+    #[arg(short, long, default_value_t = false)]
+    pub without_annotated: bool,
 }
 
 /// Sync a repository. If the repository is already up to date, no error is reported.
@@ -165,7 +171,7 @@ pub struct SyncRepoCommand {
     after_help="\
 EXAMPLES:
     # Check all repositories for license and branch protection
-    git_sync repo check --all --license --protected
+    git_sync repo check --all --license --protected --branch \"ODP-main\"
     # Check a specific repository for old branches inactive for 60 days matching a specific pattern. The pattern is optional, and if not provided, all branches will be checked.
     git_sync repo check --repository my-repo --old-branches --days-ago --branch-filter \"^ODP\"
 
@@ -189,6 +195,9 @@ pub struct CheckRepoCommand {
     /// Enable checking the protected status of the main branch for target repositories
     #[arg(short, long, default_value_t = false)]
     pub protected: bool,
+    /// Specify the branch to check. Required when '--protected' is enabled
+    #[arg(long, required_if_eq("protected", "true"))]
+    pub branch: Option<String>,
     #[arg(short, long, default_value_t = false)]
     /// Enable checking for old branches in target repository
     pub old_branches: bool,
@@ -199,7 +208,93 @@ pub struct CheckRepoCommand {
     #[arg(short, long, required = false)]
     pub branch_filter: Option<String>,
 }
+#[derive(Args, Clone, Debug)]
+#[command(
+    group(
+        ArgGroup::new("target")
+        .required(true)
+        .args(&["all", "repository"])
+    )
+)]
+/// Open a PR to merge <branch> into <base_branch>
+pub struct CreatePRCommand {
+    /// Repository for which you are creating a PR
+    #[arg(short, long, required = false)]
+    pub repository: Option<String>,
+    /// Create a PR for all configured repositories
+    #[arg(short, long, default_value_t = false)]
+    pub all: bool,
+    /// The branch whose changes will merged into <base_branch>
+    #[arg(long, required = true)]
+    pub branch: String,
+    /// This will receive the changes from <branch>
+    #[arg(long, required = true)]
+    pub base_branch: String,
 
+    #[arg(long, default_value_t = false)]
+    /// Merge the newly created PR automatically after creation, if possible
+    pub merge: bool,
+}
+#[derive(Args, Clone, Debug)]
+#[command(
+    group(
+        ArgGroup::new("target")
+        .required(true)
+        .args(&["all", "repository"])
+    )
+)]
+pub struct ClosePRCommand {
+    /// Repository for which you are closing a PR
+    #[arg(short, long, required = false)]
+    pub repository: Option<String>,
+    /// Close a PR for all configured repositories
+    #[arg(short, long, default_value_t = false)]
+    pub all: bool,
+    /// The PR number
+    #[arg(short, long, required = true)]
+    pub id: u64,
+
+    /// The base branch of the PR to close
+    #[arg(short, long, required = true)]
+    pub base_branch: String,
+}
+
+/// Merge a PR. This will only work if the PR is mergeable and has no conflicts.
+#[derive(Args, Clone, Debug)]
+#[command(
+    group(
+        ArgGroup::new("target")
+        .required(true)
+        .args(&["all", "repository"])
+    )
+)]
+pub struct MergePRCommand {
+    /// Repository for which you are merging a PR
+    #[arg(short, long, required = false)]
+    pub repository: Option<String>,
+    /// The PR number
+    #[arg(short, long, required = true, name = "pull_number")]
+    pub id: u64,
+
+    /// The base branch of the PR to close
+    #[arg(short, long, required = true)]
+    pub base_branch: String,
+    /// The method to use when merging the PR
+    #[arg(short, long, value_parser = ["merge", "squash", "rebase"], default_value = "squash")]
+    pub merge_method: String,
+
+    /// Title for the automatic commit message
+    #[arg(long, required = false)]
+    pub commit_title: Option<String>,
+
+    /// Extra detail to append to the automatic commit message
+    #[arg(long, required = false)]
+    pub commit_message: Option<String>,
+
+    /// SHA that the pull request head must match to permit merging
+    #[arg(long, required = false)]
+    pub sha: Option<String>,
+}
 /// Define the arguments for the 'delete' branch command
 #[derive(Args, Clone, Debug)]
 #[command(
@@ -265,7 +360,7 @@ pub struct CreateReleaseCommand {
     pub repository: Option<String>,
 
     /// The name of the release. If not specified, the tag name will be used
-    #[arg(short, long, required = false)]
+    #[arg(long, required = false)]
     pub release_name: Option<String>,
 
     /// Set this release to the latest
@@ -283,7 +378,14 @@ pub struct CreateReleaseCommand {
     #[arg(short, long, default_value_t = false)]
     pub no_release_notes: bool,
 }
-
+/// All valid commands concerning PRs
+#[derive(Subcommand, Clone, Debug)]
+pub enum PRCommand {
+    /// Create a new PR
+    Open(CreatePRCommand),
+    // Delete a release
+    Close(ClosePRCommand),
+}
 /// All valid commands concerning releases
 #[derive(Subcommand, Clone, Debug)]
 pub enum ReleaseCommand {
@@ -351,9 +453,6 @@ pub enum Command {
     /// Manage branches
     #[command(arg_required_else_help = true)]
     Branch {
-        /// Manage a branches for this repository
-        #[arg(short, long, global = true)]
-        repository: Option<String>,
         /// Manage branches
         #[command(subcommand)]
         cmd: BranchCommand,
@@ -372,9 +471,6 @@ pub enum Command {
     /// Manage repositories
     #[command(arg_required_else_help = true)]
     Repo {
-        /// Sync a repository with its upstream parent
-        #[arg(short, long, global = true)]
-        repository: Option<String>,
         /// Sync all configured repositories
         #[command(subcommand)]
         cmd: RepoCommand,
@@ -382,28 +478,30 @@ pub enum Command {
     /// Manage tags
     #[command(arg_required_else_help = true)]
     Tag {
-        /// Repository to act upon
-        #[arg(short, long, global = true, required = false)]
-        repository: Option<String>,
         /// Command to run
         #[command(subcommand)]
         cmd: TagCommand,
     },
     #[command(arg_required_else_help = true)]
     Release {
-        /// The repository for which to make the release
-        #[arg(short, long, global = true, required = false)]
-        repository: Option<String>,
         /// Command to run
         #[command(subcommand)]
         cmd: ReleaseCommand,
+    },
+    #[command(arg_required_else_help = true)]
+    PR {
+        /// Manage PRs
+        #[command(subcommand)]
+        cmd: PRCommand,
     },
     /// Generate completions or a manpage. This command is hidden by default since it should really
     /// done at build time
     #[command(hide = true)]
     Generate {
+        /// What to generate. Can be shell completion for bash, zsh, or fish; or manpages.
         #[arg(long, value_parser = ["bash", "zsh", "fish", "man"])]
         kind: String,
+        /// An optional output path. If not specified, the current directory will be used instead
         #[arg(long)]
         out: Option<std::path::PathBuf>,
     },
@@ -422,7 +520,6 @@ pub fn parse_args() -> AppArgs {
         }
     };
     if let Command::Tag {
-        repository: Some(_),
         cmd: TagCommand::Compare(compare),
     } = &app.command
     {

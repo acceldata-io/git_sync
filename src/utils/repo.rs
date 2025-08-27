@@ -71,6 +71,81 @@ pub enum TagType {
     Lightweight,
 }
 
+pub type Checks = (
+    Vec<(String, String)>,
+    Vec<BranchProtectionRule>,
+    Option<LicenseInfo>,
+    String,
+);
+
+/// Struct to hold branch protection rule information
+#[derive(Debug, Deserialize)]
+pub struct BranchProtectionRule {
+    pub pattern: Option<String>,
+    #[serde(rename = "isAdminEnforced")]
+    pub admin_enforced: Option<bool>,
+    #[serde(rename = "requiresApprovingReviews")]
+    pub requires_approving_reviews: Option<bool>,
+    #[serde(rename = "requiredApprovingReviewCount")]
+    pub requires_approving_review_count: Option<i64>,
+    #[serde(rename = "requiresStatusChecks")]
+    pub requires_status_checks: Option<bool>,
+    #[serde(rename = "requiresStrictStatusChecks")]
+    pub requires_strict_status_checks: Option<bool>,
+    #[serde(rename = "restrictPushes")]
+    pub restricts_pushes: Option<bool>,
+    #[serde(rename = "restrictsReviewDismissals")]
+    pub restricts_review_dismissals: Option<bool>,
+}
+
+impl BranchProtectionRule {
+    pub fn print(&self, name: &str) {
+        println!("Branch Protection Rule for '{name}'");
+        println!("\tPattern: {}", self.pattern.as_deref().unwrap_or("N/A"));
+        println!("\tAdmin enforced: {}", self.opt_bool(self.admin_enforced));
+        println!(
+            "\tRequire PR approving reviews: {}",
+            self.opt_bool(self.requires_approving_reviews)
+        );
+        if let Some(count) = self.requires_approving_review_count {
+            println!("\tRequired PR review count: {count}");
+        } else {
+            println!("\tRequired PR review count: None");
+        }
+        println!(
+            "\tRequire status checks: {}",
+            self.opt_bool(self.requires_status_checks)
+        );
+        println!(
+            "\tRequire strict status checks: {}",
+            self.opt_bool(self.requires_strict_status_checks)
+        );
+        println!(
+            "\tRestrict pushes: {}",
+            self.opt_bool(self.restricts_pushes)
+        );
+        println!(
+            "\tRestrict review dismissals: {}\n",
+            self.opt_bool(self.restricts_review_dismissals)
+        );
+    }
+    fn opt_bool(&self, b: Option<bool>) -> &'static str {
+        match b {
+            Some(true) => "Yes",
+            Some(false) => "No",
+            None => "N/A",
+        }
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct LicenseInfo {
+    pub name: Option<String>,
+    #[serde(rename = "spdxId")]
+    pub spdx_id: Option<String>,
+    pub url: Option<String>,
+}
+
 /// A holder for things that can be checked for a repository
 #[derive(Debug)]
 pub struct RepoChecks {
@@ -83,15 +158,6 @@ pub struct RepoChecks {
     pub old_branches: (bool, i64),
     /// A regex filter for the branches
     pub branch_filter: Option<Regex>,
-}
-
-pub enum CheckResult {
-    /// Whether the main branch is protected
-    Protected(bool),
-    /// The license of the repository
-    License(String),
-    /// Old branches
-    OldBranches(Vec<(String, String)>),
 }
 
 /// Parse the owner and repository name from a github repository url.
