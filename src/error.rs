@@ -25,6 +25,8 @@ pub enum GitError {
     MultipleErrors(Vec<GitError>),
     #[error("Github API error: {0}")]
     GithubApiError(#[from] octocrab::Error),
+    #[error("PR #{0} not mergeable")]
+    PRNotMergeable(u64),
     #[error("Upstream not found for fork")]
     NoUpstreamRepo,
 
@@ -69,4 +71,245 @@ pub enum GitError {
 
     #[error("Error: {0}")]
     Other(String),
+}
+
+impl GitError {
+    /// Convert this error into a user-friendly version
+    pub fn to_user_error(&self) -> UserError {
+        match self {
+            GitError::GithubApiError(e) => {
+                let (code, msg) = octocrab_error_info(e);
+                let category = match code {
+                    Some(http::StatusCode::UNAUTHORIZED) | Some(http::StatusCode::FORBIDDEN) => ErrorCategory::Auth,
+                    Some(http::StatusCode::NOT_FOUND) => ErrorCategory::NotFound,
+                    Some(http::StatusCode::TOO_MANY_REQUESTS) => ErrorCategory::RateLimit,
+                    Some(ref c) if c.is_server_error() => ErrorCategory::Server,
+                    Some(ref c) if c.is_client_error() => ErrorCategory::Input,
+                    _ => ErrorCategory::Unknown,
+                };
+                let suggestion = match category {
+                    ErrorCategory::Auth => Some("Check your credentials and repository permissions.".into()),
+                    ErrorCategory::RateLimit => Some("You are being rate-limited by GitHub. Wait and try again later.".into()),
+                    ErrorCategory::Network => Some("Check your Internet connection.".into()),
+                    ErrorCategory::NotFound => Some("Check the repository or resource name.".into()),
+                    _ => None,
+                };
+                UserError { code, message: msg, category, suggestion }
+            }
+            GitError::PRNotMergeable(pr_number) => UserError {
+                code: None,
+                message: format!("PR #{pr_number} cannot be merged automatically"),
+                category: ErrorCategory::Input,
+                suggestion: Some("Human intervention may be required.".into()),
+            },
+            GitError::NoUpstreamRepo => UserError {
+                code: None,
+                message: "Could not find an upstream repository for this fork.".into(),
+                category: ErrorCategory::NotFound,
+                suggestion: Some("Make sure the repository is a fork and has an upstream set.".into()),
+            },
+            GitError::DateParseError(e) => UserError {
+                code: None,
+                message: format!("Invalid date: {e}"),
+                category: ErrorCategory::Input,
+                suggestion: Some("Use a valid date format.".into()),
+            },
+            GitError::InvalidRepository(url) => UserError {
+                code: None,
+                message: format!("Invalid repository URL: {url}"),
+                category: ErrorCategory::Input,
+                suggestion: Some("Check the repository URL.".into()),
+            },
+            GitError::RegexError(e) => UserError {
+                code: None,
+                message: format!("Regex error: {e}"),
+                category: ErrorCategory::Input,
+                suggestion: Some("Check your regular expression syntax.".into()),
+            },
+            GitError::NoReposConfigured => UserError {
+                code: None,
+                message: "No repositories are configured.".into(),
+                category: ErrorCategory::Input,
+                suggestion: Some("Add repositories to your configuration.".into()),
+            },
+            GitError::NotAFork => UserError {
+                code: None,
+                message: "Repository is not a fork.".into(),
+                category: ErrorCategory::Input,
+                suggestion: Some("Choose a repository that is a fork.".into()),
+            },
+            GitError::MissingRepositoryName => UserError {
+                code: None,
+                message: "Repository name is missing.".into(),
+                category: ErrorCategory::Input,
+                suggestion: Some("Specify the repository name.".into()),
+            },
+            GitError::NoSuchBranch(branch) => UserError {
+                code: None,
+                message: format!("No such branch: {branch}"),
+                category: ErrorCategory::NotFound,
+                suggestion: Some("Check the branch name or create it first.".into()),
+            },
+            GitError::NoSuchTag(tag) => UserError {
+                code: None,
+                message: format!("No such tag: {tag}"),
+                category: ErrorCategory::NotFound,
+                suggestion: Some("Check the tag name or create it first.".into()),
+            },
+            GitError::TomlError(e) => UserError {
+                code: None,
+                message: format!("TOML parsing error: {e}"),
+                category: ErrorCategory::Input,
+                suggestion: Some("Check your config file for syntax errors.".into()),
+            },
+            GitError::MissingToken => UserError {
+                code: None,
+                message: "Missing GitHub token. Please provide a token via --token, GITHUB_TOKEN environment variable, or in your config file.".into(),
+                category: ErrorCategory::Auth,
+                suggestion: Some("Provide a GitHub token using --token, environment variable, or config file.".into()),
+            },
+            GitError::IoError(e) => UserError {
+                code: None,
+                message: format!("IO error: {e}"),
+                category: ErrorCategory::Network,
+                suggestion: Some("Check file paths and permissions, or try again.".into()),
+            },
+            GitError::JsonError(e) => UserError {
+                code: None,
+                message: format!("JSON error: {e}"),
+                category: ErrorCategory::Input,
+                suggestion: Some("Check your JSON syntax.".into()),
+            },
+            GitError::GetTimezoneError(e) => UserError {
+                code: None,
+                message: format!("Timezone error: {e}"),
+                category: ErrorCategory::Input,
+                suggestion: Some("Check your timezone string or system settings.".into()),
+            },
+            GitError::Other(msg) => UserError {
+                code: None,
+                message: msg.clone(),
+                category: ErrorCategory::Unknown,
+                suggestion: None,
+            },
+            GitError::MultipleErrors(errors) => {
+                // Show the first error, but mention there were multiple
+                if let Some(first) = errors.first() {
+                    let mut ue = first.to_user_error();
+                    ue.message = format!("Multiple errors (showing first): {}", ue.message);
+                    ue
+                } else {
+                    UserError {
+                        code: None,
+                        message: "Multiple unknown errors occurred.".into(),
+                        category: ErrorCategory::Unknown,
+                        suggestion: None,
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Different categories of errors for user-friendly messages
+pub enum ErrorCategory {
+    NotFound,
+    Auth,
+    RateLimit,
+    Network,
+    Input,
+    Server,
+    Unknown,
+}
+
+/// Holds information about an error to present to the user
+pub struct UserError {
+    pub code: Option<http::StatusCode>,
+    pub message: String,
+    pub category: ErrorCategory,
+    pub suggestion: Option<String>,
+}
+
+impl std::fmt::Display for UserError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if let Some(code) = self.code {
+            write!(f, " (HTTP {code:?}) ")?;
+        }
+        writeln!(f, "Error: {}", self.message)?;
+
+        if let Some(suggestion) = &self.suggestion {
+            write!(f, "Suggestion: {suggestion}")?;
+        }
+        Ok(())
+    }
+}
+pub fn giterror_retryable(e: &GitError) -> bool {
+    match e {
+        GitError::GithubApiError(inner) => is_retryable(inner),
+        _ => false,
+    }
+}
+pub fn is_retryable(e: &octocrab::Error) -> bool {
+    match e {
+        octocrab::Error::GitHub { source, .. } => {
+            // If either of these are true, then we
+            let msg = &source.message;
+            let status = source.status_code;
+
+            if status.is_server_error() {
+                return true;
+            } else if status == http::StatusCode::FORBIDDEN {
+                // Sometimes a 403 is returned for rate limiting
+                if msg.contains("rate limit") || msg.contains("abuse detection") {
+                    eprintln!("Rate limited by GitHub API: {msg}");
+                }
+                return false;
+            } else if status == http::StatusCode::TOO_MANY_REQUESTS {
+                eprintln!("Rate limited by GitHub API: {msg}");
+                return false;
+            } else if status.is_client_error() {
+                return false;
+            }
+            false
+        }
+        octocrab::Error::Http { .. }
+        | octocrab::Error::Hyper { .. }
+        | octocrab::Error::Service { .. } => true,
+        _ => false,
+    }
+}
+
+/// Helper function to extract errors from an `octocrab::Error`
+pub fn octocrab_error_info(e: &octocrab::Error) -> (Option<http::StatusCode>, String) {
+    match e {
+        octocrab::Error::GitHub { source, .. } => {
+            let status = source.status_code;
+            let mut message = source.message.to_string();
+            if let Some(errors) = &source.errors {
+                for err in errors {
+                    if let Some(obj) = err.as_object() {
+                        if let Some(msg) = obj.get("message").and_then(|m| m.as_str()) {
+                            message.push_str(&format!("\n- {msg}"));
+                        }
+                    }
+                }
+            }
+            (Some(status), message.to_string())
+        }
+        octocrab::Error::Http { source, .. } => (None, source.to_string()),
+        octocrab::Error::UriParse { source, .. } => (None, source.to_string()),
+        octocrab::Error::Uri { source, .. } => (None, source.to_string()),
+        octocrab::Error::Installation { .. } => (None, "Installation error".to_string()),
+        octocrab::Error::InvalidHeaderValue { source, .. } => (None, source.to_string()),
+        octocrab::Error::InvalidUtf8 { source, .. } => (None, source.to_string()),
+        octocrab::Error::Encoder { source, .. } => (None, source.to_string()),
+        octocrab::Error::Service { source, .. } => (None, source.to_string()),
+        octocrab::Error::Hyper { source, .. } => (None, source.to_string()),
+        octocrab::Error::SerdeUrlEncoded { source, .. } => (None, source.to_string()),
+        octocrab::Error::Serde { source, .. } => (None, source.to_string()),
+        octocrab::Error::Json { source, .. } => (None, source.to_string()),
+        octocrab::Error::JWT { source, .. } => (None, source.to_string()),
+        octocrab::Error::Other { source, .. } => (None, source.to_string()),
+        _ => (None, "Unknown error".to_string()),
+    }
 }

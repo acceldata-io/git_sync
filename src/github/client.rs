@@ -17,7 +17,8 @@ specific language governing permissions and limitations
 under the License.
 */
 use crate::config::Config;
-use crate::error::GitError;
+use crate::error::{GitError, is_retryable};
+use crate::utils::pr::{CreatePrOptions, MergePrOptions};
 use crate::utils::repo::http_to_ssh_repo;
 use crate::utils::repo::{
     BranchProtectionRule, Checks, LicenseInfo, RepoChecks, RepoInfo, TagInfo, TagType,
@@ -25,10 +26,7 @@ use crate::utils::repo::{
 };
 use chrono::{DateTime, Duration, Utc};
 use chrono::{Local, TimeZone};
-use futures::FutureExt;
-use futures::StreamExt;
-use futures::future::try_join;
-use futures::stream::FuturesUnordered;
+use futures::{FutureExt, StreamExt, future::try_join, stream::FuturesUnordered};
 use octocrab::Octocrab;
 use octocrab::models::repos::{ReleaseNotes, Tag};
 use octocrab::params::repos::Reference;
@@ -36,6 +34,9 @@ use regex::Regex;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::process::Command;
+use tokio_retry::RetryIf;
+use tokio_retry::strategy::jitter;
+use tokio_retry::{Retry, strategy::ExponentialBackoff};
 /*use tabled::{
     builder::Builder,
     settings::{
@@ -1030,6 +1031,182 @@ impl GithubClient {
         };
 
         Ok(notes)
+    }
+
+    /// Create a pull request for a specific repository
+    pub async fn create_pr(&self, opts: &CreatePrOptions) -> Result<u64, GitError> {
+        let info = get_repo_info_from_url(&opts.url)?;
+        let (owner, repo) = (info.owner, info.repo_name);
+        let octocrab = self.octocrab.clone();
+
+        // ExponentialBackoff, with a max of three tries in case something fails for a tarnsient
+        // reason.
+        let retries = 3;
+        let retry_strategy = ExponentialBackoff::from_millis(100)
+            .map(jitter)
+            .take(retries);
+        let pr_number: u64;
+        let pr_result = RetryIf::spawn(
+            retry_strategy.clone(),
+            || async {
+                octocrab
+                    .clone()
+                    .pulls(&owner, &repo)
+                    .create(&opts.title, &opts.head, &opts.base)
+                    .body(opts.body.as_deref().unwrap_or_default())
+                    .send()
+                    .await
+            },
+            |e: &octocrab::Error| is_retryable(e),
+        )
+        .await;
+
+        match pr_result {
+            Ok(p) => {
+                pr_number = p.number;
+                println!("PR #{pr_number} created successfully for {owner}/{repo}")
+            }
+            Err(e) => {
+                eprintln!("Failed to create PR for {owner}/{repo} after {retries} tries: {e}");
+                return Err(GitError::GithubApiError(e));
+            }
+        }
+
+        if let Some(reviewers) = opts.reviewers.as_deref() {
+            let reviewer_result = RetryIf::spawn(
+                retry_strategy,
+                || async {
+                    octocrab
+                        .clone()
+                        .pulls(&owner, &repo)
+                        .request_reviews(pr_number, reviewers, &[])
+                        .await
+                },
+                |e: &octocrab::Error| is_retryable(e),
+            )
+            .await;
+            match reviewer_result {
+                Ok(_) => println!(
+                    "Successfully requested reviewers for PR #{pr_number} in {owner}/{repo}"
+                ),
+                Err(e) => eprintln!(
+                    "Failed to request reviewers for PR #{pr_number} in {owner}/{repo}: {e}"
+                ),
+            }
+        }
+        Ok(pr_number)
+    }
+    /// Create a pull request for all configured repositories
+    pub async fn create_all_prs(
+        &self,
+        opts: &CreatePrOptions,
+        merge_opts: Option<MergePrOptions>,
+        repositories: Vec<String>,
+    ) -> Result<(), GitError> {
+        let mut futures = FuturesUnordered::new();
+        for repo in &repositories {
+            let merge_opts = merge_opts.clone();
+            let pr_opts = opts.clone();
+            futures.push(async move {
+                let result = self.create_pr(&pr_opts).await;
+
+                match result {
+                    Ok(pr_number) => {
+                        println!("Successfully created PR #{pr_number} for {repo}");
+                        if let Some(mut opts) = merge_opts {
+                            opts.url = repo.clone();
+                            opts.pr_number = pr_number;
+                            let merge_result = self.merge_pr(&opts).await;
+                            (repo, merge_result.map(|_| pr_number))
+                        } else {
+                            (repo, Ok(pr_number))
+                        }
+                    }
+                    Err(e) => (repo, Err(e)),
+                }
+            });
+        }
+
+        while let Some((repo, result)) = futures.next().await {
+            match result {
+                Ok(_) => {}
+                Err(e) => eprintln!("Failed to create PR for {repo}: {e}"),
+            }
+        }
+        Ok(())
+    }
+
+    /// Merge a pr
+    pub async fn merge_pr(&self, opts: &MergePrOptions) -> Result<(), GitError> {
+        let info = get_repo_info_from_url(&opts.url)?;
+        let (owner, repo) = (info.owner, info.repo_name);
+        let pr_number = opts.pr_number;
+
+        let merge_request = self
+            .octocrab
+            .clone()
+            .pulls(&owner, &repo)
+            .merge(opts.pr_number)
+            .message(opts.message.as_deref().unwrap_or_default())
+            .sha(opts.sha.as_deref().unwrap_or_default())
+            .method(opts.method)
+            .send()
+            .await;
+
+        match merge_request {
+            Ok(_) => {
+                println!("Successfully merged PR #{pr_number} in {repo}");
+                Ok(())
+            }
+            Err(_) => Err(GitError::PRNotMergeable(pr_number)), /*eprintln!("Error while merging...");
+                                                                    if let octocrab::Error::GitHub { source, .. } = e {
+                                                                        if source.message.contains("is not mergeable") {
+                                                                            eprintln!(
+                                                                                "PR #{pr_number} in {repo} has merge conflicts and cannot be merged. Please resolve the conflicts manually."
+                                                                            );
+                                                                            eprintln!("Visit {}/pull/{pr_number} to view conflicts", opts.url);
+                                                                            return Err(GitError::PRNotMergeable(pr_number, repo));
+                                                                        }
+                                                                    } else {
+                                                                        eprintln!("Failed to merge PR #{pr_number} in {repo}: {e}");
+                                                                        return Err(GitError::GithubApiError(e));
+                                                                    }
+
+                                                                }
+                                                                    */
+        }
+    }
+
+    /// Merge all PRs in the provided repositories
+    pub async fn merge_all_prs(
+        &self,
+        opts: MergePrOptions,
+        repositories: HashMap<String, u64>,
+    ) -> Result<(), GitError> {
+        let mut futures = FuturesUnordered::new();
+        for (repo, pr_number) in repositories.into_iter() {
+            let merge_opts = MergePrOptions {
+                url: repo.clone(),
+                pr_number,
+                sha: opts.sha.clone(),
+                message: opts.message.clone(),
+                title: opts.title.clone(),
+                method: opts.method,
+            };
+
+            futures.push(async move {
+                let result = self.merge_pr(&merge_opts).await;
+                (repo, result)
+            });
+        }
+
+        while let Some((repo, result)) = futures.next().await {
+            match result {
+                Ok(_) => println!("Successfully merged PR #{} in {repo}", opts.pr_number),
+                Err(e) => eprintln!("Failed to merge PR #{} in {repo}: {e}", opts.pr_number),
+            }
+        }
+        Ok(())
     }
 
     /// Run the selected checks against all configured repositories

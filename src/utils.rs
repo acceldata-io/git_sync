@@ -17,5 +17,6 @@ specific language governing permissions and limitations
 under the License.
 */
 pub mod macros;
+pub mod pr;
 pub mod repo;
 pub mod user;

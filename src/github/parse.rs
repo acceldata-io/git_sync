@@ -21,6 +21,7 @@ use crate::cli::*;
 use crate::config::Config;
 use crate::github::client::GithubClient;
 use crate::init::generate_config;
+use crate::utils::pr::{CreatePrOptions, MergePrOptions};
 use crate::utils::repo::RepoChecks;
 use clap_complete::{
     generate_to,
@@ -62,6 +63,25 @@ pub async fn match_arguments(app: &AppArgs, config: Config) -> Result<(), GitErr
         if graphql_limit.is_err() {
             eprintln!("Warning: Could not fetch GraphQL API rate limit");
         }
+        /*let opts = CreatePrOptions {
+            url: "https://github.com/JeffreySmith/m2kudu".to_string(),
+            head: "TEST".to_string(),
+            base: "ODP-main".to_string(),
+            title: "Test merge".to_string(),
+            body: Some("Automatic merge to ODP-main".to_string()),
+            reviewers: None,
+        };
+        let pr_number = client.create_pr(&opts).await?;
+        let opts = MergePrOptions {
+            url: "https://github.com/JeffreySmith/m2kudu".to_string(),
+            pr_number,
+            method: octocrab::params::pulls::MergeMethod::Squash,
+            title: None,
+            message: Some("auto commit".to_string()),
+            sha: None,
+        };
+        client.merge_pr(&opts).await?;
+        */
     }
     match &app.command {
         Command::Tag { cmd } => match cmd {
@@ -211,10 +231,41 @@ pub async fn match_arguments(app: &AppArgs, config: Config) -> Result<(), GitErr
                 }
             }
         },
-        Command::PR { cmd } => {
-            let _ = cmd;
-            todo!()
-        }
+        Command::PR { cmd } => match cmd {
+            PRCommand::Open(open_cmd) => {
+                let repository = open_cmd.repository.as_ref();
+                let merge = open_cmd.merge;
+                println!("Merge is {merge}");
+                if open_cmd.all {
+                    {}
+                } else if let Some(repository) = repository {
+                    let opts = CreatePrOptions {
+                        url: repository.to_string(),
+                        head: open_cmd.head.clone(),
+                        base: open_cmd.base.clone(),
+                        title: open_cmd.title.clone(),
+                        body: open_cmd.body.clone(),
+                        reviewers: open_cmd.reviewers.clone(),
+                    };
+                    let pr_number = client.create_pr(&opts).await?;
+                    println!("Created PR #{pr_number} in {repository}");
+                    if merge {
+                        println!("Merging???");
+                        let opts = MergePrOptions {
+                            url: repository.to_string(),
+                            pr_number,
+                            method: open_cmd.merge_method,
+                            title: open_cmd.merge_title.clone(),
+                            message: open_cmd.merge_body.clone(),
+                            sha: open_cmd.sha.clone(),
+                        };
+                        client.merge_pr(&opts).await?;
+                    }
+                } else {
+                    return Err(GitError::MissingRepositoryName);
+                }
+            }
+        },
         Command::Config { file, force } => {
             generate_config(file, *force)?;
         }

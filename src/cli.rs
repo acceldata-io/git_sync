@@ -16,6 +16,7 @@ KIND, either express or implied.  See the License for the
 specific language governing permissions and limitations
 under the License.
 */
+use crate::utils::pr::MergeMethod;
 use clap::{ArgGroup, Args, CommandFactory, Parser, Subcommand, ValueEnum};
 use std::fmt;
 use std::path::PathBuf;
@@ -224,16 +225,39 @@ pub struct CreatePRCommand {
     /// Create a PR for all configured repositories
     #[arg(short, long, default_value_t = false)]
     pub all: bool,
-    /// The branch whose changes will merged into <base_branch>
+    /// The name of the branch where your changes are implemented
     #[arg(long, required = true)]
-    pub branch: String,
-    /// This will receive the changes from <branch>
-    #[arg(long, required = true)]
-    pub base_branch: String,
+    pub head: String,
+    /// The name of the branch you want the changes pulled into
+    #[arg(short, long, required = true)]
+    pub base: String,
+    /// The title for the PR
+    #[arg(short, long)]
+    pub title: String,
 
+    /// The body for the PR
+    #[arg(long)]
+    pub body: Option<String>,
+
+    /// Attempt to merge the PR after creating it. This will only succeed if the PR is mergeable and
+    /// has no conflicts.
     #[arg(long, default_value_t = false)]
-    /// Merge the newly created PR automatically after creation, if possible
     pub merge: bool,
+    /// Title for the automatic commit message
+    #[arg(long)]
+    pub merge_title: Option<String>,
+    /// Extra detail to append to automatic commit message
+    #[arg(long)]
+    pub merge_body: Option<String>,
+    /// The method to use when merging the PR
+    #[arg(long, value_enum, default_value = "merge")]
+    pub merge_method: MergeMethod,
+    /// SHA that the pull request head must match to permit merging
+    #[arg(long, required = false)]
+    pub sha: Option<String>,
+    /// A list of reviewers to request a review from
+    #[arg(long, required = false)]
+    pub reviewers: Option<Vec<String>>,
 }
 #[derive(Args, Clone, Debug)]
 #[command(
@@ -383,8 +407,6 @@ pub struct CreateReleaseCommand {
 pub enum PRCommand {
     /// Create a new PR
     Open(CreatePRCommand),
-    // Delete a release
-    Close(ClosePRCommand),
 }
 /// All valid commands concerning releases
 #[derive(Subcommand, Clone, Debug)]

@@ -42,8 +42,17 @@ async fn main() -> Result<(), GitError> {
 
     let args = parse_args();
 
-    let config = Config::new(&args.file)?;
+    let result: Result<(), GitError> = {
+        let config = Config::new(&args.file)?;
+        parse::match_arguments(&args, config).await
+    };
+    // Get nice error messages, with simple suggestions instead of huge structs
+    if let Err(e) = result {
+        let error = e.to_user_error();
 
-    parse::match_arguments(&args, config).await?;
+        eprintln!("{error}");
+        std::process::exit(1);
+    }
+
     Ok(())
 }
