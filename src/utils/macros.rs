@@ -130,3 +130,68 @@ macro_rules! handle_futures_unordered {
 
     }};
 }
+
+/// A macro to easily retry asynchronous operations with exponential backoff and optional error filtering.
+///
+/// # Overview
+/// The `async_retry!` macro wraps an asynchronous block and automatically retries it using an
+/// exponential backoff schedule. It allows you to specify the initial delay, maximum delay,
+/// number of retries, a custom error predicate, and the operation body.
+///
+/// Internally, it uses [`tokio_retry::RetryIf`] with [`tokio_retry::strategy::ExponentialBackoff`],
+/// applying jitter to the delays.
+///
+/// # Parameters
+/// - `ms = $ms`: The base delay in milliseconds for the exponential backoff.
+/// - `timeout = $timeout`: The maximum delay between retries, in milliseconds.
+/// - `retries = $retries`: The maximum number of retry attempts.
+/// - `error_predicate = $pred`: A function or closure that takes a reference to an error and returns
+///   `true` if the error is retryable, or `false` otherwise.
+/// - `body = $body`: The asynchronous block to execute and retry on failure.
+///
+/// # Example
+/// ```rust
+/// use tokio_retry::strategy::ExponentialBackoff;
+/// use tokio_retry::RetryIf;
+///
+/// async fn unreliable_network_call() -> Result<(), std::io::Error> {
+///     // ... implementation ...
+///     Ok(())
+/// }
+///
+/// let result: Result<(), std::io::Error> = async_retry!(
+///     ms = 100,
+///     timeout = 2000,
+///     retries = 5,
+///     error_predicate = |e: &std::io::Error| matches!(e.kind(), std::io::ErrorKind::TimedOut),
+///     body = {
+///         unreliable_network_call().await
+///     },
+/// );
+/// ```
+///
+/// # Notes
+/// - The macro requires the `tokio_retry` and `tokio` crates.
+/// - The `body` block must be `async`.
+/// - The retry strategy applies exponential backoff with jitter and is capped by the specified timeout.
+///
+/// # See Also
+/// - [`tokio_retry::RetryIf`](https://docs.rs/tokio-retry/latest/tokio_retry/struct.RetryIf.html)
+/// - [`tokio_retry::strategy::ExponentialBackoff`](https://docs.rs/tokio-retry/latest/tokio_retry/strategy/struct.ExponentialBackoff.html)
+#[macro_export]
+macro_rules! async_retry {
+    (
+        ms = $ms: expr,
+        timeout = $timeout: expr,
+        retries = $retries: expr,
+        error_predicate = $pred: expr,
+        body = $body: block,
+    ) => {{
+        let retry_strategy = ExponentialBackoff::from_millis($ms)
+            .max_delay(tokio::time::Duration::from_millis($timeout))
+            .map(tokio_retry::strategy::jitter)
+            .take($retries);
+
+        RetryIf::spawn(retry_strategy, || async { $body }, $pred).await
+    }};
+}
