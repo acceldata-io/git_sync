@@ -16,8 +16,9 @@ KIND, either express or implied.  See the License for the
 specific language governing permissions and limitations
 under the License.
 */
+use std::error::Error;
+use std::io::ErrorKind::*;
 use thiserror::Error;
-
 /// Error type to make it easier to handle returning from functions
 #[derive(Error, Debug)]
 pub enum GitError {
@@ -79,13 +80,17 @@ impl GitError {
         match self {
             GitError::GithubApiError(e) => {
                 let (code, msg) = octocrab_error_info(e);
-                let category = match code {
-                    Some(http::StatusCode::UNAUTHORIZED) | Some(http::StatusCode::FORBIDDEN) => ErrorCategory::Auth,
-                    Some(http::StatusCode::NOT_FOUND) => ErrorCategory::NotFound,
-                    Some(http::StatusCode::TOO_MANY_REQUESTS) => ErrorCategory::RateLimit,
-                    Some(ref c) if c.is_server_error() => ErrorCategory::Server,
-                    Some(ref c) if c.is_client_error() => ErrorCategory::Input,
-                    _ => ErrorCategory::Unknown,
+                let category = if is_network_error(e) {
+                    ErrorCategory::Network
+                } else{
+                    match code {
+                        Some(http::StatusCode::UNAUTHORIZED) | Some(http::StatusCode::FORBIDDEN) => ErrorCategory::Auth,
+                        Some(http::StatusCode::NOT_FOUND) => ErrorCategory::NotFound,
+                        Some(http::StatusCode::TOO_MANY_REQUESTS) => ErrorCategory::RateLimit,
+                        Some(ref c) if c.is_server_error() => ErrorCategory::Server,
+                        Some(ref c) if c.is_client_error() => ErrorCategory::Input,
+                        _ => ErrorCategory::Unknown,
+                    }
                 };
                 let suggestion = match category {
                     ErrorCategory::Auth => Some("Check your credentials and repository permissions.".into()),
@@ -212,6 +217,7 @@ impl GitError {
 }
 
 /// Different categories of errors for user-friendly messages
+#[derive(Debug)]
 pub enum ErrorCategory {
     NotFound,
     Auth,
@@ -223,6 +229,7 @@ pub enum ErrorCategory {
 }
 
 /// Holds information about an error to present to the user
+#[derive(Debug)]
 pub struct UserError {
     pub code: Option<http::StatusCode>,
     pub message: String,
@@ -312,4 +319,49 @@ pub fn octocrab_error_info(e: &octocrab::Error) -> (Option<http::StatusCode>, St
         octocrab::Error::Other { source, .. } => (None, source.to_string()),
         _ => (None, "Unknown error".to_string()),
     }
+}
+
+fn is_network_error(e: &(dyn Error + 'static)) -> bool {
+    let mut current = Some(e);
+
+    while let Some(err) = current {
+        if let Some(hyper_err) = err.downcast_ref::<hyper::Error>() {
+            if hyper_err.is_closed() || hyper_err.is_incomplete_message() || hyper_err.is_timeout()
+            {
+                return true;
+            }
+        }
+
+        // reqwest errors (timeout, connect, etc.)
+        if let Some(reqwest_err) = err.downcast_ref::<reqwest::Error>() {
+            if reqwest_err.is_timeout() || reqwest_err.is_connect() || reqwest_err.is_request() {
+                return true;
+            }
+        }
+
+        if let Some(io_err) = err.downcast_ref::<std::io::Error>() {
+            match io_err.kind() {
+                TimedOut | ConnectionRefused | ConnectionAborted | ConnectionReset
+                | NotConnected | AddrNotAvailable | AddrInUse | NetworkUnreachable
+                | HostUnreachable | BrokenPipe | WouldBlock => return true,
+                _ => {}
+            }
+        }
+
+        // String-based fallback (last resort)
+        let msg = err.to_string().to_lowercase();
+        if msg.contains("dns error")
+            || msg.contains("failed to lookup address")
+            || msg.contains("nodename nor servname provided")
+            || msg.contains("network unreachable")
+            || msg.contains("no route to host")
+            || msg.contains("connection refused")
+            || msg.contains("timed out")
+        {
+            return true;
+        }
+
+        current = err.source();
+    }
+    false
 }
