@@ -47,8 +47,8 @@ use tokio_retry::{
 */
 use temp_dir::TempDir;
 
+use indexmap::IndexSet;
 use serde_json::json;
-
 /// Contains information about tags for a forked repo, its parent,
 /// and the tags that are missing from the fork
 #[derive(Debug)]
@@ -61,6 +61,12 @@ pub struct ComparisonResult {
     pub missing_in_fork: Vec<(String, String)>,
 }
 
+#[derive(Debug)]
+pub struct Comparison {
+    pub fork_tags: IndexSet<TagInfo>,
+    pub parent_tags: IndexSet<TagInfo>,
+    pub missing_in_fork: IndexSet<TagInfo>,
+}
 /*enum Output {
     Stdout,
     Stderr,
@@ -104,35 +110,6 @@ impl GithubClient {
             main_branch: parent.default_branch,
         })
     }
-    /// Get all tags for a repository
-    pub async fn get_tags(&self, url: &str) -> Result<Vec<Tag>, GitError> {
-        let mut page: u32 = 1;
-        let mut all_tags: Vec<Tag> = Vec::new();
-        let per_page = 100;
-        let info = get_repo_info_from_url(url)?;
-        let (owner, repo) = (info.owner, info.repo_name);
-        loop {
-            let tags = self
-                .octocrab
-                .clone()
-                .repos(&owner, &repo)
-                .list_tags()
-                .per_page(per_page)
-                .page(page)
-                .send()
-                .await?;
-
-            let items = tags.items;
-            if items.is_empty() {
-                break;
-            }
-            for tag in items {
-                all_tags.push(tag);
-            }
-            page += 1;
-        }
-        Ok(all_tags)
-    }
 
     /// This can be used to fetch tags in a more api-call efficient way than using the rest api.
     /// It does mean we have to manually query the graphql endpoint and manually parse the json
@@ -140,10 +117,13 @@ impl GithubClient {
     /// We can't actually get all the information required for an annotated tag, but we can use it
     /// to distinguish between lightweight and annotated tags. If we don't get any annotated tags,
     /// we can skip the fairly slow git clone and push process
-    pub async fn get_tags_new(&self, url: &str) -> Result<Vec<TagInfo>, GitError> {
+    ///
+    /// `IndexSet` is an implementation of an orderered Set.
+    pub async fn get_tags(&self, url: &str) -> Result<IndexSet<TagInfo>, GitError> {
         let info = get_repo_info_from_url(url)?;
         let (owner, repo) = (info.owner, info.repo_name);
-        let mut all_tags: Vec<TagInfo> = Vec::new();
+        //let mut all_tags: Vec<TagInfo> = Vec::new();
+        let mut all_tags: IndexSet<TagInfo> = IndexSet::new();
         let mut has_next_page = true;
         let mut after: Option<String> = None;
         let per_page = 100;
@@ -235,7 +215,7 @@ impl GithubClient {
                 };
 
                 let ssh_url = http_to_ssh_repo(url)?;
-                all_tags.push(TagInfo {
+                all_tags.insert(TagInfo {
                     name,
                     tag_type,
                     sha,
@@ -254,27 +234,23 @@ impl GithubClient {
 
         Ok(all_tags)
     }
-    pub async fn compare_tags_new(
-        &self,
-        url: &str,
-        parent: &RepoInfo,
-    ) -> Result<Vec<TagInfo>, GitError> {
+    pub async fn compare_tags(&self, url: &str, parent: &RepoInfo) -> Result<Comparison, GitError> {
         let (fork_tags, parent_tags) =
-            try_join(self.get_tags_new(url), self.get_tags_new(&parent.url)).await?;
-        let fork_tags_set: HashSet<_> = fork_tags.into_iter().collect();
-        let parent_tags_set: HashSet<_> = parent_tags.into_iter().collect();
-
+            try_join(self.get_tags(url), self.get_tags(&parent.url)).await?;
         println!(
             "Fork tags: {}\nParent tags: {}",
-            fork_tags_set.len(),
-            parent_tags_set.len()
+            fork_tags.len(),
+            parent_tags.len()
         );
 
-        let missing_in_fork: Vec<TagInfo> = parent_tags_set
-            .difference(&fork_tags_set)
-            .cloned()
-            .collect();
-        Ok(missing_in_fork)
+        let missing_in_fork: IndexSet<TagInfo> =
+            parent_tags.difference(&fork_tags).cloned().collect();
+        let compare = Comparison {
+            fork_tags,
+            parent_tags,
+            missing_in_fork,
+        };
+        Ok(compare)
     }
     /// Sync many tags asynchronously. We can use the github api to sync lightweight tags, but to
     /// sync annotated tags we need to use git. Unfortunately there's no way around that.
@@ -282,17 +258,21 @@ impl GithubClient {
         let info = get_repo_info_from_url(url)?;
         let parent = self.get_parent_repo(url).await?;
         let (owner, repo) = (info.owner, info.repo_name);
-        let missing: Vec<TagInfo> = self.compare_tags_new(url, &parent).await?;
-        let lightweight: Vec<TagInfo> = missing
+        let missing = self.compare_tags(url, &parent).await?.missing_in_fork;
+        if missing.is_empty() {
+            println!("No missing tags in {url}");
+            return Ok(());
+        }
+
+        let lightweight: IndexSet<TagInfo> = missing
             .iter()
             .filter(|t| t.tag_type == TagType::Lightweight)
             .cloned()
             .collect();
 
-        let annotated: Vec<TagInfo> = missing
-            .iter()
+        let annotated: IndexSet<TagInfo> = missing
+            .into_iter()
             .filter(|t| t.tag_type == TagType::Annotated)
-            .cloned()
             .collect();
 
         let lightweight_fut = async {
@@ -318,7 +298,7 @@ impl GithubClient {
         if process_annotated {
             let ssh_url = http_to_ssh_repo(url)?;
             let output = tokio::join!(
-                self.sync_annotated_tags(annotated.as_slice(), &parent.url, &ssh_url),
+                self.sync_annotated_tags(&annotated, &parent.url, &ssh_url),
                 lightweight_fut,
             );
             let (annotated, lightweight) = output;
@@ -401,7 +381,7 @@ impl GithubClient {
     /// possible.
     pub async fn sync_annotated_tags(
         &self,
-        tags: &[TagInfo],
+        tags: &IndexSet<TagInfo>,
         parent_url: &str,
         ssh_url: &str,
     ) -> Result<(), GitError> {
@@ -470,57 +450,29 @@ impl GithubClient {
         Ok(())
     }
 
-    /// Compare tags against a repository and its parent
-    pub async fn compare_tags(&self, fork_url: &str) -> Result<ComparisonResult, GitError> {
-        let parent = self.get_parent_repo(fork_url).await?;
-
-        //println!("{owner}/{repo} : {}/{}", parent.owner, parent.repo_name);
-        let (fork_tags, parent_tags) =
-            try_join(self.get_tags(fork_url), self.get_tags(&parent.url)).await?;
-
-        let fork_tags_set: HashSet<_> = fork_tags
-            .iter()
-            .map(|t| (t.name.clone(), t.commit.sha.clone()))
-            .collect();
-        let parent_tags_set: HashSet<_> = parent_tags
-            .iter()
-            .map(|t| (t.name.clone(), t.commit.sha.clone()))
-            .collect();
-
-        let missing_in_fork: Vec<(String, String)> = parent_tags_set
-            .difference(&fork_tags_set)
-            .map(|(name, sha)| (name.to_string(), sha.to_string()))
-            .collect();
-
-        Ok(ComparisonResult {
-            fork_tags,
-            parent_tags,
-            missing_in_fork,
-        })
-    }
     /// Get a diff of tags between a single forked repository and its parent repository.
-    pub async fn diff_tags(&self, url: &str) -> Result<ComparisonResult, GitError> {
-        let mut comparison = self.compare_tags(url).await?;
-        /*println!(
+    pub async fn diff_tags(&self, url: &str) -> Result<Comparison, GitError> {
+        let parent = self.get_parent_repo(url).await?;
+        let comparison = self.compare_tags(url, &parent).await?;
+
+        println!(
             "Fork has {} tags, parent has {} tags",
             comparison.fork_tags.len(),
             comparison.parent_tags.len()
         );
-        */
 
-        if !comparison.missing_in_fork.is_empty() {
-            comparison.missing_in_fork.sort();
-            /*println!(
+        /*if !comparison.missing_in_fork.is_empty() {
+            println!(
                 "\nTags missing in fork: {}",
                 comparison.missing_in_fork.len()
             );
             for (name, _) in &comparison.missing_in_fork {
                 //println!(" - {name}");
             }
-            */
         } else {
-            //println!("{repo} up to date");
+            println!("{repo} up to date");
         }
+        */
 
         Ok(comparison)
     }
@@ -532,7 +484,7 @@ impl GithubClient {
             .map(|url| get_repo_info_from_url(url))
             .collect();
 
-        let mut diffs: HashMap<String, ComparisonResult> = HashMap::new();
+        let mut diffs: HashMap<String, Comparison> = HashMap::new();
 
         let pb = create_progress_bar(repositories.len() as u64);
 
@@ -576,7 +528,7 @@ impl GithubClient {
                 println!("# {name}:");
             }
             for comp in comparison.missing_in_fork {
-                println!("\t{}", comp.0);
+                println!("\t{}", comp.name);
             }
         }
         if !errors.is_empty() {

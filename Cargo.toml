@@ -6,13 +6,12 @@ authors = ["Jeffrey Smith <jeffrey.smith7@gmail.com>"]
 license = "Apache-2.0"
 
 
-
 [dependencies]
-tokio = { version = "1.47", features=["macros", "rt-multi-thread"]}
+tokio = { version = "1.47", features = ["macros", "rt-multi-thread"] }
 toml = "0.9.5"
-clap = { version = "4.5", features = ["derive", "env", "unicode","wrap_help"] }
-futures = {version = "0.3.31", features = ["alloc", "async-await", "std"]}
-octocrab = {version = "0.44.1", default-features = false, features = [
+clap = { version = "4.5", features = ["derive", "env", "unicode", "wrap_help"] }
+futures = { version = "0.3.31", features = ["alloc", "async-await", "std"] }
+octocrab = { version = "0.44.1", default-features = false, features = [
   "default-client",
   "follow-redirect",
   "retry",
@@ -21,8 +20,8 @@ octocrab = {version = "0.44.1", default-features = false, features = [
   "stream",
   "tokio",
   "timeout",
-]}
-chrono = {version = "0.4.41", features = ["iana-time-zone","clock", "std"]}
+] }
+chrono = { version = "0.4.41", features = ["iana-time-zone", "clock", "std"] }
 serde = { version = "1.0", features = ["derive"] }
 thiserror = "2.0.12"
 url = "2.5.4"
@@ -30,19 +29,25 @@ dirs = "6.0.0"
 serde_json = "1.0.142"
 http = "1.3.1"
 regex = "1.11.1"
-log = {version = "0.4", features = ["std"]}
-tabled = {version = "0.20", features = ["ansi", "macros","std"]}
+log = { version = "0.4", features = ["std"] }
+tabled = { version = "0.20", features = ["ansi", "macros", "std"] }
 clap_mangen = "0.2.29"
 clap_complete = "4.5.57"
 iana-time-zone = "0.1.63"
-rustls = {version = "0.23", features = ["aws-lc-rs", "zlib"] }
+rustls = { version = "0.23", features = ["aws-lc-rs", "zlib"] }
 aws-lc-rs = "1.13.3"
 temp-dir = "0.1.16"
 tokio-retry = "0.3.0"
 reqwest = "0.12.23"
 hyper = "1.7.0"
-indicatif = { version = "0.18.0", features = ["tokio"]}
+indicatif = { version = "0.18.0", features = ["tokio"] }
 console = "0.16.0"
+indexmap = { version = "2.11", features = ["serde"] }
 
 [dev-dependencies]
 httpmock = { version = "0.7.0" }
+criterion = { version = "0.7", features = [
+  "async",
+  "async_tokio",
+  "html_reports",
+] }
