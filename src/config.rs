@@ -29,7 +29,7 @@ use std::path::{Path, PathBuf};
 pub const CONFIG_NAME: &str = "git-manage.toml";
 
 /// This is the root level of the configuration file
-#[derive(Default, Deserialize)]
+#[derive(Default, Deserialize, Debug)]
 pub struct Config {
     #[serde(default)]
     pub github: GithubConfig,
@@ -62,7 +62,7 @@ pub struct GithubConfig {
 
 /// Options for git. This may be removed
 #[allow(dead_code)]
-#[derive(Deserialize, Default)]
+#[derive(Deserialize, Default, Debug)]
 pub struct GitConfig {
     pub default_directory: Option<PathBuf>,
     pub shallow_by_default: Option<bool>,
@@ -87,7 +87,6 @@ impl Config {
     /// Create a new config from an optional path. If None, then it tries to load the config.
     /// If it can't be loaded, the default values are loaded, which probably won't work as
     /// expected.
-    #[allow(dead_code)]
     pub fn new(path: &Option<PathBuf>) -> Result<Self, GitError> {
         if let Some(config_path) = path {
             Ok(Config::from_file(config_path)?)
@@ -96,7 +95,6 @@ impl Config {
         }
     }
     /// Load config from an existing toml file.
-    #[allow(dead_code)]
     pub fn from_file(path: &Path) -> Result<Self, GitError> {
         let config_str = fs::read_to_string(path)?;
         match toml::from_str(&config_str) {
@@ -170,6 +168,7 @@ impl Config {
     }
     /// Get a vector of repositories defined in the config file that are forks
     pub fn get_fork_repositories(&self) -> Vec<String> {
+        println!("{:?}", self.repos.fork.clone());
         self.repos.fork.clone().unwrap_or_default()
     }
     /// Get a vector of private repositories defined in the config file

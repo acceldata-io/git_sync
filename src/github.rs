@@ -18,3 +18,4 @@ under the License.
 */
 pub mod client;
 pub mod parse;
+pub mod tag;

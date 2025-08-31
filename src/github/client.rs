@@ -18,6 +18,7 @@ under the License.
 */
 use crate::config::Config;
 use crate::error::{GitError, is_retryable};
+use crate::github::tag::RepoResponse;
 use crate::utils::pr::{CreatePrOptions, MergePrOptions};
 use crate::utils::repo::{
     BranchProtectionRule, Checks, LicenseInfo, RepoChecks, RepoInfo, TagInfo, TagType,
@@ -57,16 +58,6 @@ static ODP_REGEX: OnceLock<Regex> = OnceLock::new();
 
 /// Contains information about tags for a forked repo, its parent,
 /// and the tags that are missing from the fork
-#[derive(Debug)]
-pub struct ComparisonResult {
-    /// All tags found in the forked repository
-    pub fork_tags: Vec<Tag>,
-    /// All tags found in the parent repository
-    pub parent_tags: Vec<Tag>,
-    /// All tags missing in the forked repository
-    pub missing_in_fork: Vec<(String, String)>,
-}
-
 #[derive(Debug)]
 pub struct Comparison {
     pub fork_tags: IndexSet<TagInfo>,
@@ -176,66 +167,45 @@ impl GithubClient {
                     "after": after,
                 }
             });
+            let res: RepoResponse = octocrab.graphql(&payload).await?;
+            let repo = &res.data.repository;
+            let parent_url = repo.parent.as_ref().map(|p| p.url.clone());
 
-            let res: serde_json::Value = octocrab.graphql(&payload).await?;
-
-            let refs = &res["data"]["repository"]["refs"];
-            let nodes = refs["nodes"]
-                .as_array()
-                .ok_or_else(|| GitError::Other("Invalid response structure".to_string()))?;
-
-            for tag in nodes {
-                let name = tag["name"].as_str().unwrap_or("").to_string();
-                let typename = tag["target"]["__typename"]
-                    .as_str()
-                    .unwrap_or("")
-                    .to_string();
-                let sha = tag["target"]["oid"].as_str().unwrap_or("").to_string();
-                let (message, tagger_name, tagger_email, tagger_date, parent_url) =
-                    if typename == "Tag" {
-                        (
-                            tag["target"]["message"].as_str().map(|s| s.to_string()),
-                            tag["target"]["tagger"]["name"]
-                                .as_str()
-                                .map(|s| s.to_string()),
-                            tag["target"]["tagger"]["email"]
-                                .as_str()
-                                .map(|s| s.to_string()),
-                            tag["target"]["tagger"]["date"]
-                                .as_str()
-                                .map(|s| s.to_string()),
-                            res["data"]["repository"]["parent"]["url"]
-                                .as_str()
-                                .map(|s| s.to_string()),
-                        )
-                    } else {
-                        (None, None, None, None, None)
-                    };
-
-                let tag_type = if typename == "Tag" {
-                    TagType::Annotated
-                } else if typename == "Commit" {
-                    TagType::Lightweight
-                } else {
-                    return Err(GitError::Other(format!("Unknown tag type: {typename}")));
+            for tag in &repo.refs.nodes {
+                let tag_type = match tag.target.typename.as_str() {
+                    "Tag" => TagType::Annotated,
+                    "Commit" => TagType::Lightweight,
+                    other => return Err(GitError::Other(format!("Unknown tag type '{other}'"))),
                 };
 
+                let (message, tagger_name, tagger_email, tagger_date) =
+                    if let Some(tagger) = &tag.target.tagger {
+                        (
+                            tag.target.message.clone(),
+                            tagger.name.clone(),
+                            tagger.email.clone(),
+                            tagger.date.clone(),
+                        )
+                    } else {
+                        (None, None, None, None)
+                    };
+
                 let ssh_url = http_to_ssh_repo(url)?;
+
                 all_tags.insert(TagInfo {
-                    name,
+                    name: tag.name.clone(),
                     tag_type,
-                    sha,
+                    sha: tag.target.oid.clone(),
                     message,
                     tagger_name,
                     tagger_email,
                     tagger_date,
-                    parent_url,
+                    parent_url: parent_url.clone(),
                     ssh_url,
                 });
             }
-            let page_info = &refs["pageInfo"];
-            has_next_page = page_info["hasNextPage"].as_bool().unwrap_or(false);
-            after = page_info["endCursor"].as_str().map(|s| s.to_string());
+            has_next_page = repo.refs.page_info.has_next_page;
+            after = repo.refs.page_info.end_cursor.clone();
         }
 
         Ok(all_tags)
@@ -530,12 +500,13 @@ impl GithubClient {
             println!("\nTags missing in forks:");
         }
         for (name, comparison) in diffs {
-            if !comparison.missing_in_fork.is_empty() {
+            /*if !comparison.missing_in_fork.is_empty() {
                 println!("# {name}:");
             }
             for comp in comparison.missing_in_fork {
                 println!("\t{}", comp.name);
             }
+            */
         }
         if !errors.is_empty() {
             return Err(GitError::MultipleErrors(errors));
@@ -758,11 +729,11 @@ impl GithubClient {
             .await;
         match result {
             Ok(()) => {
-                println!("Successfully deleted branch '{branch}' for {repo}");
+                println!("✅ Successfully deleted branch '{branch}' for {repo}");
                 Ok(())
             }
             Err(e) => {
-                eprintln!("Failed to delete branch '{branch}' for {repo}: {e}");
+                eprintln!("❌ Failed to delete branch '{branch}' for {repo}: {e}");
                 Err(GitError::GithubApiError(e))
             }
         }

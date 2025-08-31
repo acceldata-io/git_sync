@@ -74,7 +74,7 @@ pub async fn match_arguments(app: &AppArgs, config: Config) -> Result<(), GitErr
                 let repository = compare_cmd.repository.as_ref();
                 if compare_cmd.all && !repos.is_empty() {
                     client.diff_all_tags(repos).await?
-                } else if compare_cmd.all {
+                } else if compare_cmd.all && repos.is_empty() {
                     return Err(GitError::NoReposConfigured);
                 } else if let Some(repository) = repository {
                     let _diffs = client.diff_tags(repository).await?;
