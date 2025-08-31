@@ -33,6 +33,7 @@ use octocrab::params::repos::Reference;
 use regex::Regex;
 use std::collections::{HashMap, HashSet};
 use std::process::Command;
+use std::sync::OnceLock;
 use tokio_retry::{
     RetryIf,
     strategy::{ExponentialBackoff, jitter},
@@ -49,6 +50,11 @@ use temp_dir::TempDir;
 
 use indexmap::IndexSet;
 use serde_json::json;
+
+// Static, pre-compiled at first use:
+static CVE_REGEX: OnceLock<Regex> = OnceLock::new();
+static ODP_REGEX: OnceLock<Regex> = OnceLock::new();
+
 /// Contains information about tags for a forked repo, its parent,
 /// and the tags that are missing from the fork
 #[derive(Debug)]
@@ -1068,8 +1074,10 @@ impl GithubClient {
 
         println!("Upper case: {}", repo.to_ascii_uppercase());
         let re = Regex::new(&format!("{}-[0-9]+", repo.to_ascii_uppercase()))?;
-        let cve = Regex::new(r"OSV|CVE")?;
-        let odp = Regex::new(r"ODP-[0-9]*")?;
+        let cve =
+            CVE_REGEX.get_or_init(|| Regex::new(r"OSV|CVE").expect("Failed to compile CVE regex"));
+        let odp = ODP_REGEX
+            .get_or_init(|| Regex::new(r"ODP-[0-9]*").expect("Failed to compile ODP regex"));
 
         for s in &new_commits {
             let s_upper = s.to_ascii_uppercase();

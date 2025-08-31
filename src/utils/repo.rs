@@ -20,6 +20,12 @@ use crate::error::GitError;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::hash::{Hash, Hasher};
+use std::sync::OnceLock;
+
+// Initialized once, then it becomes available
+// from then on so we don't have to compile our regex every
+// single time test_get_repo_info_from_url is called
+static REPO_REGEX: OnceLock<Regex> = OnceLock::new();
 
 /// Hold basic information about a github url
 #[derive(Debug)]
@@ -163,12 +169,11 @@ pub struct RepoChecks {
 /// Parse the owner and repository name from a github repository url.
 pub fn get_repo_info_from_url(url: &str) -> Result<RepoInfo, GitError> {
     // Named capture groups for the owner and the repo
-    let repo_re =
-        Regex::new(r"^https://github.com/(?<owner>[^/].+)/(?<repo>[^/].+[^/])/?(\.git)?/?.*");
-    let repo_regex = match repo_re {
-        Ok(re) => re,
-        Err(e) => return Err(GitError::RegexError(e)),
-    };
+    let repo_regex = REPO_REGEX.get_or_init(|| {
+        Regex::new(r"^https://github.com/(?<owner>[^/].+)/(?<repo>[^/].+[^/])/?(\.git)?/?.*")
+            .expect("Invalid regex for {url}")
+    });
+
     if let Some(captures) = repo_regex.captures(url) {
         if captures.len() > 2 {
             let owner = captures["owner"].to_string();
