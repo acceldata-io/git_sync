@@ -19,24 +19,24 @@ under the License.
 use crate::config::Config;
 use crate::error::{GitError, is_retryable};
 use crate::utils::pr::{CreatePrOptions, MergePrOptions};
-use crate::utils::repo::http_to_ssh_repo;
 use crate::utils::repo::{
     BranchProtectionRule, Checks, LicenseInfo, RepoChecks, RepoInfo, TagInfo, TagType,
-    get_repo_info_from_url,
+    get_repo_info_from_url, http_to_ssh_repo,
 };
-use chrono::{DateTime, Duration, Utc};
-use chrono::{Local, TimeZone};
+use crate::{async_retry, handle_api_response, handle_futures_unordered};
+use chrono::{DateTime, Duration, Local, TimeZone, Utc};
 use futures::{FutureExt, StreamExt, future::try_join, stream::FuturesUnordered};
+use indicatif::{ProgressBar, ProgressStyle};
 use octocrab::Octocrab;
-use octocrab::models::repos::{ReleaseNotes, Tag};
+use octocrab::models::repos::{Ref, ReleaseNotes, Tag};
 use octocrab::params::repos::Reference;
 use regex::Regex;
-use std::collections::HashMap;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::process::Command;
-use tokio_retry::RetryIf;
-use tokio_retry::strategy::jitter;
-use tokio_retry::{Retry, strategy::ExponentialBackoff};
+use tokio_retry::{
+    RetryIf,
+    strategy::{ExponentialBackoff, jitter},
+};
 /*use tabled::{
     builder::Builder,
     settings::{
@@ -47,11 +47,11 @@ use tokio_retry::{Retry, strategy::ExponentialBackoff};
 */
 use temp_dir::TempDir;
 
-use crate::{handle_api_response, handle_futures_unordered};
 use serde_json::json;
 
 /// Contains information about tags for a forked repo, its parent,
 /// and the tags that are missing from the fork
+#[derive(Debug)]
 pub struct ComparisonResult {
     /// All tags found in the forked repository
     pub fork_tags: Vec<Tag>,
@@ -61,19 +61,27 @@ pub struct ComparisonResult {
     pub missing_in_fork: Vec<(String, String)>,
 }
 
+/*enum Output {
+    Stdout,
+    Stderr,
+}
+*/
+
 /// Github api entry point
 pub struct GithubClient {
     /// Octocrab client. This can be trivially cloned
     pub octocrab: Octocrab,
+    is_a_tty: bool,
 }
 
 impl GithubClient {
-    pub fn new(github_token: String, _config: &Config) -> Result<Self, GitError> {
+    pub fn new(github_token: String, _config: &Config, is_a_tty: bool) -> Result<Self, GitError> {
         let octocrab = Octocrab::builder()
             .personal_token(github_token.clone())
             .build()
             .map_err(GitError::GithubApiError)?;
-        Ok(Self { octocrab })
+        println!("Is user? {is_a_tty}");
+        Ok(Self { octocrab, is_a_tty })
     }
     /// Get the parent repository of a github repository.
     pub async fn get_parent_repo(&self, url: &str) -> Result<RepoInfo, GitError> {
@@ -464,12 +472,9 @@ impl GithubClient {
 
     /// Compare tags against a repository and its parent
     pub async fn compare_tags(&self, fork_url: &str) -> Result<ComparisonResult, GitError> {
-        let repo_info = get_repo_info_from_url(fork_url)?;
-        let (owner, repo) = (repo_info.owner, repo_info.repo_name);
-
         let parent = self.get_parent_repo(fork_url).await?;
 
-        println!("{owner}/{repo} : {}/{}", parent.owner, parent.repo_name);
+        //println!("{owner}/{repo} : {}/{}", parent.owner, parent.repo_name);
         let (fork_tags, parent_tags) =
             try_join(self.get_tags(fork_url), self.get_tags(&parent.url)).await?;
 
@@ -494,60 +499,89 @@ impl GithubClient {
         })
     }
     /// Get a diff of tags between a single forked repository and its parent repository.
-    pub async fn diff_tags(&self, url: &str) -> Result<(), GitError> {
-        println!("Fetching parent repo info for {url}");
-        let info = get_repo_info_from_url(url)?;
-        let (owner, repo) = (info.owner, info.repo_name);
-        let parent = self.get_parent_repo(url).await?;
-
-        println!(
-            "Comparing tags in {owner}/{repo} and {}/{}",
-            parent.owner, parent.repo_name
-        );
+    pub async fn diff_tags(&self, url: &str) -> Result<ComparisonResult, GitError> {
         let mut comparison = self.compare_tags(url).await?;
-        println!(
+        /*println!(
             "Fork has {} tags, parent has {} tags",
             comparison.fork_tags.len(),
             comparison.parent_tags.len()
         );
+        */
 
         if !comparison.missing_in_fork.is_empty() {
             comparison.missing_in_fork.sort();
-            println!(
+            /*println!(
                 "\nTags missing in fork: {}",
                 comparison.missing_in_fork.len()
             );
             for (name, _) in &comparison.missing_in_fork {
-                println!(" - {name}");
+                //println!(" - {name}");
             }
+            */
         } else {
-            println!("{repo} up to date");
+            //println!("{repo} up to date");
         }
 
-        Ok(())
+        Ok(comparison)
     }
     /// Get a diff of all configured repositories tags, compared against their parent.
-    pub async fn diff_all_tags(&self, repos: Vec<String>) -> Result<(), GitError> {
+    pub async fn diff_all_tags(&self, repositories: Vec<String>) -> Result<(), GitError> {
         //let mut futures = FuturesUnordered::new();
-        let repositories: Vec<Result<RepoInfo, _>> = repos
+        let repositories: Vec<Result<RepoInfo, _>> = repositories
             .iter()
             .map(|url| get_repo_info_from_url(url))
             .collect();
+
+        let mut diffs: HashMap<String, ComparisonResult> = HashMap::new();
+
+        let pb = create_progress_bar(repositories.len() as u64);
+
+        let mut errors: Vec<(String, GitError)> = Vec::new();
         handle_futures_unordered!(
             repositories.into_iter().flatten().map(|repo|{
                 let url = repo.url.clone();
                 let owner = repo.owner.clone();
                 let repo_name = repo.repo_name.clone();
-                (owner, repo_name, url)
+                self.println(&format!("   Processing {owner}/{repo_name}"), &pb);
+                (owner, repo_name, url )
             }),
             |owner, repo, url| self.diff_tags(&url).map(|result| (owner, repo, result)),
             (owner, repo, result) {
                 match result {
-                    Ok(()) => println!("Ok: {owner}/{repo}"),
-                    Err(e) => eprintln!("Error: {owner}/{repo}: {e}"),
+                    Ok(r) => {
+                        diffs.insert(repo.to_string(), r);
+                        if let Some(pb) = &pb {
+                            pb.inc(1);
+                        }
+                        self.println(&format!("✅ Successfully diffed {owner}/{repo}"), &pb);
+                    },
+                    Err(e) => {
+                        if let Some(pb) = &pb {
+                            pb.inc(1);
+                        }
+                        self.println(&format!("❌ {owner}/{repo}: {e}"), &pb);
+                        errors.push((format!("{owner}/{repo}"), e));
+                    }
                 }
             }
         );
+        if let Some(pb) = pb {
+            pb.finish_with_message("All repositories processed");
+        }
+        if !diffs.is_empty() {
+            println!("\nTags missing in forks:");
+        }
+        for (name, comparison) in diffs {
+            if !comparison.missing_in_fork.is_empty() {
+                println!("# {name}:");
+            }
+            for comp in comparison.missing_in_fork {
+                println!("\t{}", comp.0);
+            }
+        }
+        if !errors.is_empty() {
+            return Err(GitError::MultipleErrors(errors));
+        }
         Ok(())
     }
 
@@ -578,20 +612,40 @@ impl GithubClient {
 
     /// Sync all configured repositories. Only repositories that have a parent repository
     /// should be passed to this function
-    pub async fn sync_all_forks(&self, repos: Vec<String>) -> Result<(), GitError> {
+    pub async fn sync_all_forks(&self, repositories: Vec<String>) -> Result<(), GitError> {
+        let pb = create_progress_bar(repositories.len() as u64);
+
         let mut futures = FuturesUnordered::new();
-        for repo in repos {
+        for repo in repositories {
+            self.println(&format!("   Processing {repo}"), &pb);
             futures.push(async move {
                 let result = self.sync_fork(&repo).await;
                 (repo, result)
             });
         }
-
+        let mut errors: Vec<(String, GitError)> = Vec::new();
         while let Some((repo, result)) = futures.next().await {
             match result {
-                Ok(_) => println!("Successfully synced {repo}"),
-                Err(e) => eprintln!("Sync failed for {repo}: {e}"),
+                Ok(_) => {
+                    if let Some(pb) = &pb {
+                        pb.inc(1);
+                    }
+                    self.println(&format!("✅ Successfully synced {repo}"), &pb);
+                }
+                Err(e) => {
+                    if let Some(pb) = &pb {
+                        pb.inc(1);
+                    }
+                    self.println(&format!("❌ Failed to sync {repo}: {e}"), &pb);
+                    errors.push((repo.to_string(), e));
+                }
             }
+        }
+        if let Some(pb) = pb {
+            pb.finish_with_message("All repositories processed");
+        }
+        if !errors.is_empty() {
+            return Err(GitError::MultipleErrors(errors));
         }
         Ok(())
     }
@@ -599,19 +653,30 @@ impl GithubClient {
     async fn get_branch_sha(&self, url: &str, branch: &str) -> Result<String, GitError> {
         let info = get_repo_info_from_url(url)?;
         let (owner, repo) = (info.owner, info.repo_name);
-        let response = self
-            .octocrab
-            .clone()
-            .repos(&owner, &repo)
-            .get_ref(&Reference::Branch(branch.to_string()))
-            .await?;
+        let res: Result<_, octocrab::Error> = async_retry!(
+            ms = 100,
+            timeout = 5000,
+            retries = 3,
+            error_predicate = |e: &octocrab::Error| is_retryable(e),
+            body = {
+                self.octocrab
+                    .clone()
+                    .repos(&owner, &repo)
+                    .get_ref(&Reference::Branch(branch.to_string()))
+                    .await
+            },
+        );
 
-        let sha = match response.object {
-            octocrab::models::repos::Object::Commit { sha, .. } => sha,
-            _ => return Err(GitError::NoSuchBranch(branch.to_string())),
-        };
-
-        Ok(sha)
+        match res {
+            Ok(r) => {
+                let sha = match r.object {
+                    octocrab::models::repos::Object::Commit { sha, .. } => sha,
+                    _ => return Err(GitError::NoSuchBranch(branch.to_string())),
+                };
+                Ok(sha)
+            }
+            Err(e) => Err(GitError::GithubApiError(e)),
+        }
     }
     /// Get the sha of a tag
     #[allow(dead_code)]
@@ -662,11 +727,11 @@ impl GithubClient {
 
         match response {
             Ok(_) => {
-                println!("Successfully created branch '{new_branch}' for {repo}");
+                //println!("Successfully created branch '{new_branch}' for {repo}");
                 Ok(())
             }
             Err(e) => {
-                eprintln!("Failed to create branch '{new_branch}' for {repo}: {e}");
+                //eprintln!("Failed to create branch '{new_branch}' for {repo}: {e}");
                 Err(GitError::GithubApiError(e))
             }
         }
@@ -678,19 +743,47 @@ impl GithubClient {
         new_branch: &str,
         repositories: &Vec<String>,
     ) -> Result<(), GitError> {
+        let pb = create_progress_bar(repositories.len() as u64);
         let mut futures = FuturesUnordered::new();
         for repo in repositories {
+            self.println(&format!("   Processing {repo}"), &pb);
+
             futures.push(async move {
                 let result = self.create_branch(repo, base_branch, new_branch).await;
                 (repo, result)
             });
         }
 
+        let mut errors: Vec<(String, GitError)> = Vec::new();
         while let Some((repo, result)) = futures.next().await {
             match result {
-                Ok(_) => println!("Successfully created {new_branch} for {repo}"),
-                Err(e) => eprintln!("Failed to create {new_branch} for {repo}: {e}"),
+                Ok(_) => {
+                    if let Some(pb) = &pb {
+                        pb.inc(1);
+                    }
+                    self.println(
+                        &format!("✅ Successfully created '{new_branch}' for {repo}"),
+                        &pb,
+                    );
+                }
+                Err(e) => {
+                    if let Some(pb) = &pb {
+                        pb.inc(1);
+                    }
+                    self.eprintln(
+                        &format!("❌ Failed to create '{new_branch}' for {repo}"),
+                        &pb,
+                    );
+                    errors.push((repo.to_string(), e));
+                }
             }
+        }
+        if let Some(pb) = &pb {
+            pb.finish_with_message("All repositories processed");
+        }
+
+        if !errors.is_empty() {
+            return Err(GitError::MultipleErrors(errors));
         }
         Ok(())
     }
@@ -722,19 +815,43 @@ impl GithubClient {
         branch: &str,
         repositories: &Vec<String>,
     ) -> Result<(), GitError> {
+        let pb = create_progress_bar(repositories.len() as u64);
         let mut futures = FuturesUnordered::new();
         for repo in repositories {
+            self.println(&format!("   Processing {repo}"), &pb);
+            self.println(&format!("   Processing {repo}"), &pb);
             futures.push(async move {
                 let result = self.delete_branch(repo, branch).await;
                 (repo, result)
             });
         }
 
+        let mut errors: Vec<(String, GitError)> = Vec::new();
         while let Some((repo, result)) = futures.next().await {
             match result {
-                Ok(_) => println!("Successfully deleted {branch} in {repo}"),
-                Err(e) => eprintln!("Failed to delete {branch} for {repo}: {e}"),
+                Ok(_) => {
+                    if let Some(pb) = &pb {
+                        pb.inc(1);
+                    }
+                    self.println(
+                        &format!("✅ Successfully deleted '{branch}' for {repo}"),
+                        &pb,
+                    );
+                }
+                Err(e) => {
+                    if let Some(pb) = &pb {
+                        pb.inc(1);
+                    }
+                    self.eprintln(&format!("❌ Failed to delete '{branch}' for {repo}"), &pb);
+                    errors.push((format!("{repo} ({branch})"), e));
+                }
             }
+        }
+        if let Some(pb) = &pb {
+            pb.finish_with_message("All repositories processed");
+        }
+        if !errors.is_empty() {
+            return Err(GitError::MultipleErrors(errors));
         }
         Ok(())
     }
@@ -745,22 +862,26 @@ impl GithubClient {
         let sha = self.get_branch_sha(url, branch).await?;
         let (owner, repo) = (info.owner, info.repo_name);
 
-        let response = self
-            .octocrab
-            .clone()
-            .repos(&owner, &repo)
-            .create_ref(&Reference::Tag(tag.to_string()), sha)
-            .await;
+        let res: Result<Ref, octocrab::Error> = async_retry!(
+            ms = 100,
+            timeout = 5000,
+            retries = 3,
+            error_predicate = |e: &octocrab::Error| is_retryable(e),
+            body = {
+                self.octocrab
+                    .clone()
+                    .repos(&owner, &repo)
+                    .create_ref(&Reference::Tag(tag.to_string()), sha.clone())
+                    .await
+            },
+        );
 
-        match response {
+        match res {
             Ok(_) => {
                 println!("Successfully created tag '{tag}' for {repo}");
                 Ok(())
             }
-            Err(e) => {
-                eprintln!("Failed to create tag '{tag}' for {repo}: {e}");
-                Err(GitError::GithubApiError(e))
-            }
+            Err(e) => Err(GitError::GithubApiError(e)),
         }
     }
 
@@ -871,18 +992,37 @@ impl GithubClient {
         } else {
             current_tag.to_string()
         };
-        println!("This is the current name: {name}");
-        self.octocrab
-            .clone()
-            .repos(&owner, &repo)
-            .releases()
-            .create(current_tag)
-            .name(&name)
-            .body(&release_notes.body)
-            .send()
-            .await?;
+        // ExponentialBackoff, with a max of three tries in case something fails for a tarnsient
+        // reason.
+        let retries = 3;
+        let retry_strategy = ExponentialBackoff::from_millis(100)
+            .map(jitter)
+            .take(retries);
 
-        Ok(())
+        let release = RetryIf::spawn(
+            retry_strategy.clone(),
+            || async {
+                self.octocrab
+                    .clone()
+                    .repos(&owner, &repo)
+                    .releases()
+                    .create(current_tag)
+                    .name(&name)
+                    .body(&release_notes.body)
+                    .send()
+                    .await
+            },
+            |e: &octocrab::Error| is_retryable(e),
+        )
+        .await;
+
+        match release {
+            Ok(_) => {
+                println!("Successfully created release '{name}' for {repo}");
+                Ok(())
+            }
+            Err(e) => Err(GitError::GithubApiError(e)),
+        }
     }
 
     /// Generate release notes for a particular releaese. It grabs all the commits present in `tag`
@@ -1096,23 +1236,28 @@ impl GithubClient {
         }
         Ok(pr_number)
     }
-    /// Create a pull request for all configured repositories
+    /// Create a pull request for all configured repositories, and optionally merge them
+    /// automatically, if possible
     pub async fn create_all_prs(
         &self,
         opts: &CreatePrOptions,
         merge_opts: Option<MergePrOptions>,
         repositories: Vec<String>,
-    ) -> Result<(), GitError> {
+    ) -> Result<HashMap<String, u64>, GitError> {
         let mut futures = FuturesUnordered::new();
         for repo in &repositories {
             let merge_opts = merge_opts.clone();
-            let pr_opts = opts.clone();
+            // Copy the fields of the opts struct, except for what we need to override (namely, the
+            // url)
+            let pr_opts = CreatePrOptions {
+                url: repo.to_string(),
+                ..opts.clone()
+            };
             futures.push(async move {
                 let result = self.create_pr(&pr_opts).await;
 
                 match result {
                     Ok(pr_number) => {
-                        println!("Successfully created PR #{pr_number} for {repo}");
                         if let Some(mut opts) = merge_opts {
                             opts.url = repo.clone();
                             opts.pr_number = pr_number;
@@ -1127,13 +1272,22 @@ impl GithubClient {
             });
         }
 
+        // Keep track of which PR number belongs to which repository
+        let mut pr_map: HashMap<String, u64> = HashMap::new();
+        let mut errors: Vec<(String, GitError)> = Vec::new();
         while let Some((repo, result)) = futures.next().await {
             match result {
-                Ok(_) => {}
-                Err(e) => eprintln!("Failed to create PR for {repo}: {e}"),
+                Ok(pr_number) => {
+                    pr_map.insert(repo.to_string(), pr_number);
+                }
+                Err(e) => errors.push((repo.to_string(), e)),
             }
         }
-        Ok(())
+        if !errors.is_empty() {
+            return Err(GitError::MultipleErrors(errors));
+        }
+
+        Ok(pr_map)
     }
 
     /// Merge a pr
@@ -1141,43 +1295,40 @@ impl GithubClient {
         let info = get_repo_info_from_url(&opts.url)?;
         let (owner, repo) = (info.owner, info.repo_name);
         let pr_number = opts.pr_number;
+        // ExponentialBackoff, with a max of three tries in case something fails for a tarnsient
+        // reason.
+        let retries = 3;
+        let retry_strategy = ExponentialBackoff::from_millis(100)
+            .map(jitter)
+            .take(retries);
 
-        let merge_request = self
-            .octocrab
-            .clone()
-            .pulls(&owner, &repo)
-            .merge(opts.pr_number)
-            .message(opts.message.as_deref().unwrap_or_default())
-            .sha(opts.sha.as_deref().unwrap_or_default())
-            .method(opts.method)
-            .send()
-            .await;
+        let merge_result = RetryIf::spawn(
+            retry_strategy.clone(),
+            || async {
+                self.octocrab
+                    .clone()
+                    .pulls(&owner, &repo)
+                    .merge(opts.pr_number)
+                    .message(opts.message.as_deref().unwrap_or_default())
+                    .sha(opts.sha.as_deref().unwrap_or_default())
+                    .method(opts.method)
+                    .send()
+                    .await
+            },
+            |e: &octocrab::Error| is_retryable(e),
+        )
+        .await;
 
-        match merge_request {
+        match merge_result {
             Ok(_) => {
                 println!("Successfully merged PR #{pr_number} in {repo}");
                 Ok(())
             }
-            Err(_) => Err(GitError::PRNotMergeable(pr_number)), /*eprintln!("Error while merging...");
-                                                                    if let octocrab::Error::GitHub { source, .. } = e {
-                                                                        if source.message.contains("is not mergeable") {
-                                                                            eprintln!(
-                                                                                "PR #{pr_number} in {repo} has merge conflicts and cannot be merged. Please resolve the conflicts manually."
-                                                                            );
-                                                                            eprintln!("Visit {}/pull/{pr_number} to view conflicts", opts.url);
-                                                                            return Err(GitError::PRNotMergeable(pr_number, repo));
-                                                                        }
-                                                                    } else {
-                                                                        eprintln!("Failed to merge PR #{pr_number} in {repo}: {e}");
-                                                                        return Err(GitError::GithubApiError(e));
-                                                                    }
-
-                                                                }
-                                                                    */
+            Err(_) => Err(GitError::PRNotMergeable(pr_number)),
         }
     }
 
-    /// Merge all PRs in the provided repositories
+    // Merge all PRs in the provided repositories
     pub async fn merge_all_prs(
         &self,
         opts: MergePrOptions,
@@ -1188,10 +1339,7 @@ impl GithubClient {
             let merge_opts = MergePrOptions {
                 url: repo.clone(),
                 pr_number,
-                sha: opts.sha.clone(),
-                message: opts.message.clone(),
-                title: opts.title.clone(),
-                method: opts.method,
+                ..opts.clone()
             };
 
             futures.push(async move {
@@ -1219,17 +1367,19 @@ impl GithubClient {
         let mut futures = FuturesUnordered::new();
         for repo in repositories {
             futures.push(async move {
-                self.check_repository(&repo, blacklist.clone(), checks)
-                    .await
+                let response = self
+                    .check_repository(&repo, blacklist.clone(), checks)
+                    .await;
+                (response, repo)
             });
         }
 
         let mut results: Vec<Checks> = Vec::new();
-        let mut errors = Vec::new();
-        while let Some(result) = futures.next().await {
+        let mut errors: Vec<(String, GitError)> = Vec::new();
+        while let Some((result, repo)) = futures.next().await {
             match result {
                 Ok(r) => results.push(r),
-                Err(e) => errors.push(e),
+                Err(e) => errors.push((repo, e)),
             }
         }
         if !errors.is_empty() {
@@ -1258,7 +1408,7 @@ impl GithubClient {
 
         let mut protection_rules: Vec<BranchProtectionRule> = Vec::new();
         let mut license: Option<LicenseInfo>;
-        // Use a graphql query to drastically reduce the number of api calls (in half) we need to make.
+        // Use a graphql query to drastically reduce the number of api calls we need to make.
         // This lets us get the repo name and latest commit date in one call, instead of two.
         // This makes a huge difference for very large repositories with many branches.
         let query = r#"
@@ -1305,7 +1455,9 @@ impl GithubClient {
 
         // Needed for the graphql query
         let mut after: Option<String> = None;
+
         loop {
+            // Paginated results, so we have to loop over until there aren't any more pages left
             let payload = serde_json::json!({
                 "query": query,
                 "variables": {
@@ -1402,23 +1554,34 @@ impl GithubClient {
     /// Get the number of api calls left at the moment. Generally, the maximum number is 5000 in
     /// one hour.
     pub async fn get_rate_limit(&self) -> Result<(), GitError> {
-        let rate = self.octocrab.clone().ratelimit().get().await?.rate;
-
-        let (remaining, limit) = (rate.remaining, rate.limit);
-
-        let reset_time = Utc
-            .timestamp_opt(rate.reset.try_into().unwrap(), 0)
-            .unwrap();
-        let local_time = reset_time.with_timezone(&Local).format("%H:%M %Y-%m-%d");
-
-        let time_zone = iana_time_zone::get_timezone()?;
-        println!(
-            "REST API Rate limit: {remaining}/{limit} remaining. Resets at {local_time} ({time_zone})"
+        let response = async_retry!(
+            ms = 100,
+            timeout = 500,
+            retries = 3,
+            error_predicate = |e: &octocrab::Error| is_retryable(e),
+            body = { self.octocrab.clone().ratelimit().get().await },
         );
-        Ok(())
+        match response {
+            Ok(rate) => {
+                let rate = rate.rate;
+                let (remaining, limit) = (rate.remaining, rate.limit);
+
+                let reset_time = Utc
+                    .timestamp_opt(rate.reset.try_into().unwrap(), 0)
+                    .unwrap();
+                let local_time = reset_time.with_timezone(&Local).format("%H:%M %Y-%m-%d");
+
+                let time_zone = iana_time_zone::get_timezone()?;
+                println!(
+                    "REST API Rate limit: {remaining}/{limit} remaining. Resets at {local_time} ({time_zone})"
+                );
+                Ok(())
+            }
+            Err(e) => Err(GitError::GithubApiError(e)),
+        }
     }
     /// Get the number of graphql api calls left at the moment. Generally, the maximum number is
-    /// 5000. This is trakced separately from the rest api limits.
+    /// 5000. This is tracked separately from the rest api limits.
     pub async fn get_graphql_limit(&self) -> Result<(), GitError> {
         let query = r#"
             {
@@ -1429,23 +1592,63 @@ impl GithubClient {
                 }
             }"#;
         let payload = serde_json::json!({ "query": query });
-        let response: serde_json::Value = self.octocrab.clone().graphql(&payload).await?;
 
-        let rate_limit = &response["data"]["rateLimit"];
-
-        let limit = rate_limit["limit"].as_u64().unwrap_or(0);
-        let remaining = rate_limit["remaining"].as_u64().unwrap_or(0);
-        let reset_at_str = rate_limit["resetAt"].as_str().unwrap_or("");
-
-        let reset_at = reset_at_str.parse::<DateTime<Utc>>()?;
-        let local_time = reset_at.with_timezone(&Local).format("%H:%M %Y-%m-%d");
-        let time_zone = iana_time_zone::get_timezone()?;
-
-        println!(
-            "GraphQL API Rate limit: {remaining}/{limit} remaining. Resets at {local_time} ({time_zone})"
+        let response: Result<serde_json::Value, octocrab::Error> = async_retry!(
+            ms = 100,
+            timeout = 500,
+            retries = 3,
+            error_predicate = |e: &octocrab::Error| is_retryable(e),
+            body = { self.octocrab.clone().graphql(&payload).await },
         );
 
-        Ok(())
+        match response {
+            Ok(resp) => {
+                let rate_limit = &resp["data"]["rateLimit"];
+                let limit = rate_limit["limit"].as_u64().unwrap_or(0);
+                let remaining = rate_limit["remaining"].as_u64().unwrap_or(0);
+                let reset_at_str = rate_limit["resetAt"].as_str().unwrap_or("");
+
+                let reset_at = reset_at_str.parse::<DateTime<Utc>>()?;
+                let local_time = reset_at.with_timezone(&Local).format("%H:%M %Y-%m-%d");
+                let time_zone = iana_time_zone::get_timezone()?;
+
+                println!(
+                    "GraphQL API Rate limit: {remaining}/{limit} remaining. Resets at {local_time} ({time_zone})"
+                );
+                Ok(())
+            }
+            Err(e) => Err(GitError::GithubApiError(e)),
+        }
+    }
+    fn println(&self, text: &str, pb: &Option<ProgressBar>) {
+        match pb {
+            Some(pb) => {
+                if console::user_attended() {
+                    pb.println(text);
+                } else {
+                    // Fallback if no TTY
+                    println!("{text}");
+                }
+            }
+            None => {
+                println!("{text}");
+            }
+        }
+    }
+    fn eprintln(&self, text: &str, pb: &Option<ProgressBar>) {
+        match pb {
+            Some(pb) => {
+                if console::user_attended() {
+                    pb.println(text);
+                } else {
+                    // Fallback if no TTY
+                    eprintln!("{text}");
+                }
+            }
+            None => {
+                eprintln!("{text}");
+            }
+        }
     }
 }
 
@@ -1457,4 +1660,20 @@ fn get_http_status(err: &octocrab::Error) -> (Option<http::StatusCode>, Option<S
         return (Some(status), Some(message));
     }
     (None, None)
+}
+
+fn create_progress_bar<T: Into<u64>>(len: T) -> Option<ProgressBar> {
+    if console::user_attended() {
+        return None;
+    }
+    let pb = ProgressBar::new(len.into());
+    pb.set_style(
+        ProgressStyle::with_template(
+            "{spinner:.magenta} [{wide_bar:.cyan/dark_blue}] [{elapsed}] {msg}",
+        )
+        .unwrap()
+        .progress_chars("#>-"),
+    );
+    pb.enable_steady_tick(std::time::Duration::from_millis(100));
+    Some(pb)
 }

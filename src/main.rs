@@ -48,6 +48,9 @@ async fn main() -> Result<(), GitError> {
     };
     // Get nice error messages, with simple suggestions instead of huge structs
     if let Err(e) = result {
+        if e.is_broken_pipe() {
+            std::process::exit(0)
+        }
         let error = e.to_user_error();
 
         eprintln!("{error}");

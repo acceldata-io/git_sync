@@ -28,6 +28,7 @@ use clap_complete::{
     shells::{Bash, Fish, Zsh},
 };
 use clap_mangen::Man;
+use console::user_attended;
 use regex::Regex;
 use std::fs::File;
 use std::path::{Path, PathBuf};
@@ -52,7 +53,9 @@ pub async fn match_arguments(app: &AppArgs, config: Config) -> Result<(), GitErr
         RepositoryType::All => config.get_all_repositories(),
     };
 
-    let client = GithubClient::new(token.to_string(), &config)?;
+    let is_user = user_attended();
+
+    let client = GithubClient::new(token.to_string(), &config, is_user)?;
     if !token.is_empty() {
         let (rest_limit, graphql_limit) =
             tokio::join!(client.get_rate_limit(), client.get_graphql_limit());
@@ -63,25 +66,6 @@ pub async fn match_arguments(app: &AppArgs, config: Config) -> Result<(), GitErr
         if graphql_limit.is_err() {
             eprintln!("Warning: Could not fetch GraphQL API rate limit");
         }
-        /*let opts = CreatePrOptions {
-            url: "https://github.com/JeffreySmith/m2kudu".to_string(),
-            head: "TEST".to_string(),
-            base: "ODP-main".to_string(),
-            title: "Test merge".to_string(),
-            body: Some("Automatic merge to ODP-main".to_string()),
-            reviewers: None,
-        };
-        let pr_number = client.create_pr(&opts).await?;
-        let opts = MergePrOptions {
-            url: "https://github.com/JeffreySmith/m2kudu".to_string(),
-            pr_number,
-            method: octocrab::params::pulls::MergeMethod::Squash,
-            title: None,
-            message: Some("auto commit".to_string()),
-            sha: None,
-        };
-        client.merge_pr(&opts).await?;
-        */
     }
     match &app.command {
         Command::Tag { cmd } => match cmd {
@@ -93,7 +77,7 @@ pub async fn match_arguments(app: &AppArgs, config: Config) -> Result<(), GitErr
                 } else if compare_cmd.all {
                     return Err(GitError::NoReposConfigured);
                 } else if let Some(repository) = repository {
-                    client.diff_tags(repository).await?
+                    let _diffs = client.diff_tags(repository).await?;
                 } else {
                     return Err(GitError::MissingRepositoryName);
                 }
@@ -170,10 +154,20 @@ pub async fn match_arguments(app: &AppArgs, config: Config) -> Result<(), GitErr
                     let result = client
                         .check_all_repositories(repos, checks, &blacklist)
                         .await?;
+
                     for res in &result {
-                        let (_, rules, _, repo) = res;
+                        println!("{:?}", res.0);
+                        let (branches, rules, license, repo) = res;
+                        for branch in branches {
+                            println!("\tStale branch: {} - {}", branch.0, branch.1);
+                        }
                         for rule in rules {
-                            rule.print(repo)
+                            rule.print(repo);
+                        }
+                        if let Some(license) = license {
+                            if let Some(name) = license.name.as_ref() {
+                                println!("\tLicense: {name}");
+                            }
                         }
                     }
                 } else if let Some(repository) = repository {
@@ -233,33 +227,38 @@ pub async fn match_arguments(app: &AppArgs, config: Config) -> Result<(), GitErr
         },
         Command::PR { cmd } => match cmd {
             PRCommand::Open(open_cmd) => {
-                let repository = open_cmd.repository.as_ref();
+                let repository = open_cmd.repository.clone().unwrap_or_default();
                 let merge = open_cmd.merge;
                 println!("Merge is {merge}");
+                let opts = CreatePrOptions {
+                    url: repository.clone(),
+                    head: open_cmd.head.clone(),
+                    base: open_cmd.base.clone(),
+                    title: open_cmd.title.clone(),
+                    body: open_cmd.body.clone(),
+                    reviewers: open_cmd.reviewers.clone(),
+                };
+
+                let mut merge_opts = if merge {
+                    Some(MergePrOptions {
+                        url: repository.clone(),
+                        pr_number: 0,
+                        method: open_cmd.merge_method,
+                        title: open_cmd.merge_title.clone(),
+                        message: open_cmd.merge_body.clone(),
+                        sha: open_cmd.sha.clone(),
+                    })
+                } else {
+                    None
+                };
                 if open_cmd.all {
-                    {}
-                } else if let Some(repository) = repository {
-                    let opts = CreatePrOptions {
-                        url: repository.to_string(),
-                        head: open_cmd.head.clone(),
-                        base: open_cmd.base.clone(),
-                        title: open_cmd.title.clone(),
-                        body: open_cmd.body.clone(),
-                        reviewers: open_cmd.reviewers.clone(),
-                    };
+                    let pr_numbers = client.create_all_prs(&opts, merge_opts, repos).await?;
+                } else if !repository.len() > 0 {
                     let pr_number = client.create_pr(&opts).await?;
                     println!("Created PR #{pr_number} in {repository}");
-                    if merge {
-                        println!("Merging???");
-                        let opts = MergePrOptions {
-                            url: repository.to_string(),
-                            pr_number,
-                            method: open_cmd.merge_method,
-                            title: open_cmd.merge_title.clone(),
-                            message: open_cmd.merge_body.clone(),
-                            sha: open_cmd.sha.clone(),
-                        };
-                        client.merge_pr(&opts).await?;
+                    if let Some(opts) = merge_opts.as_mut() {
+                        opts.pr_number = pr_number;
+                        client.merge_pr(opts).await?;
                     }
                 } else {
                     return Err(GitError::MissingRepositoryName);

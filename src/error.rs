@@ -23,7 +23,7 @@ use thiserror::Error;
 #[derive(Error, Debug)]
 pub enum GitError {
     #[error("Multiple errors: {0:?}")]
-    MultipleErrors(Vec<GitError>),
+    MultipleErrors(Vec<(String, GitError)>),
     #[error("Github API error: {0}")]
     GithubApiError(#[from] octocrab::Error),
     #[error("PR #{0} not mergeable")]
@@ -199,10 +199,18 @@ impl GitError {
             },
             GitError::MultipleErrors(errors) => {
                 // Show the first error, but mention there were multiple
-                if let Some(first) = errors.first() {
-                    let mut ue = first.to_user_error();
-                    ue.message = format!("Multiple errors (showing first): {}", ue.message);
-                    ue
+                if !errors.is_empty() {
+                    let mut message = "Multiple errors: ".to_string();
+                    for (context, err) in errors {
+                        let e = err.to_user_error();
+                        message.push_str(&format!("\n\t- {context}: {}", e.message));
+                    }
+                    UserError {
+                        code: None,
+                        message,
+                        category: ErrorCategory::Unknown,
+                        suggestion: None,
+                    }
                 } else {
                     UserError {
                         code: None,
@@ -213,6 +221,19 @@ impl GitError {
                 }
             }
         }
+    }
+    /// Walk through the error chain to find out if it's a broken pipe
+    pub fn is_broken_pipe(&self) -> bool {
+        let mut source = Some(self as &dyn std::error::Error);
+        while let Some(err) = source {
+            if let Some(ioe) = err.downcast_ref::<std::io::Error>() {
+                if ioe.kind() == std::io::ErrorKind::BrokenPipe {
+                    return true;
+                }
+            }
+            source = err.source();
+        }
+        false
     }
 }
 
