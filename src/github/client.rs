@@ -125,7 +125,7 @@ impl GithubClient {
         let mut after: Option<String> = None;
         let per_page = 100;
 
-        let octocrab = self.octocrab.clone();
+        //let octocrab = self.octocrab.clone();
         let query = r#"
         query($owner: String!, $repo: String!, $first: Int!, $after: String) {
             repository(owner: $owner, name: $repo) {
@@ -167,7 +167,7 @@ impl GithubClient {
                     "after": after,
                 }
             });
-            let res: RepoResponse = octocrab.graphql(&payload).await?;
+            let res: RepoResponse = self.octocrab.graphql(&payload).await?;
             let repo = &res.data.repository;
             let parent_url = repo.parent.as_ref().map(|p| p.url.clone());
 
@@ -1020,13 +1020,23 @@ impl GithubClient {
                 .branch(tag.to_string())
                 .send()
                 .await?;
-
-            new_commits.extend(
+            // Arbitrary pre-allocated length. Uses a bit more memory, but reduces
+            // the number of potential resizes
+            let mut commit_line = String::with_capacity(200);
+            for commit in &commits.items {
+                commit_line.clear();
+                if let Some(first_line) = commit.commit.message.lines().next() {
+                    commit_line.push_str(first_line);
+                    new_commits.push(commit_line.clone());
+                }
+            }
+            /*new_commits.extend(
                 commits
                     .items
                     .iter()
                     .map(|c| c.commit.message.lines().next().unwrap().to_string()),
             );
+            */
 
             if commits.items.len() < per_page as usize {
                 break;
@@ -1064,9 +1074,18 @@ impl GithubClient {
             }
         }
 
-        let mut body_header = tag.replace("-tag", "");
+        /*let mut body_header = tag.replace("-tag", "");
         body_header = body_header.replace("ODP-", "");
         body_header = format!("# Release Notes for {capitalized} {body_header}");
+        */
+
+        let body_header = format!(
+            "# Release Notes for {capitalized} {}",
+            tag.strip_suffix("-tag")
+                .unwrap_or(tag)
+                .strip_prefix("ODP-")
+                .unwrap_or_else(|| tag.strip_suffix("-tag").unwrap_or(tag))
+        );
 
         let mut body_commits: Vec<String> = Vec::with_capacity(new_commits.len() + 10);
         body_commits.push(body_header.clone());

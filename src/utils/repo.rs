@@ -177,7 +177,10 @@ pub fn get_repo_info_from_url(url: &str) -> Result<RepoInfo, GitError> {
     if let Some(captures) = repo_regex.captures(url) {
         if captures.len() > 2 {
             let owner = captures["owner"].to_string();
-            let repo = captures["repo"].to_string().replace(".git", "");
+            let repo = captures["repo"]
+                .strip_suffix(".git")
+                .unwrap_or(&captures["repo"])
+                .to_string();
             return Ok(RepoInfo {
                 owner,
                 repo_name: repo,
