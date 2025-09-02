@@ -2,18 +2,21 @@
 .el .ds Aq '
 .TH sync 1  "sync " 
 .SH NAME
-sync \- Sync repoositories
+sync \- Sync tags for a forked repository with its parent
 .SH SYNOPSIS
-\fBsync\fR [\fB\-r\fR|\fB\-\-repository\fR] [\fB\-a\fR|\fB\-\-all\fR] [\fB\-h\fR|\fB\-\-help\fR] 
+\fBsync\fR [\fB\-r\fR|\fB\-\-repository\fR] [\fB\-a\fR|\fB\-\-all\fR] [\fB\-w\fR|\fB\-\-without\-annotated\fR] [\fB\-h\fR|\fB\-\-help\fR] 
 .SH DESCRIPTION
-Sync repoositories
+Sync tags for a forked repository with its parent
 .SH OPTIONS
 .TP
 \fB\-r\fR, \fB\-\-repository\fR \fI<REPOSITORY>\fR
-The repository to sync
+The Repository to sync tags for. Not valid if \*(Aq\-\-all\*(Aq is set
 .TP
 \fB\-a\fR, \fB\-\-all\fR
-
+Sync tags for all configured repositories. Not valid if \*(Aq\-\-repository\*(Aq is set
+.TP
+\fB\-w\fR, \fB\-\-without\-annotated\fR
+Disable syncing annotated tags. Syncing annotated tags requires git to be setup with commit access to the repositories you are attempting to manage
 .TP
 \fB\-h\fR, \fB\-\-help\fR
 Print help

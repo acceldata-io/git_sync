@@ -4,7 +4,7 @@
 .SH NAME
 check \- Check repositories for various conditions, such as branch protection being enabled, stale branches, etc
 .SH SYNOPSIS
-\fBcheck\fR [\fB\-r\fR|\fB\-\-repository\fR] [\fB\-a\fR|\fB\-\-all\fR] [\fB\-l\fR|\fB\-\-license\fR] [\fB\-p\fR|\fB\-\-protected\fR] [\fB\-o\fR|\fB\-\-old\-branches\fR] [\fB\-d\fR|\fB\-\-days\-ago\fR] [\fB\-b\fR|\fB\-\-branch\-filter\fR] [\fB\-h\fR|\fB\-\-help\fR] 
+\fBcheck\fR [\fB\-r\fR|\fB\-\-repository\fR] [\fB\-a\fR|\fB\-\-all\fR] [\fB\-l\fR|\fB\-\-license\fR] [\fB\-p\fR|\fB\-\-protected\fR] [\fB\-\-branch\fR] [\fB\-o\fR|\fB\-\-old\-branches\fR] [\fB\-d\fR|\fB\-\-days\-ago\fR] [\fB\-b\fR|\fB\-\-branch\-filter\fR] [\fB\-h\fR|\fB\-\-help\fR] 
 .SH DESCRIPTION
 Check repositories for various conditions, such as branch protection being enabled, stale branches, etc
 .SH OPTIONS
@@ -21,6 +21,9 @@ Enable checking the license of target repositories
 \fB\-p\fR, \fB\-\-protected\fR
 Enable checking the protected status of the main branch for target repositories
 .TP
+\fB\-\-branch\fR \fI<BRANCH>\fR
+Specify the branch to check. Required when \*(Aq\-\-protected\*(Aq is enabled
+.TP
 \fB\-o\fR, \fB\-\-old\-branches\fR
 Enable checking for old branches in target repository
 .TP
@@ -35,7 +38,7 @@ Print help
 .SH EXTRA
 EXAMPLES:
     # Check all repositories for license and branch protection
-    git_sync repo check \-\-all \-\-license \-\-protected
+    git_sync repo check \-\-all \-\-license \-\-protected \-\-branch "ODP\-main"
     # Check a specific repository for old branches inactive for 60 days matching a specific pattern. The pattern is optional, and if not provided, all branches will be checked.
     git_sync repo check \-\-repository my\-repo \-\-old\-branches \-\-days\-ago \-\-branch\-filter "^ODP"
 

@@ -2,11 +2,11 @@
 .el .ds Aq '
 .TH git_sync 1  "git_sync 0.1.0" 
 .SH NAME
-git_sync \- Root level struct for cli arguments
+git_sync \- Top level options to configure git_sync
 .SH SYNOPSIS
 \fBgit_sync\fR [\fB\-t\fR|\fB\-\-token\fR] [\fB\-f\fR|\fB\-\-file\fR] [\fB\-r\fR|\fB\-\-repository\-type\fR] [\fB\-q\fR|\fB\-\-quiet\fR] [\fB\-h\fR|\fB\-\-help\fR] [\fB\-V\fR|\fB\-\-version\fR] <\fIsubcommands\fR>
 .SH DESCRIPTION
-Root level struct for cli arguments
+Top level options to configure git_sync
 .SH OPTIONS
 .TP
 \fB\-t\fR, \fB\-\-token\fR \fI<TOKEN>\fR
@@ -49,6 +49,12 @@ Manage repositories
 .TP
 git_sync\-tag(1)
 Manage tags
+.TP
+git_sync\-release(1)
+All valid commands concerning releases
+.TP
+git_sync\-pr(1)
+All valid commands concerning PRs
 .TP
 git_sync\-help(1)
 Print this message or the help of the given subcommand(s)

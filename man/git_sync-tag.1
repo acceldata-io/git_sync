@@ -4,13 +4,10 @@
 .SH NAME
 tag \- Manage tags
 .SH SYNOPSIS
-\fBtag\fR [\fB\-r\fR|\fB\-\-repository\fR] [\fB\-h\fR|\fB\-\-help\fR] <\fIsubcommands\fR>
+\fBtag\fR [\fB\-h\fR|\fB\-\-help\fR] <\fIsubcommands\fR>
 .SH DESCRIPTION
 Manage tags
 .SH OPTIONS
-.TP
-\fB\-r\fR, \fB\-\-repository\fR \fI<REPOSITORY>\fR
-Repository to act upon
 .TP
 \fB\-h\fR, \fB\-\-help\fR
 Print help
@@ -24,6 +21,9 @@ Create a new tag
 .TP
 tag\-delete(1)
 Delete a tag
+.TP
+tag\-sync(1)
+Sync tags for a forked repository with its parent
 .TP
 tag\-help(1)
 Print this message or the help of the given subcommand(s)

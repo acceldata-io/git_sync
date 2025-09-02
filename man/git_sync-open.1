@@ -1,0 +1,53 @@
+.ie \n(.g .ds Aq \(aq
+.el .ds Aq '
+.TH open 1  "open " 
+.SH NAME
+open \- Create a new PR
+.SH SYNOPSIS
+\fBopen\fR [\fB\-r\fR|\fB\-\-repository\fR] [\fB\-a\fR|\fB\-\-all\fR] <\fB\-\-head\fR> <\fB\-b\fR|\fB\-\-base\fR> <\fB\-t\fR|\fB\-\-title\fR> [\fB\-\-body\fR] [\fB\-\-merge\fR] [\fB\-\-merge\-title\fR] [\fB\-\-merge\-body\fR] [\fB\-\-merge\-method\fR] [\fB\-\-sha\fR] [\fB\-\-reviewers\fR] [\fB\-h\fR|\fB\-\-help\fR] 
+.SH DESCRIPTION
+Create a new PR
+.SH OPTIONS
+.TP
+\fB\-r\fR, \fB\-\-repository\fR \fI<REPOSITORY>\fR
+Repository for which you are creating a PR
+.TP
+\fB\-a\fR, \fB\-\-all\fR
+Create a PR for all configured repositories
+.TP
+\fB\-\-head\fR \fI<HEAD>\fR
+The name of the branch where your changes are implemented
+.TP
+\fB\-b\fR, \fB\-\-base\fR \fI<BASE>\fR
+The name of the branch you want the changes pulled into
+.TP
+\fB\-t\fR, \fB\-\-title\fR \fI<TITLE>\fR
+The title for the PR
+.TP
+\fB\-\-body\fR \fI<BODY>\fR
+The body for the PR
+.TP
+\fB\-\-merge\fR
+Attempt to merge the PR after creating it. This will only succeed if the PR is mergeable and has no conflicts
+.TP
+\fB\-\-merge\-title\fR \fI<MERGE_TITLE>\fR
+Title for the automatic commit message
+.TP
+\fB\-\-merge\-body\fR \fI<MERGE_BODY>\fR
+Extra detail to append to automatic commit message
+.TP
+\fB\-\-merge\-method\fR \fI<MERGE_METHOD>\fR [default: merge]
+The method to use when merging the PR
+.br
+
+.br
+[\fIpossible values: \fRmerge, squash, rebase]
+.TP
+\fB\-\-sha\fR \fI<SHA>\fR
+SHA that the pull request head must match to permit merging
+.TP
+\fB\-\-reviewers\fR \fI<REVIEWERS>\fR
+A list of reviewers to request a review from
+.TP
+\fB\-h\fR, \fB\-\-help\fR
+Print help
