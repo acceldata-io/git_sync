@@ -38,7 +38,13 @@ rustls = { version = "0.23", features = ["aws-lc-rs", "zlib"] }
 aws-lc-rs = "1.13.3"
 temp-dir = "0.1.16"
 tokio-retry = "0.3.0"
-reqwest = "0.12.23"
+reqwest = {version = "0.12.23", default-features = false, features = [
+  "http2",
+  "rustls-tls",
+  "charset",
+  "system-proxy",
+  "json",
+]}
 hyper = "1.7.0"
 indicatif = { version = "0.18.0", features = ["tokio"] }
 console = "0.16.0"
