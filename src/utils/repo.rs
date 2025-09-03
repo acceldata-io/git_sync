@@ -167,35 +167,77 @@ pub struct RepoChecks {
 }
 
 /// Parse the owner and repository name from a github repository url.
+/// Specifically this is for taking https://github.com/<owner>/<repo>
+/// and pulling out <owner> and <repo>
 pub fn get_repo_info_from_url(url: &str) -> Result<RepoInfo, GitError> {
     // Named capture groups for the owner and the repo
+    // Use the OnceLock to ensure we only compile the regex once, improving performance greatly
+    // compared to compiling the regex each time
     let repo_regex = REPO_REGEX.get_or_init(|| {
-        Regex::new(r"^https://github.com/(?<owner>[^/].+)/(?<repo>[^/].+[^/])/?(\.git)?/?.*")
-            .expect("Invalid regex for {url}")
+        // This has an optional prefix for github, and a required owner and repo.
+        // We don't need the .git suffix at the end, so while we do optionally check for it,
+        // we don't need to capture it.
+        //
+        // "The repository name can only contain ASCII letters, digits, and the characters ., -, and _."
+        let msg = format!("Invalid regex for {url}");
+        Regex::new(
+            r"^(?:https://github.com/)?(?P<owner>[A-Za-z0-9._-]+)/(?P<repo>[A-Za-z0-9._-]+)(?:\.git)?/?$",
+        )
+        .expect(&msg)
     });
-
+    let url = url.trim();
     if let Some(captures) = repo_regex.captures(url) {
-        if captures.len() > 2 {
-            let owner = captures["owner"].to_string();
-            let repo = captures["repo"]
+        let owner = match captures.name("owner") {
+            Some(m) => m.as_str().to_string(),
+            None => return Err(GitError::InvalidRepository(url.to_string())),
+        };
+
+        let repo = match captures.name("repo") {
+            Some(m) => m
+                .as_str()
                 .strip_suffix(".git")
-                .unwrap_or(&captures["repo"])
-                .to_string();
-            return Ok(RepoInfo {
-                owner,
-                repo_name: repo,
-                url: url.to_string(),
-                main_branch: None,
-            });
-        }
+                .unwrap_or(m.as_str())
+                .to_string(),
+            None => return Err(GitError::InvalidRepository(url.to_string())),
+        };
+        println!("Repo: {repo}");
+        let url = format!("https://github.com/{owner}/{repo}");
+        return Ok(RepoInfo {
+            owner,
+            url,
+            repo_name: repo,
+            main_branch: None,
+        });
     }
     Err(GitError::InvalidRepository(url.to_string()))
 }
 
+/// Convert an https github url to a clonable SSH URL, needed for cloning a repository
+/// in order to be able to push to the repository
 pub fn http_to_ssh_repo(url: &str) -> Result<String, GitError> {
+    let url = url.trim();
+    if url.starts_with("git@github.com") {
+        if url.ends_with(".git") {
+            return Ok(url.to_string());
+        } else {
+            return Ok(format!("{url}.git"));
+        }
+    }
     let repo_info = get_repo_info_from_url(url)?;
-    let (owner, repo) = (repo_info.owner, repo_info.repo_name);
-    Ok(format!("git@github.com:{owner}/{repo}.git"))
+    Ok(format!(
+        "git@github.com:{}/{}.git",
+        repo_info.owner, repo_info.repo_name
+    ))
+}
+
+/// Convert github http status errors to a usable string message
+pub fn get_http_status(err: &octocrab::Error) -> (Option<http::StatusCode>, Option<String>) {
+    if let octocrab::Error::GitHub { source, .. } = err {
+        let status = source.status_code;
+        let message = source.message.clone();
+        return (Some(status), Some(message));
+    }
+    (None, None)
 }
 
 #[cfg(test)]
@@ -246,6 +288,7 @@ mod tests {
             "https://github.com/acceldata-io/",
         ];
         for test in bad_tests {
+            println!("{test}");
             let info = get_repo_info_from_url(test);
             assert!(info.is_err())
         }

@@ -59,7 +59,7 @@ macro_rules! handle_api_response {
         match $response {
             Ok(body) => $ok(body),
             Err(err) => {
-                let (status, message) = get_http_status(&err);
+                let (status, message) = $crate::utils::repo::get_http_status(&err);
                 match (status, message) {
                     (Some(code), Some(message)) => {
                         eprintln!("{}: HTTP {:?} - {:?}", $context, code, message)
@@ -187,11 +187,11 @@ macro_rules! async_retry {
         error_predicate = $pred: expr,
         body = $body: block,
     ) => {{
-        let retry_strategy = ExponentialBackoff::from_millis($ms)
+        let retry_strategy = tokio_retry::strategy::ExponentialBackoff::from_millis($ms)
             .max_delay(tokio::time::Duration::from_millis($timeout))
             .map(tokio_retry::strategy::jitter)
             .take($retries);
 
-        RetryIf::spawn(retry_strategy, || async { $body }, $pred).await
+        tokio_retry::RetryIf::spawn(retry_strategy, || async { $body }, $pred).await
     }};
 }

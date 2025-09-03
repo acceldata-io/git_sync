@@ -33,18 +33,17 @@ const SAMPLE_CONFIG: &str = r#"#Git repo syncing configuration
 #Use shallow clones by default to use less disk space,
 #bandwidth, and decrease processing time
 shallow_by_default = true
-#owner="set owner organization/user here"
+#owner = "set owner organization/user here"
 
 [info]
-#name="set the name of who is commiting changes"
-#email="set the email of who is commiting changes"
+#name = "set the name of who is commiting changes"
+#email = "set the email of who is commiting changes"
 
-#repos is just the name of a repository, not including the owner.
-#ex: https://github.com/apache/hadoop/ -> just "hadoop"
-[fork_repos]
-#repos=["repo1","repo2"]
-[private_repos]
-#repos=["repo1", "repo2"]
+[repos]
+#fork = ["repo1", "repo2"]
+#private = ["repo1", "repo2"]
+#public = []
+
 "#;
 
 /// Create a sample config file
