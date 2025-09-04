@@ -87,7 +87,7 @@ impl Config {
     /// Create a new config from an optional path. If None, then it tries to load the config.
     /// If it can't be loaded, the default values are loaded, which probably won't work as
     /// expected.
-    pub fn new(path: &Option<PathBuf>) -> Result<Self, GitError> {
+    pub fn new(path: Option<&PathBuf>) -> Result<Self, GitError> {
         if let Some(config_path) = path {
             Ok(Config::from_file(config_path)?)
         } else {
@@ -100,7 +100,7 @@ impl Config {
         match toml::from_str(&config_str) {
             Ok(config) => Ok(config),
             Err(e) => {
-                eprintln!("Toml parse error in {path:?}: {e}");
+                eprintln!("Toml parse error in {}: {e}", path.display());
                 Err(GitError::TomlError(e))
             }
         }
@@ -108,7 +108,7 @@ impl Config {
     /// Try to load the config from expected locations. Checks in the current directory first,
     /// then checks for the configuration file in ~/.config/ next. If all else fails, it sets
     /// everything to the default.
-    /// In the default case, as long as you have the GITHUB_TOKEN defined as an environment
+    /// In the default case, as long as you have the `GITHUB_TOKEN` defined as an environment
     /// variable, you can still perform operations through the github api.
     /// If not, this tool will fail to run and tell you you're missing the token.
     pub fn load() -> Self {
@@ -117,7 +117,7 @@ impl Config {
         }
         if let Some(home_dir) = home_dir() {
             let home_config = home_dir.join(".config").join(CONFIG_NAME);
-            println!("Checking home_dir: {home_config:?}");
+            println!("Checking home_dir: {}", home_config.display());
             if let Ok(home_config) = Config::from_file(&home_config) {
                 return home_config;
             }

@@ -42,12 +42,11 @@ pub struct GithubClient {
 }
 
 impl GithubClient {
-    pub fn new(github_token: String, _config: &Config, is_a_tty: bool) -> Result<Self, GitError> {
+    pub fn new(github_token: &str, _config: &Config) -> Result<Self, GitError> {
         let octocrab = Octocrab::builder()
-            .personal_token(github_token.clone())
+            .personal_token(github_token)
             .build()
             .map_err(GitError::GithubApiError)?;
-        println!("Is user? {is_a_tty}");
         Ok(Self { octocrab })
     }
     /// Get the parent repository of a github repository.
@@ -111,7 +110,7 @@ impl GithubClient {
         let mut errors: Vec<(String, GitError)> = Vec::new();
         while let Some((repo, result)) = futures.next().await {
             match result {
-                Ok(_) => {
+                Ok(()) => {
                     println!("✅ Successfully synced {repo}");
                 }
                 Err(e) => {
@@ -158,14 +157,14 @@ impl GithubClient {
     /// Get the number of graphql api calls left at the moment. Generally, the maximum number is
     /// 5000. This is tracked separately from the rest api limits.
     pub async fn get_graphql_limit(&self) -> Result<(), GitError> {
-        let query = r#"
+        let query = r"
             {
                 rateLimit {
                     limit
                     remaining
                     resetAt
                 }
-            }"#;
+            }";
         let payload = serde_json::json!({ "query": query });
 
         let response: Result<serde_json::Value, octocrab::Error> = async_retry!(

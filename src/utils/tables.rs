@@ -136,7 +136,7 @@ impl<
         let term = Term::stdout();
 
         let table = if self.rows.is_empty() {
-            "".to_string()
+            String::new()
         } else if self.centre && term.is_term() {
             let term_width = term.size().1 as usize;
             self.table

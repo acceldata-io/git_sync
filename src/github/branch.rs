@@ -45,10 +45,14 @@ impl GithubClient {
 
         match res {
             Ok(r) => {
-                let sha = match r.object {
+                let octocrab::models::repos::Object::Commit { sha, .. } = r.object else {
+                    return Err(GitError::NoSuchBranch(branch.to_string()));
+                };
+                /*let sha = match r.object {
                     octocrab::models::repos::Object::Commit { sha, .. } => sha,
                     _ => return Err(GitError::NoSuchBranch(branch.to_string())),
                 };
+                */
                 Ok(sha)
             }
             Err(e) => Err(GitError::GithubApiError(e)),
@@ -89,11 +93,10 @@ impl GithubClient {
             .get_ref(&Reference::Branch(base_branch.to_string()))
             .await?;
         */
-
-        let sha = match response.object {
-            octocrab::models::repos::Object::Commit { sha, .. } => sha,
-            _ => return Err(GitError::NoSuchBranch(base_branch.to_string())),
+        let octocrab::models::repos::Object::Commit { sha, .. } = response.object else {
+            return Err(GitError::NoSuchBranch(base_branch.to_string()));
         };
+
         let res: Result<_, octocrab::Error> = async_retry!(
             ms = 100,
             timeout = 5000,
@@ -139,7 +142,7 @@ impl GithubClient {
         let mut errors: Vec<(String, GitError)> = Vec::new();
         while let Some((repo, result)) = futures.next().await {
             match result {
-                Ok(_) => {
+                Ok(()) => {
                     println!("✅ Successfully created '{new_branch}' for {repo}");
                 }
                 Err(e) => {
@@ -208,7 +211,7 @@ impl GithubClient {
         let mut errors: Vec<(String, GitError)> = Vec::new();
         while let Some((repo, result)) = futures.next().await {
             match result {
-                Ok(_) => {
+                Ok(()) => {
                     println!("✅ Successfully deleted '{branch}' for {repo}");
                 }
                 Err(e) => {

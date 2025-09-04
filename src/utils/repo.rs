@@ -20,6 +20,7 @@ use crate::error::GitError;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::fmt;
+use std::fmt::Write as _;
 use std::hash::{Hash, Hasher};
 use std::sync::OnceLock;
 
@@ -57,7 +58,7 @@ pub struct TagInfo {
 }
 
 /// Implements checking for equality based on the tag name only. This is needed for
-/// Taginfo to be used in a HashSet
+/// `Taginfo` to be used in a `HashSet`
 impl PartialEq for TagInfo {
     fn eq(&self, other: &Self) -> bool {
         self.name == other.name
@@ -65,19 +66,21 @@ impl PartialEq for TagInfo {
 }
 impl Eq for TagInfo {}
 
-/// Implements hashing for name only. This is needed to use TagInfo in a HashSet
+/// Implements hashing for name only. This is needed to use `TagInfo` in a `HashSet`
 impl Hash for TagInfo {
     fn hash<H: Hasher>(&self, state: &mut H) {
         self.name.hash(state);
     }
 }
 
+/// The different types of tags
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq, Hash, Clone)]
 pub enum TagType {
     Annotated,
     Lightweight,
 }
 
+/// A holder for the results of various checks on a repository
 pub struct Checks {
     pub branches: Vec<(String, String)>,
     pub rules: Vec<BranchProtectionRule>,
@@ -148,25 +151,43 @@ impl fmt::Display for BranchProtectionRule {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut output = String::new();
 
-        output += &format!("\tPattern: {}\n", self.pattern.as_deref().unwrap_or("N/A"));
-        output += &format!("\tAdmin enforced: {}\n", self.opt_bool(self.admin_enforced));
-        let pr = self.opt_bool(self.requires_approving_reviews);
-        let status_check = self.opt_bool(self.requires_status_checks);
-        let strict_check = self.opt_bool(self.requires_strict_status_checks);
-        let restrict_pushes = self.opt_bool(self.restricts_pushes);
-        let restrict_dismissals = self.opt_bool(self.restricts_review_dismissals);
+        let pattern = format!("\tPattern: {}\n", self.pattern.as_deref().unwrap_or("N/A"));
+        let admin = format!("\tAdmin enforced: {}\n", self.opt_bool(self.admin_enforced));
 
-        output += &format!("\tRequire PR approving reviews: {pr}\n");
+        let pr = self.opt_bool(self.requires_approving_reviews);
+        let require_pr = format!("\tRequire PR approving reviews: {pr}\n");
+        let status_check = format!(
+            "\tRequire status checks: {}\n",
+            self.opt_bool(self.requires_status_checks)
+        );
+        let strict_check = format!(
+            "\tRequire strict status checks: {}\n",
+            self.opt_bool(self.requires_strict_status_checks)
+        );
+        let restrict_pushes = format!(
+            "\tRestrict pushes: {}\n",
+            self.opt_bool(self.restricts_pushes)
+        );
+        let restrict_dismissals = format!(
+            "\tRestrict review dismissals: {}\n\n",
+            self.opt_bool(self.restricts_review_dismissals)
+        );
+
+        write!(output, "{pattern}")?;
+        write!(output, "{admin}")?;
+
         if let Some(count) = self.requires_approving_review_count {
-            output += &format!("\tRequired PR review count: {count}\n");
+            let out = format!("\tRequired PR review count: {count}\n");
+            write!(output, "{out}")?;
         } else {
-            output += "\tRequired PR review count: None\n";
+            writeln!(output, "\tRequired PR review count: None")?;
         }
 
-        output += &format!("\tRequire status checks: {status_check}\n");
-        output += &format!("\tRequire strict status checks: {strict_check}\n");
-        output += &format!("\tRestrict pushes: {restrict_pushes}\n");
-        output += &format!("\tRestrict review dismissals: {restrict_dismissals}\n\n");
+        write!(output, "{status_check}")?;
+        write!(output, "{require_pr}")?;
+        write!(output, "{strict_check}")?;
+        write!(output, "{restrict_pushes}")?;
+        write!(output, "{restrict_dismissals}")?;
 
         write!(f, "{output}")
     }
@@ -195,8 +216,6 @@ pub struct RepoChecks {
 }
 
 /// Parse the owner and repository name from a github repository url.
-/// Specifically this is for taking https://github.com/<owner>/<repo>
-/// and pulling out <owner> and <repo>
 pub fn get_repo_info_from_url(url: &str) -> Result<RepoInfo, GitError> {
     // Named capture groups for the owner and the repo
     // Use the OnceLock to ensure we only compile the regex once, improving performance greatly
@@ -245,11 +264,11 @@ pub fn get_repo_info_from_url(url: &str) -> Result<RepoInfo, GitError> {
 pub fn http_to_ssh_repo(url: &str) -> Result<String, GitError> {
     let url = url.trim();
     if url.starts_with("git@github.com") {
+        #[allow(clippy::case_sensitive_file_extension_comparisons)]
         if url.ends_with(".git") {
             return Ok(url.to_string());
-        } else {
-            return Ok(format!("{url}.git"));
         }
+        return Ok(format!("{url}.git"));
     }
     let repo_info = get_repo_info_from_url(url)?;
     Ok(format!(

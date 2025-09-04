@@ -16,6 +16,7 @@ KIND, either express or implied.  See the License for the
 specific language governing permissions and limitations
 under the License.
 */
+#![warn(clippy::pedantic)]
 mod cli;
 mod config;
 mod error;
@@ -23,7 +24,7 @@ mod github;
 mod init;
 mod utils;
 
-use cli::*;
+use cli::parse_args;
 use config::Config;
 use error::GitError;
 use github::parse;
@@ -42,7 +43,7 @@ async fn main() -> Result<(), GitError> {
     let args = parse_args();
 
     let result: Result<(), GitError> = {
-        let config = Config::new(&args.file)?;
+        let config = Config::new(args.file.as_ref())?;
         parse::match_arguments(&args, config).await
     };
     // Get nice error messages, with simple suggestions instead of huge structs

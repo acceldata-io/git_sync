@@ -53,7 +53,7 @@ impl GithubClient {
         match pr_result {
             Ok(p) => {
                 pr_number = p.number;
-                println!("PR #{pr_number} created successfully for {owner}/{repo}")
+                println!("PR #{pr_number} created successfully for {owner}/{repo}");
             }
             Err(e) => {
                 eprintln!("Failed to create PR for {owner}/{repo} after {retries} tries: {e}");
@@ -110,10 +110,10 @@ impl GithubClient {
                 match result {
                     Ok(pr_number) => {
                         if let Some(mut opts) = merge_opts {
-                            opts.url = repo.clone();
+                            opts.url.clone_from(repo);
                             opts.pr_number = pr_number;
                             let merge_result = self.merge_pr(&opts).await;
-                            (repo, merge_result.map(|_| pr_number))
+                            (repo, merge_result.map(|()| pr_number))
                         } else {
                             (repo, Ok(pr_number))
                         }

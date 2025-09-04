@@ -31,6 +31,7 @@ impl GithubClient {
     /// Get branches that are older than a certain number of days
     /// A blacklist should be passed to ignore certain branches, since some of them are static and
     /// will never change, nor should they be deleted.
+    #[allow(clippy::too_many_lines)]
     pub async fn check_repository(
         &self,
         url: &str,
@@ -109,14 +110,13 @@ impl GithubClient {
                 }
             });
 
-            let res: Result<serde_json::Value, octocrab::Error> = async_retry!(
+            let response: serde_json::Value = async_retry!(
                 ms = 100,
                 timeout = 5000,
                 retries = 3,
                 error_predicate = |e: &octocrab::Error| is_retryable(e),
                 body = { octocrab.graphql(&payload).await },
-            );
-            let response: serde_json::Value = res?;
+            )?;
             let refs = &response["data"]["repository"]["refs"];
             license = response["data"]["repository"]["licenseInfo"]
                 .as_object()
@@ -167,7 +167,9 @@ impl GithubClient {
 
             let page_info = &refs["pageInfo"];
             let has_next_page = page_info["hasNextPage"].as_bool().unwrap_or(false);
-            after = page_info["endCursor"].as_str().map(|s| s.to_string());
+            after = page_info["endCursor"]
+                .as_str()
+                .map(std::string::ToString::to_string);
 
             if !has_next_page {
                 break;
@@ -209,7 +211,7 @@ impl GithubClient {
             repo: format!("{owner}/{repo}"),
         })
     }
-    pub async fn display_check_results(
+    pub fn display_check_results(
         &self,
         header: Vec<String>,
         rows: Vec<Vec<String>>,
@@ -236,7 +238,7 @@ impl GithubClient {
             license
                 .and_then(|l| l.name)
                 .unwrap_or("No license found".to_string())
-        )
+        );
     }
     /// Run the selected checks against all configured repositories
     pub async fn check_all_repositories(
@@ -263,10 +265,10 @@ impl GithubClient {
                 Err(e) => errors.push((repo, e)),
             }
         }
-        if !errors.is_empty() {
-            Err(GitError::MultipleErrors(errors))
-        } else {
+        if errors.is_empty() {
             Ok(results)
+        } else {
+            Err(GitError::MultipleErrors(errors))
         }
     }
 }

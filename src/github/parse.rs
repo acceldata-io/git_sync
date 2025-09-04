@@ -17,7 +17,10 @@ specific language governing permissions and limitations
 under the License.
 */
 use crate::GitError;
-use crate::cli::*;
+use crate::cli::{
+    AppArgs, BranchCommand, Command, PRCommand, ReleaseCommand, RepoCommand, RepositoryType,
+    TagCommand, cli,
+};
 use crate::config::Config;
 use crate::github::client::GithubClient;
 use crate::init::generate_config;
@@ -29,7 +32,6 @@ use clap_complete::{
     shells::{Bash, Fish, Zsh},
 };
 use clap_mangen::Man;
-use console::user_attended;
 use regex::Regex;
 use std::fs::File;
 use std::path::{Path, PathBuf};
@@ -39,7 +41,7 @@ pub async fn match_arguments(app: &AppArgs, config: Config) -> Result<(), GitErr
     // If we're trying to generate man pages or shell completion, we don't need
     // a github token
     let token = match &app.command {
-        Command::Generate { .. } | Command::Config { .. } => "".to_string(),
+        Command::Generate { .. } | Command::Config { .. } => String::new(),
         _ => app
             .token
             .clone()
@@ -56,9 +58,7 @@ pub async fn match_arguments(app: &AppArgs, config: Config) -> Result<(), GitErr
         RepositoryType::All => config.get_all_repositories(),
     };
 
-    let is_user = user_attended();
-
-    let client = GithubClient::new(token.to_string(), &config, is_user)?;
+    let client = GithubClient::new(&token, &config)?;
     if !token.is_empty() && verbose {
         let (rest_limit, graphql_limit) =
             tokio::join!(client.get_rate_limit(), client.get_graphql_limit());
@@ -76,7 +76,7 @@ pub async fn match_arguments(app: &AppArgs, config: Config) -> Result<(), GitErr
                 compare_cmd.validate().map_err(GitError::Other)?;
                 let repository = compare_cmd.repository.as_ref();
                 if compare_cmd.all && !repos.is_empty() {
-                    client.diff_all_tags(repos).await?
+                    client.diff_all_tags(repos).await?;
                 } else if compare_cmd.all && repos.is_empty() {
                     return Err(GitError::NoReposConfigured);
                 } else if let Some(repository) = repository {
@@ -91,11 +91,11 @@ pub async fn match_arguments(app: &AppArgs, config: Config) -> Result<(), GitErr
                 let repository = create_cmd.repository.as_ref();
 
                 if create_cmd.all {
-                    client.create_all_tags(tag, branch, repos).await?
+                    client.create_all_tags(tag, branch, repos).await?;
                 } else if let Some(repository) = repository {
                     client
                         .create_tag(repository, &create_cmd.tag, &create_cmd.branch)
-                        .await?
+                        .await?;
                 } else {
                     return Err(GitError::MissingRepositoryName);
                 }
@@ -104,9 +104,9 @@ pub async fn match_arguments(app: &AppArgs, config: Config) -> Result<(), GitErr
                 let repository = delete_cmd.repository.as_ref();
 
                 if delete_cmd.all {
-                    client.delete_all_tags(&delete_cmd.tag, &repos).await?
+                    client.delete_all_tags(&delete_cmd.tag, &repos).await?;
                 } else if let Some(repository) = repository {
-                    client.delete_tag(repository, &delete_cmd.tag).await?
+                    client.delete_tag(repository, &delete_cmd.tag).await?;
                 } else {
                     return Err(GitError::MissingRepositoryName);
                 }
@@ -116,9 +116,9 @@ pub async fn match_arguments(app: &AppArgs, config: Config) -> Result<(), GitErr
                 // By default, this is false
                 let process_annotated_tags = sync_cmd.without_annotated;
                 if sync_cmd.all {
-                    client.sync_all_tags(process_annotated_tags, repos).await?
+                    client.sync_all_tags(process_annotated_tags, repos).await?;
                 } else if let Some(repository) = repository {
-                    client.sync_tags(repository, process_annotated_tags).await?
+                    client.sync_tags(repository, process_annotated_tags).await?;
                 } else {
                     return Err(GitError::MissingRepositoryName);
                 }
@@ -128,9 +128,9 @@ pub async fn match_arguments(app: &AppArgs, config: Config) -> Result<(), GitErr
             RepoCommand::Sync(sync_cmd) => {
                 let repository = sync_cmd.repository.as_ref();
                 if sync_cmd.all {
-                    client.sync_all_forks(repos).await?
+                    client.sync_all_forks(repos).await?;
                 } else if let Some(repository) = repository {
-                    client.sync_fork(repository).await?
+                    client.sync_fork(repository).await?;
                 } else {
                     return Err(GitError::MissingRepositoryName);
                 }
@@ -191,15 +191,13 @@ pub async fn match_arguments(app: &AppArgs, config: Config) -> Result<(), GitErr
                         .iter()
                         .map(|(b, d)| vec![b.to_string(), d.to_string()])
                         .collect();
-                    client
-                        .display_check_results(
-                            vec!["Branch".to_string(), "Date".to_string()],
-                            branches,
-                            rules,
-                            license.clone(),
-                            repo,
-                        )
-                        .await;
+                    client.display_check_results(
+                        vec!["Branch".to_string(), "Date".to_string()],
+                        branches,
+                        rules,
+                        license.clone(),
+                        repo,
+                    );
                     /*println!("Rules for '{repo}':");
                     for rule in rules {
                         println!("{rule}");
@@ -218,9 +216,9 @@ pub async fn match_arguments(app: &AppArgs, config: Config) -> Result<(), GitErr
                     create_cmd.new_branch.clone(),
                 );
                 if create_cmd.all {
-                    client.create_all_branches(&base, &new, &repos).await?
+                    client.create_all_branches(&base, &new, &repos).await?;
                 } else if let Some(repository) = repository {
-                    client.create_branch(repository, &base, &new).await?
+                    client.create_branch(repository, &base, &new).await?;
                 }
             }
             BranchCommand::Delete(delete_cmd) => {
@@ -228,9 +226,9 @@ pub async fn match_arguments(app: &AppArgs, config: Config) -> Result<(), GitErr
                 if delete_cmd.all {
                     client
                         .delete_all_branches(&delete_cmd.branch, &repos)
-                        .await?
+                        .await?;
                 } else if let Some(repository) = repository {
-                    client.delete_branch(repository, &delete_cmd.branch).await?
+                    client.delete_branch(repository, &delete_cmd.branch).await?;
                 }
             }
         },
@@ -293,7 +291,7 @@ pub async fn match_arguments(app: &AppArgs, config: Config) -> Result<(), GitErr
             }
         },
         Command::Config { file, force } => {
-            generate_config(file, *force)?;
+            generate_config(file.as_ref(), *force)?;
         }
         Command::Generate { kind, out } => {
             let mut cmd = cli();

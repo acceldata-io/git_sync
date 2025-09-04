@@ -20,7 +20,7 @@ use crate::utils::pr::MergeMethod;
 use clap::{ArgGroup, Args, CommandFactory, Parser, Subcommand, ValueEnum};
 use std::fmt;
 use std::path::PathBuf;
-/// git_sync is an application for managing multiple github repositories at once.
+/// `git_sync` is an application for managing multiple github repositories at once.
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
 pub struct AppArgs {
@@ -49,7 +49,7 @@ pub struct AppArgs {
     pub verbose: bool,
 }
 
-/// Valid options for repository_type for cli arguments
+/// Valid options for `repository_type` for cli arguments
 #[derive(Copy, Clone, PartialEq, Eq, Debug, ValueEnum)]
 pub enum RepositoryType {
     Public,
@@ -99,8 +99,7 @@ impl CompareTagCommand {
     /// to enforce this through the type system or macros.
     pub fn validate(&self) -> Result<(), String> {
         match (&self.repository, &self.parent, self.all) {
-            (Some(_), Some(_), _) => Ok(()),
-            (None, None, true) => Ok(()),
+            (Some(_), Some(_), _) | (None, None, true) => Ok(()),
             _ => Err("Must specify --repository and --parent, or use --all".to_string()),
         }
     }
@@ -187,6 +186,7 @@ NOTES:
 
 )]
 /// Check repositories for various conditions
+#[allow(clippy::struct_excessive_bools)]
 pub struct CheckRepoCommand {
     /// The repository to check
     #[arg(short, long, required = false)]
@@ -221,7 +221,7 @@ pub struct CheckRepoCommand {
         .args(&["all", "repository"])
     )
 )]
-/// Open a PR to merge <branch> into <base_branch>
+/// Open a PR to merge <branch> into <`base_branch`>
 pub struct CreatePRCommand {
     /// Repository for which you are creating a PR
     #[arg(short, long, required = false)]
@@ -420,7 +420,7 @@ pub enum ReleaseCommand {
     // Delete a release
     //Delete(DeleteReleaseCommand)
 }
-/// Valid options that can be passed to make_latest in the github api.
+/// Valid options that can be passed to `make_latest` in the github api.
 /// True makes this the latest release, false makes it not the latest release,
 /// Legacy looks at both the date, and the semantic version to decide if this should be the latest
 #[derive(Copy, Clone, PartialEq, Eq, Debug, ValueEnum)]
@@ -429,7 +429,7 @@ pub enum MakeLatest {
     False,
     Legacy,
 }
-/// Implement fmt::Display so this type can be printed to the cli
+/// Implement `fmt::Display` so this type can be printed to the cli
 impl fmt::Display for MakeLatest {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -533,7 +533,7 @@ pub enum Command {
     },
 }
 /// Parse the command line arguments and validate them.
-/// This function uses clap to generate the AppArgs struct,
+/// This function uses clap to generate the `AppArgs` struct,
 /// and then runs a small amount of validation on it that can't be
 /// enforced by the type system or macros.
 pub fn parse_args() -> AppArgs {
@@ -553,7 +553,7 @@ pub fn parse_args() -> AppArgs {
             eprintln!("Error validating compare command: {e}");
 
             std::process::exit(1);
-        };
+        }
     }
     app
 }

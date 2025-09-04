@@ -190,7 +190,7 @@ impl GithubClient {
                 });
             }
             has_next_page = repo.refs.page_info.has_next_page;
-            after = repo.refs.page_info.end_cursor.clone();
+            after.clone_from(&repo.refs.page_info.end_cursor);
         }
 
         Ok(all_tags)
@@ -247,7 +247,7 @@ impl GithubClient {
                 |repo, name, owner, tag| self.sync_lightweight_tag(&owner, &repo.clone(), &tag).map(|result|(repo, name, result)),
                 (repo, name, result) {
                     match result {
-                        Ok(_) => println!("Successfully synced tag '{name}' in '{repo}'"),
+                        Ok(()) => println!("Successfully synced tag '{name}' in '{repo}'"),
                         Err(e) => eprintln!("Failed to sync '{name}' for '{repo}': {e}")
                     }
                 }
@@ -259,7 +259,7 @@ impl GithubClient {
         if process_annotated {
             let ssh_url = http_to_ssh_repo(url)?;
             let output = tokio::join!(
-                self.sync_annotated_tags(&annotated, &parent.url, &ssh_url),
+                async { self.sync_annotated_tags(&annotated, &parent.url, &ssh_url) },
                 lightweight_fut,
             );
             let (annotated, lightweight) = output;
@@ -297,7 +297,7 @@ impl GithubClient {
             |owner, repo , url| self.sync_tags(&url.clone(), process_annotated).map(move |result| (url, owner, repo, result)),
             (url, owner, repo, result) {
                 match result {
-                    Ok(_) => println!("Successfully synced tags for {owner}/{repo}: {url}"),
+                    Ok(()) => println!("Successfully synced tags for {owner}/{repo}: {url}"),
                     Err(e) => eprintln!("Failed to sync tags for repo {owner}/{repo}: {e}"),
                 }
             }
@@ -351,7 +351,7 @@ impl GithubClient {
     /// Doing this *requires* using git (or some re-implementation of git). Syncing annotated tags
     /// through the github api with all of its fields, including signing, is currently not
     /// possible.
-    pub async fn sync_annotated_tags(
+    pub fn sync_annotated_tags(
         &self,
         tags: &IndexSet<TagInfo>,
         parent_url: &str,
@@ -520,7 +520,7 @@ impl GithubClient {
 
         while let Some((repo, result)) = futures.next().await {
             match result {
-                Ok(_) => println!("Successfully created tag '{tag}' for '{repo}'"),
+                Ok(()) => println!("Successfully created tag '{tag}' for '{repo}'"),
                 Err(e) => eprintln!("Failed to create tag '{tag}' for '{repo}': {e}"),
             }
         }
@@ -583,7 +583,7 @@ impl GithubClient {
 
         while let Some((repo, result)) = futures.next().await {
             match result {
-                Ok(_) => println!("Successfully deleted tag '{tag}' for {repo}"),
+                Ok(()) => println!("Successfully deleted tag '{tag}' for {repo}"),
                 Err(e) => eprintln!("Failed to delete tag '{tag}' for {repo}: {e}"),
             }
         }
@@ -601,11 +601,9 @@ impl GithubClient {
             .get_ref(&Reference::Tag(tag.to_string()))
             .await?;
 
-        let sha = match response.object {
-            octocrab::models::repos::Object::Tag { sha, .. } => sha,
-            _ => return Err(GitError::NoSuchTag(tag.to_string())),
+        let octocrab::models::repos::Object::Tag { sha, .. } = response.object else {
+            return Err(GitError::NoSuchTag(tag.to_string()));
         };
-
         Ok(sha)
     }
 }

@@ -35,6 +35,7 @@ impl GithubClient {
     /// Generate release notes for a particular releaese. It grabs all the commits present in `tag`
     /// that are newer than the latest commit in `previous_tag`.
     /// This needs to be cleaned up, it is a bit of a mess right now.
+    #[allow(clippy::too_many_lines)]
     pub async fn generate_release_notes(
         &self,
         url: &str,
@@ -59,9 +60,9 @@ impl GithubClient {
             },
         )?;
         let tag_sha = match tag_info.object {
-            octocrab::models::repos::Object::Tag { sha, .. } => sha,
-            octocrab::models::repos::Object::Commit { sha, .. } => sha,
-            _ => "".to_string(),
+            octocrab::models::repos::Object::Commit { sha, .. }
+            | octocrab::models::repos::Object::Tag { sha, .. } => sha,
+            _ => String::new(),
         };
         let mut page: u32 = 1;
         let per_page = 100;
@@ -84,11 +85,9 @@ impl GithubClient {
         )?;
 
         if let Some(commit) = newest_commit.items.first() {
-            commit
-                .commit
-                .committer
-                .as_ref()
-                .map(|c| {
+            commit.commit.committer.as_ref().map_or_else(
+                || eprintln!("No commit found"),
+                |c| {
                     if let Some(d) = c.date {
                         // Set the oldest commits we're going to look for to just a little bit
                         // after the most recent commit in the old tag, so that we get no overlap
@@ -97,8 +96,8 @@ impl GithubClient {
                         eprintln!("Can't get date of commit, assume things are broken");
                     }
                     println!("Last commit date: {}", date.to_rfc3339());
-                })
-                .unwrap_or_else(|| eprintln!("No commit found"));
+                },
+            );
         }
 
         // This is an arbitrary pre-allocation that should speed up pushing to the vec. Most of the

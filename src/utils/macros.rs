@@ -18,7 +18,7 @@ under the License.
 */
 
 /// Handles the result of an API call using octocrab and maps them
-/// to a GitError. This helps reduce a lot of unnecessary boilerplate.
+/// to a `GitError`. This helps reduce a lot of unnecessary boilerplate.
 /// This is used for api calls that don't already have a high level
 /// function provided by Octocrab.
 ///
@@ -76,7 +76,7 @@ macro_rules! handle_api_response {
 /// Handles reducing some of the boiler plate for defining these unordered futures.
 ///
 /// # Parameters
-/// `$iter`` is some iterable collection
+/// `$iter` is some iterable collection
 /// `|$($arg:ident),*| $future:expr`: Closure-like syntax where you specify the variable(s)
 /// `($($pat:pat),*) $body:block`: Pattern(s) to destructure the resulting tuple from the completed future
 /// and a block of code to process each result.

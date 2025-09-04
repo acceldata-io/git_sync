@@ -47,7 +47,7 @@ shallow_by_default = true
 "#;
 
 /// Create a sample config file
-pub fn generate_config(path: &Option<PathBuf>, force: bool) -> Result<PathBuf, GitError> {
+pub fn generate_config(path: Option<&PathBuf>, force: bool) -> Result<PathBuf, GitError> {
     // This is only needed if a path isn't provided
     let home_dir = dirs::home_dir();
     let config_path = if let Some(config) = home_dir {

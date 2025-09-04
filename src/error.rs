@@ -17,7 +17,11 @@ specific language governing permissions and limitations
 under the License.
 */
 use std::error::Error;
-use std::io::ErrorKind::*;
+use std::fmt::Write as _;
+use std::io::ErrorKind::{
+    AddrInUse, AddrNotAvailable, BrokenPipe, ConnectionAborted, ConnectionRefused, ConnectionReset,
+    HostUnreachable, NetworkUnreachable, NotConnected, TimedOut, WouldBlock,
+};
 use thiserror::Error;
 /// Error type to make it easier to handle returning from functions
 #[derive(Error, Debug)]
@@ -76,6 +80,7 @@ pub enum GitError {
 
 impl GitError {
     /// Convert this error into a user-friendly version
+    #[allow(clippy::too_many_lines)]
     pub fn to_user_error(&self) -> UserError {
         match self {
             GitError::GithubApiError(e) => {
@@ -84,7 +89,7 @@ impl GitError {
                     ErrorCategory::Network
                 } else{
                     match code {
-                        Some(http::StatusCode::UNAUTHORIZED) | Some(http::StatusCode::FORBIDDEN) => ErrorCategory::Auth,
+                        Some(http::StatusCode::UNAUTHORIZED | http::StatusCode::FORBIDDEN) => ErrorCategory::Auth,
                         Some(http::StatusCode::NOT_FOUND) => ErrorCategory::NotFound,
                         Some(http::StatusCode::TOO_MANY_REQUESTS) => ErrorCategory::RateLimit,
                         Some(ref c) if c.is_server_error() => ErrorCategory::Server,
@@ -183,21 +188,21 @@ impl GitError {
             },
             GitError::MultipleErrors(errors) => {
                 // Show the first error, but mention there were multiple
-                if !errors.is_empty() {
+                if errors.is_empty() {
+                    UserError {
+                        code: None,
+                        message: "Multiple unknown errors occurred.".into(),
+                        suggestion: None,
+                    }
+                } else  {
                     let mut message = "Multiple errors: ".to_string();
                     for (context, err) in errors {
                         let e = err.to_user_error();
-                        message.push_str(&format!("\n\t- {context}: {}", e.message));
+                        let _ = writeln!(message, "\n\t- {context}: {}", e.message);
                     }
                     UserError {
                         code: None,
                         message,
-                        suggestion: None,
-                    }
-                } else {
-                    UserError {
-                        code: None,
-                        message: "Multiple unknown errors occurred.".into(),
                         suggestion: None,
                     }
                 }
@@ -294,7 +299,8 @@ pub fn octocrab_error_info(e: &octocrab::Error) -> (Option<http::StatusCode>, St
                 for err in errors {
                     if let Some(obj) = err.as_object() {
                         if let Some(msg) = obj.get("message").and_then(|m| m.as_str()) {
-                            message.push_str(&format!("\n- {msg}"));
+                            let m = format!("\n- {msg}");
+                            let _ = write!(message, "{m}");
                         }
                     }
                 }
@@ -308,13 +314,14 @@ pub fn octocrab_error_info(e: &octocrab::Error) -> (Option<http::StatusCode>, St
         octocrab::Error::InvalidHeaderValue { source, .. } => (None, source.to_string()),
         octocrab::Error::InvalidUtf8 { source, .. } => (None, source.to_string()),
         octocrab::Error::Encoder { source, .. } => (None, source.to_string()),
-        octocrab::Error::Service { source, .. } => (None, source.to_string()),
         octocrab::Error::Hyper { source, .. } => (None, source.to_string()),
         octocrab::Error::SerdeUrlEncoded { source, .. } => (None, source.to_string()),
         octocrab::Error::Serde { source, .. } => (None, source.to_string()),
         octocrab::Error::Json { source, .. } => (None, source.to_string()),
         octocrab::Error::JWT { source, .. } => (None, source.to_string()),
-        octocrab::Error::Other { source, .. } => (None, source.to_string()),
+        octocrab::Error::Other { source, .. } | octocrab::Error::Service { source, .. } => {
+            (None, source.to_string())
+        }
         _ => (None, "Unknown error".to_string()),
     }
 }

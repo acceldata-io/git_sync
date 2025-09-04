@@ -29,7 +29,7 @@ pub struct UserDetails {
 }
 
 impl UserDetails {
-    /// Create a new UserDetails instance
+    /// Create a new `UserDetails` instance
     pub fn new(name: String, email: String) -> Self {
         UserDetails { name, email }
     }
