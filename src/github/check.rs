@@ -16,18 +16,16 @@ KIND, either express or implied.  See the License for the
 specific language governing permissions and limitations
 under the License.
 */
+use crate::async_retry;
 use crate::error::{GitError, is_retryable};
 use crate::github::client::GithubClient;
 use crate::utils::repo::{
     BranchProtectionRule, Checks, LicenseInfo, RepoChecks, get_repo_info_from_url,
 };
-use chrono::{DateTime, Duration, Local, TimeZone, Utc};
-use futures::{FutureExt, StreamExt, future::try_join, stream::FuturesUnordered};
+use crate::utils::tables::Table;
+use chrono::{DateTime, Utc};
+use futures::{StreamExt, stream::FuturesUnordered};
 use std::collections::{HashMap, HashSet};
-use tokio_retry::{
-    RetryIf,
-    strategy::{ExponentialBackoff, jitter},
-};
 
 impl GithubClient {
     /// Get branches that are older than a certain number of days
@@ -111,7 +109,14 @@ impl GithubClient {
                 }
             });
 
-            let response: serde_json::Value = octocrab.graphql(&payload).await?;
+            let res: Result<serde_json::Value, octocrab::Error> = async_retry!(
+                ms = 100,
+                timeout = 5000,
+                retries = 3,
+                error_predicate = |e: &octocrab::Error| is_retryable(e),
+                body = { octocrab.graphql(&payload).await },
+            );
+            let response: serde_json::Value = res?;
             let refs = &response["data"]["repository"]["refs"];
             license = response["data"]["repository"]["licenseInfo"]
                 .as_object()
@@ -178,18 +183,60 @@ impl GithubClient {
             .collect();
         old_branches.sort_by_key(|(_, age)| *age);
 
-        let old_branches: Vec<(String, String)> = old_branches
+        let (old_branches, array_branch): (Vec<(String, String)>, Vec<[String; 2]>) = old_branches
             .into_iter()
-            .map(|(branch, age)| (branch, age.format("%Y-%m-%d").to_string()))
-            .collect();
+            .map(|(branch, age)| {
+                let formatted = age.format("%Y-%m-%d").to_string();
+                ((branch.clone(), formatted.clone()), [branch, formatted])
+            })
+            .unzip();
+        let table = Table::builder(tabled::settings::style::Style::ascii())
+            .title("Old Branches")
+            .header(["Branch name", "Age"])
+            .rows(array_branch)
+            .centre(false)
+            .align(tabled::settings::Alignment::center())
+            .build();
+
+        //let table = create_table(["Branch name", "Age"], array_branch, "Old Branches");
+        println!("{table}");
         println!("Protection rules: {protection_rules:#?}");
 
-        Ok((
-            old_branches,
-            protection_rules,
+        Ok(Checks {
+            branches: old_branches,
+            rules: protection_rules,
             license,
-            format!("{owner}/{repo}"),
-        ))
+            repo: format!("{owner}/{repo}"),
+        })
+    }
+    pub async fn display_check_results(
+        &self,
+        header: Vec<String>,
+        rows: Vec<Vec<String>>,
+        rules: &Vec<BranchProtectionRule>,
+        license: Option<LicenseInfo>,
+        repo: &str,
+    ) {
+        let table = Table::builder(tabled::settings::style::Style::ascii())
+            .title("Stale Branches")
+            .header(header)
+            .rows(rows)
+            .centre(false)
+            .align(tabled::settings::Alignment::center())
+            .build();
+        println!("Results for {repo}");
+        println!("{table}");
+        if !rules.is_empty() {
+            for rule in rules {
+                println!("{rule}");
+            }
+        }
+        println!(
+            "License: {}",
+            license
+                .and_then(|l| l.name)
+                .unwrap_or("No license found".to_string())
+        )
     }
     /// Run the selected checks against all configured repositories
     pub async fn check_all_repositories(

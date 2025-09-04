@@ -20,7 +20,7 @@ use crate::utils::pr::MergeMethod;
 use clap::{ArgGroup, Args, CommandFactory, Parser, Subcommand, ValueEnum};
 use std::fmt;
 use std::path::PathBuf;
-/// Top level options to configure git_sync
+/// git_sync is an application for managing multiple github repositories at once.
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
 pub struct AppArgs {
@@ -43,6 +43,10 @@ pub struct AppArgs {
     /// Make output quiet. This is useful when not running in interactive mode
     #[arg(short, long, default_value_t = false, global = true)]
     pub quiet: bool,
+
+    /// Verbose output
+    #[arg(long, default_value_t = false, global = true)]
+    pub verbose: bool,
 }
 
 /// Valid options for repository_type for cli arguments

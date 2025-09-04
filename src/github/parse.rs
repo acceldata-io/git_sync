@@ -22,6 +22,7 @@ use crate::config::Config;
 use crate::github::client::GithubClient;
 use crate::init::generate_config;
 use crate::utils::pr::{CreatePrOptions, MergePrOptions};
+use crate::utils::repo::Checks;
 use crate::utils::repo::RepoChecks;
 use clap_complete::{
     generate_to,
@@ -46,6 +47,8 @@ pub async fn match_arguments(app: &AppArgs, config: Config) -> Result<(), GitErr
             .ok_or(GitError::MissingToken)?,
     };
 
+    let verbose = app.verbose;
+
     let repos = match app.repository_type {
         RepositoryType::Public => config.get_public_repositories(),
         RepositoryType::Private => config.get_private_repositories(),
@@ -56,7 +59,7 @@ pub async fn match_arguments(app: &AppArgs, config: Config) -> Result<(), GitErr
     let is_user = user_attended();
 
     let client = GithubClient::new(token.to_string(), &config, is_user)?;
-    if !token.is_empty() {
+    if !token.is_empty() && verbose {
         let (rest_limit, graphql_limit) =
             tokio::join!(client.get_rate_limit(), client.get_graphql_limit());
 
@@ -156,8 +159,12 @@ pub async fn match_arguments(app: &AppArgs, config: Config) -> Result<(), GitErr
                         .await?;
 
                     for res in &result {
-                        println!("{:?}", res.0);
-                        let (branches, rules, license, repo) = res;
+                        let Checks {
+                            branches,
+                            rules,
+                            license,
+                            repo,
+                        } = res;
                         for branch in branches {
                             println!("\tStale branch: {} - {}", branch.0, branch.1);
                         }
@@ -174,11 +181,30 @@ pub async fn match_arguments(app: &AppArgs, config: Config) -> Result<(), GitErr
                     let result = client
                         .check_repository(repository, blacklist, checks)
                         .await?;
-                    let (_, rules, license, repo) = &result;
+                    let Checks {
+                        branches,
+                        rules,
+                        license,
+                        repo,
+                    } = &result;
+                    let branches = branches
+                        .iter()
+                        .map(|(b, d)| vec![b.to_string(), d.to_string()])
+                        .collect();
+                    client
+                        .display_check_results(
+                            vec!["Branch".to_string(), "Date".to_string()],
+                            branches,
+                            rules,
+                            license.clone(),
+                            repo,
+                        )
+                        .await;
+                    /*println!("Rules for '{repo}':");
                     for rule in rules {
-                        rule.print(repo);
+                        println!("{rule}");
                     }
-                    println!("License: {license:?}")
+                    */
                 } else {
                     return Err(GitError::MissingRepositoryName);
                 }
@@ -253,6 +279,7 @@ pub async fn match_arguments(app: &AppArgs, config: Config) -> Result<(), GitErr
                 };
                 if open_cmd.all {
                     let pr_numbers = client.create_all_prs(&opts, merge_opts, repos).await?;
+                    // Do some stuff here
                 } else if !repository.len() > 0 {
                     let pr_number = client.create_pr(&opts).await?;
                     println!("Created PR #{pr_number} in {repository}");

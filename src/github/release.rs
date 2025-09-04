@@ -17,20 +17,15 @@ specific language governing permissions and limitations
 under the License.
 */
 
+use crate::async_retry;
 use crate::error::{GitError, is_retryable};
 use crate::github::client::GithubClient;
 use crate::utils::repo::get_repo_info_from_url;
-use crate::{async_retry, handle_api_response, handle_futures_unordered};
 use chrono::{DateTime, Duration, Utc};
-use futures::{FutureExt, StreamExt, future::try_join, stream::FuturesUnordered};
 use octocrab::models::repos::ReleaseNotes;
 use octocrab::params::repos::Reference;
 use regex::Regex;
 use std::sync::OnceLock;
-use tokio_retry::{
-    RetryIf,
-    strategy::{ExponentialBackoff, jitter},
-};
 
 // Static, compiled on first use, to prevent recompiling them each time we use them
 static CVE_REGEX: OnceLock<Regex> = OnceLock::new();
@@ -51,10 +46,18 @@ impl GithubClient {
 
         let octocrab = self.octocrab.clone();
 
-        let tag_info = octocrab
-            .repos(&owner, &repo)
-            .get_ref(&Reference::Tag(previous_tag.to_string()))
-            .await?;
+        let tag_info = async_retry!(
+            ms = 100,
+            timeout = 5000,
+            retries = 3,
+            error_predicate = |e: &octocrab::Error| is_retryable(e),
+            body = {
+                octocrab
+                    .repos(&owner, &repo)
+                    .get_ref(&Reference::Tag(previous_tag.to_string()))
+                    .await
+            },
+        )?;
         let tag_sha = match tag_info.object {
             octocrab::models::repos::Object::Tag { sha, .. } => sha,
             octocrab::models::repos::Object::Commit { sha, .. } => sha,
@@ -64,14 +67,23 @@ impl GithubClient {
         let per_page = 100;
         let mut date: DateTime<Utc> = Utc::now();
 
-        let c = octocrab
-            .repos(&owner, &repo)
-            .list_commits()
-            .per_page(1)
-            .sha(tag_sha)
-            .send()
-            .await?;
-        if let Some(commit) = c.items.first() {
+        let newest_commit = async_retry!(
+            ms = 100,
+            timeout = 5000,
+            retries = 3,
+            error_predicate = |e: &octocrab::Error| is_retryable(e),
+            body = {
+                octocrab
+                    .repos(&owner, &repo)
+                    .list_commits()
+                    .per_page(1)
+                    .sha(tag_sha.clone())
+                    .send()
+                    .await
+            },
+        )?;
+
+        if let Some(commit) = newest_commit.items.first() {
             commit
                 .commit
                 .committer
@@ -94,15 +106,23 @@ impl GithubClient {
         // branches/tags. If not, pushing elements after 300 will just take slightly longer.
         let mut new_commits: Vec<String> = Vec::with_capacity(300);
         loop {
-            let commits = octocrab
-                .repos(&owner, &repo)
-                .list_commits()
-                .page(page)
-                .per_page(per_page)
-                .since(date)
-                .branch(tag.to_string())
-                .send()
-                .await?;
+            let commits = async_retry!(
+                ms = 100,
+                timeout = 5000,
+                retries = 3,
+                error_predicate = |e: &octocrab::Error| is_retryable(e),
+                body = {
+                    octocrab
+                        .repos(&owner, &repo)
+                        .list_commits()
+                        .page(page)
+                        .per_page(per_page)
+                        .since(date)
+                        .branch(tag.to_string())
+                        .send()
+                        .await
+                },
+            )?;
             // Arbitrary pre-allocated length. Uses a bit more memory, but reduces
             // the number of potential resizes
             let mut commit_line = String::with_capacity(200);
@@ -228,13 +248,13 @@ impl GithubClient {
         // ExponentialBackoff, with a max of three tries in case something fails for a tarnsient
         // reason.
         let retries = 3;
-        let retry_strategy = ExponentialBackoff::from_millis(100)
-            .map(jitter)
-            .take(retries);
 
-        let release = RetryIf::spawn(
-            retry_strategy.clone(),
-            || async {
+        let release = async_retry!(
+            ms = 100,
+            timeout = 5000,
+            retries = retries,
+            error_predicate = |e: &octocrab::Error| is_retryable(e),
+            body = {
                 self.octocrab
                     .clone()
                     .repos(&owner, &repo)
@@ -245,9 +265,7 @@ impl GithubClient {
                     .send()
                     .await
             },
-            |e: &octocrab::Error| is_retryable(e),
-        )
-        .await;
+        );
 
         match release {
             Ok(_) => {

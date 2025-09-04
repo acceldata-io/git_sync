@@ -99,102 +99,86 @@ impl GitError {
                     ErrorCategory::NotFound => Some("Check the repository or resource name.".into()),
                     _ => None,
                 };
-                UserError { code, message: msg, category, suggestion }
+                UserError { code, message: msg, suggestion }
             }
             GitError::PRNotMergeable(pr_number) => UserError {
                 code: None,
                 message: format!("PR #{pr_number} cannot be merged automatically"),
-                category: ErrorCategory::Input,
                 suggestion: Some("Human intervention may be required.".into()),
             },
             GitError::NoUpstreamRepo => UserError {
                 code: None,
                 message: "Could not find an upstream repository for this fork.".into(),
-                category: ErrorCategory::NotFound,
                 suggestion: Some("Make sure the repository is a fork and has an upstream set.".into()),
             },
             GitError::DateParseError(e) => UserError {
                 code: None,
                 message: format!("Invalid date: {e}"),
-                category: ErrorCategory::Input,
                 suggestion: Some("Use a valid date format.".into()),
             },
             GitError::InvalidRepository(url) => UserError {
                 code: None,
                 message: format!("Invalid repository URL: {url}"),
-                category: ErrorCategory::Input,
                 suggestion: Some("Check the repository URL.".into()),
             },
             GitError::RegexError(e) => UserError {
                 code: None,
                 message: format!("Regex error: {e}"),
-                category: ErrorCategory::Input,
                 suggestion: Some("Check your regular expression syntax.".into()),
             },
             GitError::NoReposConfigured => UserError {
                 code: None,
                 message: "No repositories are configured.".into(),
-                category: ErrorCategory::Input,
                 suggestion: Some("Add repositories to your configuration.".into()),
             },
             GitError::NotAFork => UserError {
                 code: None,
                 message: "Repository is not a fork.".into(),
-                category: ErrorCategory::Input,
                 suggestion: Some("Choose a repository that is a fork.".into()),
             },
             GitError::MissingRepositoryName => UserError {
                 code: None,
                 message: "Repository name is missing.".into(),
-                category: ErrorCategory::Input,
                 suggestion: Some("Specify the repository name.".into()),
             },
             GitError::NoSuchBranch(branch) => UserError {
                 code: None,
                 message: format!("No such branch: {branch}"),
-                category: ErrorCategory::NotFound,
                 suggestion: Some("Check the branch name or create it first.".into()),
             },
             GitError::NoSuchTag(tag) => UserError {
                 code: None,
                 message: format!("No such tag: {tag}"),
-                category: ErrorCategory::NotFound,
                 suggestion: Some("Check the tag name or create it first.".into()),
             },
             GitError::TomlError(e) => UserError {
                 code: None,
                 message: format!("TOML parsing error: {e}"),
-                category: ErrorCategory::Input,
                 suggestion: Some("Check your config file for syntax errors.".into()),
             },
             GitError::MissingToken => UserError {
                 code: None,
                 message: "Missing GitHub token. Please provide a token via --token, GITHUB_TOKEN environment variable, or in your config file.".into(),
-                category: ErrorCategory::Auth,
                 suggestion: Some("Provide a GitHub token using --token, environment variable, or config file.".into()),
             },
             GitError::IoError(e) => UserError {
                 code: None,
                 message: format!("IO error: {e}"),
-                category: ErrorCategory::Network,
                 suggestion: Some("Check file paths and permissions, or try again.".into()),
             },
             GitError::JsonError(e) => UserError {
                 code: None,
                 message: format!("JSON error: {e}"),
-                category: ErrorCategory::Input,
                 suggestion: Some("Check your JSON syntax.".into()),
             },
             GitError::GetTimezoneError(e) => UserError {
                 code: None,
                 message: format!("Timezone error: {e}"),
-                category: ErrorCategory::Input,
                 suggestion: Some("Check your timezone string or system settings.".into()),
             },
             GitError::Other(msg) => UserError {
                 code: None,
                 message: msg.clone(),
-                category: ErrorCategory::Unknown,
                 suggestion: None,
             },
             GitError::MultipleErrors(errors) => {
@@ -208,14 +192,12 @@ impl GitError {
                     UserError {
                         code: None,
                         message,
-                        category: ErrorCategory::Unknown,
                         suggestion: None,
                     }
                 } else {
                     UserError {
                         code: None,
                         message: "Multiple unknown errors occurred.".into(),
-                        category: ErrorCategory::Unknown,
                         suggestion: None,
                     }
                 }
@@ -254,7 +236,6 @@ pub enum ErrorCategory {
 pub struct UserError {
     pub code: Option<http::StatusCode>,
     pub message: String,
-    pub category: ErrorCategory,
     pub suggestion: Option<String>,
 }
 
@@ -271,12 +252,8 @@ impl std::fmt::Display for UserError {
         Ok(())
     }
 }
-pub fn giterror_retryable(e: &GitError) -> bool {
-    match e {
-        GitError::GithubApiError(inner) => is_retryable(inner),
-        _ => false,
-    }
-}
+
+/// Check if whatever error is passed is reasonably retryable. Most errors aren't.
 pub fn is_retryable(e: &octocrab::Error) -> bool {
     match e {
         octocrab::Error::GitHub { source, .. } => {

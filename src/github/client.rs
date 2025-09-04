@@ -18,29 +18,13 @@ under the License.
 */
 use crate::config::Config;
 use crate::error::{GitError, is_retryable};
-use crate::utils::pr::{CreatePrOptions, MergePrOptions};
-use crate::utils::repo::{
-    BranchProtectionRule, Checks, LicenseInfo, RepoChecks, RepoInfo, TagInfo, get_http_status,
-    get_repo_info_from_url,
-};
-use crate::{async_retry, handle_api_response, handle_futures_unordered};
-use chrono::{DateTime, Duration, Local, TimeZone, Utc};
-use futures::{FutureExt, StreamExt, future::try_join, stream::FuturesUnordered};
+use crate::utils::repo::{RepoInfo, TagInfo, get_repo_info_from_url};
+use crate::{async_retry, handle_api_response};
+use chrono::{DateTime, Local, TimeZone, Utc};
+use futures::{StreamExt, stream::FuturesUnordered};
 use octocrab::Octocrab;
-use octocrab::models::repos::{Ref, ReleaseNotes};
-use octocrab::params::repos::Reference;
-use regex::Regex;
-use std::collections::{HashMap, HashSet};
-use std::sync::OnceLock;
-use tokio_retry::{
-    RetryIf,
-    strategy::{ExponentialBackoff, jitter},
-};
-
-use temp_dir::TempDir;
 
 use indexmap::IndexSet;
-use serde_json::json;
 
 /// Contains information about tags for a forked repo, its parent,
 /// and the tags that are missing from the fork

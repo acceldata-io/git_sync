@@ -17,11 +17,11 @@ specific language governing permissions and limitations
 under the License.
 */
 
+use crate::async_retry;
 use crate::error::{GitError, is_retryable};
 use crate::github::client::GithubClient;
 use crate::utils::repo::get_repo_info_from_url;
-use crate::{async_retry, handle_api_response, handle_futures_unordered};
-use futures::{FutureExt, StreamExt, future::try_join, stream::FuturesUnordered};
+use futures::{StreamExt, stream::FuturesUnordered};
 use octocrab::params::repos::Reference;
 
 impl GithubClient {
@@ -63,35 +63,61 @@ impl GithubClient {
     ) -> Result<(), GitError> {
         let info = get_repo_info_from_url(url)?;
         let (owner, repo) = (info.owner, info.repo_name);
-        let response = self
+        let res: Result<_, octocrab::Error> = async_retry!(
+            ms = 100,
+            timeout = 5000,
+            retries = 3,
+            error_predicate = |e: &octocrab::Error| is_retryable(e),
+            body = {
+                self.octocrab
+                    .clone()
+                    .repos(&owner, &repo)
+                    .get_ref(&Reference::Branch(base_branch.to_string()))
+                    .await
+            },
+        );
+        let response = match res {
+            Ok(r) => r,
+            Err(e) => {
+                return Err(GitError::GithubApiError(e));
+            }
+        };
+        /*let response = self
             .octocrab
             .clone()
             .repos(&owner, &repo)
             .get_ref(&Reference::Branch(base_branch.to_string()))
             .await?;
+        */
 
         let sha = match response.object {
             octocrab::models::repos::Object::Commit { sha, .. } => sha,
             _ => return Err(GitError::NoSuchBranch(base_branch.to_string())),
         };
-
-        let response = self
+        let res: Result<_, octocrab::Error> = async_retry!(
+            ms = 100,
+            timeout = 5000,
+            retries = 3,
+            error_predicate = |e: &octocrab::Error| is_retryable(e),
+            body = {
+                self.octocrab
+                    .clone()
+                    .repos(&owner, &repo)
+                    .create_ref(&Reference::Branch(new_branch.to_string()), sha.clone())
+                    .await
+            },
+        );
+        match res {
+            Ok(_) => Ok(()),
+            Err(e) => Err(GitError::GithubApiError(e)),
+        }
+        /*let response = self
             .octocrab
             .clone()
             .repos(&owner, &repo)
             .create_ref(&Reference::Branch(new_branch.to_string()), sha)
             .await;
-
-        match response {
-            Ok(_) => {
-                //println!("Successfully created branch '{new_branch}' for {repo}");
-                Ok(())
-            }
-            Err(e) => {
-                //eprintln!("Failed to create branch '{new_branch}' for {repo}: {e}");
-                Err(GitError::GithubApiError(e))
-            }
-        }
+        */
     }
     /// Create the passed branch for each repository provided
     pub async fn create_all_branches(
@@ -132,13 +158,26 @@ impl GithubClient {
     pub async fn delete_branch(&self, url: &str, branch: &str) -> Result<(), GitError> {
         let info = get_repo_info_from_url(url)?;
         let (owner, repo) = (info.owner, info.repo_name);
-
-        let result = self
+        let result: Result<_, octocrab::Error> = async_retry!(
+            ms = 100,
+            timeout = 5000,
+            retries = 3,
+            error_predicate = |e: &octocrab::Error| is_retryable(e),
+            body = {
+                self.octocrab
+                    .clone()
+                    .repos(&owner, &repo)
+                    .delete_ref(&Reference::Branch(branch.to_string()))
+                    .await
+            },
+        );
+        /*let result = self
             .octocrab
             .clone()
             .repos(&owner, &repo)
             .delete_ref(&Reference::Branch(branch.to_string()))
             .await;
+        */
         match result {
             Ok(()) => {
                 println!("✅ Successfully deleted branch '{branch}' for {repo}");

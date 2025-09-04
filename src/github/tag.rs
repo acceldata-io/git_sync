@@ -433,19 +433,6 @@ impl GithubClient {
             comparison.parent_tags.len()
         );
 
-        /*if !comparison.missing_in_fork.is_empty() {
-            println!(
-                "\nTags missing in fork: {}",
-                comparison.missing_in_fork.len()
-            );
-            for (name, _) in &comparison.missing_in_fork {
-                //println!(" - {name}");
-            }
-        } else {
-            println!("{repo} up to date");
-        }
-        */
-
         Ok(comparison)
     }
     /// Get a diff of all configured repositories tags, compared against their parent.
@@ -481,18 +468,7 @@ impl GithubClient {
                 }
             }
         );
-        if !diffs.is_empty() {
-            println!("\nTags missing in forks:");
-        }
-        for (name, comparison) in diffs {
-            /*if !comparison.missing_in_fork.is_empty() {
-                println!("# {name}:");
-            }
-            for comp in comparison.missing_in_fork {
-                println!("\t{}", comp.name);
-            }
-            */
-        }
+
         if !errors.is_empty() {
             return Err(GitError::MultipleErrors(errors));
         }

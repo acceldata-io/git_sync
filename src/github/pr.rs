@@ -17,17 +17,13 @@ specific language governing permissions and limitations
 under the License.
 */
 
+use crate::async_retry;
 use crate::error::{GitError, is_retryable};
 use crate::github::client::GithubClient;
 use crate::utils::pr::{CreatePrOptions, MergePrOptions};
 use crate::utils::repo::get_repo_info_from_url;
-use crate::{async_retry, handle_api_response, handle_futures_unordered};
-use futures::{FutureExt, StreamExt, future::try_join, stream::FuturesUnordered};
-use std::collections::{HashMap, HashSet};
-use tokio_retry::{
-    RetryIf,
-    strategy::{ExponentialBackoff, jitter},
-};
+use futures::{StreamExt, stream::FuturesUnordered};
+use std::collections::HashMap;
 
 impl GithubClient {
     /// Create a pull request for a specific repository
@@ -36,16 +32,14 @@ impl GithubClient {
         let (owner, repo) = (info.owner, info.repo_name);
         let octocrab = self.octocrab.clone();
 
-        // ExponentialBackoff, with a max of three tries in case something fails for a tarnsient
-        // reason.
         let retries = 3;
-        let retry_strategy = ExponentialBackoff::from_millis(100)
-            .map(jitter)
-            .take(retries);
         let pr_number: u64;
-        let pr_result = RetryIf::spawn(
-            retry_strategy.clone(),
-            || async {
+        let pr_result: Result<_, octocrab::Error> = async_retry!(
+            ms = 100,
+            timeout = 5000,
+            retries = retries,
+            error_predicate = |e: &octocrab::Error| is_retryable(e),
+            body = {
                 octocrab
                     .clone()
                     .pulls(&owner, &repo)
@@ -54,9 +48,7 @@ impl GithubClient {
                     .send()
                     .await
             },
-            |e: &octocrab::Error| is_retryable(e),
-        )
-        .await;
+        );
 
         match pr_result {
             Ok(p) => {
@@ -70,18 +62,20 @@ impl GithubClient {
         }
 
         if let Some(reviewers) = opts.reviewers.as_deref() {
-            let reviewer_result = RetryIf::spawn(
-                retry_strategy,
-                || async {
+            let reviewer_result = async_retry!(
+                ms = 100,
+                timeout = 5000,
+                retries = 3,
+                error_predicate = |e: &octocrab::Error| is_retryable(e),
+                body = {
                     octocrab
                         .clone()
                         .pulls(&owner, &repo)
                         .request_reviews(pr_number, reviewers, &[])
                         .await
                 },
-                |e: &octocrab::Error| is_retryable(e),
-            )
-            .await;
+            );
+
             match reviewer_result {
                 Ok(_) => println!(
                     "Successfully requested reviewers for PR #{pr_number} in {owner}/{repo}"
@@ -152,29 +146,25 @@ impl GithubClient {
         let info = get_repo_info_from_url(&opts.url)?;
         let (owner, repo) = (info.owner, info.repo_name);
         let pr_number = opts.pr_number;
-        // ExponentialBackoff, with a max of three tries in case something fails for a tarnsient
-        // reason.
-        let retries = 3;
-        let retry_strategy = ExponentialBackoff::from_millis(100)
-            .map(jitter)
-            .take(retries);
 
-        let merge_result = RetryIf::spawn(
-            retry_strategy.clone(),
-            || async {
+        let merge_result: Result<_, octocrab::Error> = async_retry!(
+            ms = 100,
+            timeout = 5000,
+            retries = 3,
+            error_predicate = |e: &octocrab::Error| is_retryable(e),
+            body = {
                 self.octocrab
                     .clone()
                     .pulls(&owner, &repo)
                     .merge(opts.pr_number)
                     .message(opts.message.as_deref().unwrap_or_default())
+                    .title(opts.title.as_deref().unwrap_or_default())
                     .sha(opts.sha.as_deref().unwrap_or_default())
                     .method(opts.method)
                     .send()
                     .await
             },
-            |e: &octocrab::Error| is_retryable(e),
-        )
-        .await;
+        );
 
         match merge_result {
             Ok(_) => {
@@ -185,6 +175,7 @@ impl GithubClient {
         }
     }
 
+    /*
     // Merge all PRs in the provided repositories
     pub async fn merge_all_prs(
         &self,
@@ -213,4 +204,5 @@ impl GithubClient {
         }
         Ok(())
     }
+    */
 }

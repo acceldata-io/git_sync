@@ -19,4 +19,5 @@ under the License.
 pub mod macros;
 pub mod pr;
 pub mod repo;
+pub mod tables;
 pub mod user;

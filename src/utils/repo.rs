@@ -19,6 +19,7 @@ under the License.
 use crate::error::GitError;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
+use std::fmt;
 use std::hash::{Hash, Hasher};
 use std::sync::OnceLock;
 
@@ -77,12 +78,12 @@ pub enum TagType {
     Lightweight,
 }
 
-pub type Checks = (
-    Vec<(String, String)>,
-    Vec<BranchProtectionRule>,
-    Option<LicenseInfo>,
-    String,
-);
+pub struct Checks {
+    pub branches: Vec<(String, String)>,
+    pub rules: Vec<BranchProtectionRule>,
+    pub license: Option<LicenseInfo>,
+    pub repo: String,
+}
 
 /// Struct to hold branch protection rule information
 #[derive(Debug, Deserialize)]
@@ -141,6 +142,33 @@ impl BranchProtectionRule {
             Some(false) => "No",
             None => "N/A",
         }
+    }
+}
+impl fmt::Display for BranchProtectionRule {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut output = String::new();
+
+        output += &format!("\tPattern: {}\n", self.pattern.as_deref().unwrap_or("N/A"));
+        output += &format!("\tAdmin enforced: {}\n", self.opt_bool(self.admin_enforced));
+        let pr = self.opt_bool(self.requires_approving_reviews);
+        let status_check = self.opt_bool(self.requires_status_checks);
+        let strict_check = self.opt_bool(self.requires_strict_status_checks);
+        let restrict_pushes = self.opt_bool(self.restricts_pushes);
+        let restrict_dismissals = self.opt_bool(self.restricts_review_dismissals);
+
+        output += &format!("\tRequire PR approving reviews: {pr}\n");
+        if let Some(count) = self.requires_approving_review_count {
+            output += &format!("\tRequired PR review count: {count}\n");
+        } else {
+            output += "\tRequired PR review count: None\n";
+        }
+
+        output += &format!("\tRequire status checks: {status_check}\n");
+        output += &format!("\tRequire strict status checks: {strict_check}\n");
+        output += &format!("\tRestrict pushes: {restrict_pushes}\n");
+        output += &format!("\tRestrict review dismissals: {restrict_dismissals}\n\n");
+
+        write!(f, "{output}")
     }
 }
 

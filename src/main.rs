@@ -39,7 +39,6 @@ async fn main() -> Result<(), GitError> {
             "Failed to install AWS-LC-RS as default TLS provider".to_string(),
         ));
     }
-
     let args = parse_args();
 
     let result: Result<(), GitError> = {
