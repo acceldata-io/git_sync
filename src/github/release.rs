@@ -22,6 +22,7 @@ use crate::error::{GitError, is_retryable};
 use crate::github::client::GithubClient;
 use crate::utils::repo::get_repo_info_from_url;
 use chrono::{DateTime, Duration, Utc};
+use futures::{StreamExt, stream::FuturesUnordered};
 use octocrab::models::repos::ReleaseNotes;
 use octocrab::params::repos::Reference;
 use regex::Regex;
@@ -273,5 +274,34 @@ impl GithubClient {
             }
             Err(e) => Err(GitError::GithubApiError(e)),
         }
+    }
+    /// Create a new release for each of the specified repositories.
+    pub async fn create_all_releases(
+        &self,
+        current_tag: &str,
+        previous_tag: &str,
+        release_name: Option<&str>,
+        repositories: Vec<String>,
+    ) -> Result<(), GitError> {
+        let mut futures = FuturesUnordered::new();
+        for repo in &repositories {
+            futures.push(async move {
+                let result = self
+                    .create_release(repo, current_tag, previous_tag, release_name)
+                    .await;
+                (repo, result)
+            });
+        }
+        let mut errors: Vec<(String, GitError)> = Vec::new();
+        while let Some((repo, result)) = futures.next().await {
+            if let Err(e) = result {
+                errors.push((repo.to_string(), e));
+            }
+        }
+        if !errors.is_empty() {
+            return Err(GitError::MultipleErrors(errors));
+        }
+
+        Ok(())
     }
 }
