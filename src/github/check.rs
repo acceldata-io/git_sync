@@ -211,7 +211,6 @@ impl GithubClient {
         })
     }
     pub fn display_check_results(
-        &self,
         header: Vec<String>,
         rows: Vec<Vec<String>>,
         rules: &Vec<BranchProtectionRule>,
