@@ -31,7 +31,7 @@ pub struct Table<T, B, L, R, H, V, const HSIZE: usize, const VSIZE: usize> {
     style: Style<T, B, L, R, H, V, HSIZE, VSIZE>,
     alignment: Option<Alignment>,
     centre: bool,
-    table: tabled::Table,
+    inner_table_: tabled::Table,
 }
 
 impl<
@@ -53,7 +53,7 @@ impl<
             style,
             alignment: None,
             centre: false,
-            table: tabled::Table::default(),
+            inner_table_: tabled::Table::default(),
         }
     }
     /// Add a header to the table
@@ -115,7 +115,7 @@ impl<
         if let Some(alignment) = self.alignment {
             table.with(alignment);
         }
-        self.table = table;
+        self.inner_table_ = table;
 
         self
     }
@@ -139,7 +139,7 @@ impl<
             String::new()
         } else if self.centre && term.is_term() {
             let term_width = term.size().1 as usize;
-            self.table
+            self.inner_table_
                 .to_string()
                 .lines()
                 .map(|line| {
@@ -155,7 +155,7 @@ impl<
                 .collect::<Vec<String>>()
                 .join("\n")
         } else if term.is_term() {
-            self.table.to_string()
+            self.inner_table_.to_string()
         } else {
             let mut output = String::new();
             for row in &self.rows {
