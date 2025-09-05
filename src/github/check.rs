@@ -109,7 +109,6 @@ impl GithubClient {
                     "getLicenseInfo": get_license,
                 }
             });
-
             let response: serde_json::Value = async_retry!(
                 ms = 100,
                 timeout = 5000,

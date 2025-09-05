@@ -107,15 +107,22 @@ pub struct BranchProtectionRule {
     #[serde(rename = "restrictsReviewDismissals")]
     pub restricts_review_dismissals: Option<bool>,
 }
+fn opt_bool(b: Option<bool>) -> &'static str {
+    match b {
+        Some(true) => "Yes",
+        Some(false) => "No",
+        None => "N/A",
+    }
+}
 
 impl BranchProtectionRule {
     pub fn print(&self, name: &str) {
         println!("Branch Protection Rule for '{name}'");
         println!("\tPattern: {}", self.pattern.as_deref().unwrap_or("N/A"));
-        println!("\tAdmin enforced: {}", self.opt_bool(self.admin_enforced));
+        println!("\tAdmin enforced: {}", opt_bool(self.admin_enforced));
         println!(
             "\tRequire PR approving reviews: {}",
-            self.opt_bool(self.requires_approving_reviews)
+            opt_bool(self.requires_approving_reviews)
         );
         if let Some(count) = self.requires_approving_review_count {
             println!("\tRequired PR review count: {count}");
@@ -124,27 +131,17 @@ impl BranchProtectionRule {
         }
         println!(
             "\tRequire status checks: {}",
-            self.opt_bool(self.requires_status_checks)
+            opt_bool(self.requires_status_checks)
         );
         println!(
             "\tRequire strict status checks: {}",
-            self.opt_bool(self.requires_strict_status_checks)
+            opt_bool(self.requires_strict_status_checks)
         );
-        println!(
-            "\tRestrict pushes: {}",
-            self.opt_bool(self.restricts_pushes)
-        );
+        println!("\tRestrict pushes: {}", opt_bool(self.restricts_pushes));
         println!(
             "\tRestrict review dismissals: {}\n",
-            self.opt_bool(self.restricts_review_dismissals)
+            opt_bool(self.restricts_review_dismissals)
         );
-    }
-    fn opt_bool(&self, b: Option<bool>) -> &'static str {
-        match b {
-            Some(true) => "Yes",
-            Some(false) => "No",
-            None => "N/A",
-        }
     }
 }
 impl fmt::Display for BranchProtectionRule {
@@ -152,25 +149,22 @@ impl fmt::Display for BranchProtectionRule {
         let mut output = String::new();
 
         let pattern = format!("\tPattern: {}\n", self.pattern.as_deref().unwrap_or("N/A"));
-        let admin = format!("\tAdmin enforced: {}\n", self.opt_bool(self.admin_enforced));
+        let admin = format!("\tAdmin enforced: {}\n", opt_bool(self.admin_enforced));
 
-        let pr = self.opt_bool(self.requires_approving_reviews);
+        let pr = opt_bool(self.requires_approving_reviews);
         let require_pr = format!("\tRequire PR approving reviews: {pr}\n");
         let status_check = format!(
             "\tRequire status checks: {}\n",
-            self.opt_bool(self.requires_status_checks)
+            opt_bool(self.requires_status_checks)
         );
         let strict_check = format!(
             "\tRequire strict status checks: {}\n",
-            self.opt_bool(self.requires_strict_status_checks)
+            opt_bool(self.requires_strict_status_checks)
         );
-        let restrict_pushes = format!(
-            "\tRestrict pushes: {}\n",
-            self.opt_bool(self.restricts_pushes)
-        );
+        let restrict_pushes = format!("\tRestrict pushes: {}\n", opt_bool(self.restricts_pushes));
         let restrict_dismissals = format!(
             "\tRestrict review dismissals: {}\n\n",
-            self.opt_bool(self.restricts_review_dismissals)
+            opt_bool(self.restricts_review_dismissals)
         );
 
         write!(output, "{pattern}")?;
@@ -247,7 +241,6 @@ pub fn get_repo_info_from_url(url: &str) -> Result<RepoInfo, GitError> {
                 .to_string(),
             None => return Err(GitError::InvalidRepository(url.to_string())),
         };
-        println!("Repo: {repo}");
         let url = format!("https://github.com/{owner}/{repo}");
         return Ok(RepoInfo {
             owner,
@@ -335,9 +328,8 @@ mod tests {
             "https://github.com/acceldata-io/",
         ];
         for test in bad_tests {
-            println!("{test}");
             let info = get_repo_info_from_url(test);
-            assert!(info.is_err())
+            assert!(info.is_err());
         }
     }
 }

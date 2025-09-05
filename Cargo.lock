@@ -1059,7 +1059,6 @@ dependencies = [
  "iana-time-zone",
  "indexmap",
  "indicatif",
- "log",
  "octocrab",
  "regex",
  "reqwest",
@@ -1072,7 +1071,6 @@ dependencies = [
  "tokio",
  "tokio-retry",
  "toml",
- "url",
 ]
 
 [[package]]
