@@ -71,225 +71,11 @@ pub async fn match_arguments(app: &AppArgs, config: Config) -> Result<(), GitErr
         }
     }
     match &app.command {
-        Command::Tag { cmd } => match cmd {
-            TagCommand::Compare(compare_cmd) => {
-                compare_cmd.validate().map_err(GitError::Other)?;
-                let repository = compare_cmd.repository.as_ref();
-                if compare_cmd.all && !repos.is_empty() {
-                    client.diff_all_tags(repos).await?;
-                } else if compare_cmd.all && repos.is_empty() {
-                    return Err(GitError::NoReposConfigured);
-                } else if let Some(repository) = repository {
-                    let _diffs = client.diff_tags(repository).await?;
-                } else {
-                    return Err(GitError::MissingRepositoryName);
-                }
-            }
-            TagCommand::Create(create_cmd) => {
-                let tag = &create_cmd.tag;
-                let branch = &create_cmd.branch;
-                let repository = create_cmd.repository.as_ref();
-
-                if create_cmd.all {
-                    client.create_all_tags(tag, branch, repos).await?;
-                } else if let Some(repository) = repository {
-                    client
-                        .create_tag(repository, &create_cmd.tag, &create_cmd.branch)
-                        .await?;
-                } else {
-                    return Err(GitError::MissingRepositoryName);
-                }
-            }
-            TagCommand::Delete(delete_cmd) => {
-                let repository = delete_cmd.repository.as_ref();
-
-                if delete_cmd.all {
-                    client.delete_all_tags(&delete_cmd.tag, &repos).await?;
-                } else if let Some(repository) = repository {
-                    client.delete_tag(repository, &delete_cmd.tag).await?;
-                } else {
-                    return Err(GitError::MissingRepositoryName);
-                }
-            }
-            TagCommand::Sync(sync_cmd) => {
-                let repository = sync_cmd.repository.as_ref();
-                // By default, this is false
-                let process_annotated_tags = sync_cmd.without_annotated;
-                if sync_cmd.all {
-                    client.sync_all_tags(process_annotated_tags, repos).await?;
-                } else if let Some(repository) = repository {
-                    client.sync_tags(repository, process_annotated_tags).await?;
-                } else {
-                    return Err(GitError::MissingRepositoryName);
-                }
-            }
-        },
-        Command::Repo { cmd } => match cmd {
-            RepoCommand::Sync(sync_cmd) => {
-                let repository = sync_cmd.repository.as_ref();
-                if sync_cmd.all {
-                    client.sync_all_forks(repos).await?;
-                } else if let Some(repository) = repository {
-                    client.sync_fork(repository).await?;
-                } else {
-                    return Err(GitError::MissingRepositoryName);
-                }
-            }
-            RepoCommand::Check(check_cmd) => {
-                let repository = check_cmd.repository.as_ref();
-                let (protected, license) = (check_cmd.protected, check_cmd.license);
-                let old_branches = (check_cmd.old_branches, check_cmd.days_ago);
-                let blacklist = config.misc.branch_blacklist.unwrap_or_default();
-                let filter = check_cmd.branch_filter.clone();
-                let branch_filter = if let Some(filter) = filter {
-                    Some(Regex::new(&filter).map_err(GitError::RegexError)?)
-                } else {
-                    None
-                };
-                let checks = &RepoChecks {
-                    protected,
-                    license,
-                    old_branches,
-                    branch_filter: branch_filter.clone(),
-                };
-
-                if check_cmd.all {
-                    let result = client
-                        .check_all_repositories(repos, checks, &blacklist)
-                        .await?;
-
-                    for res in &result {
-                        let Checks {
-                            branches,
-                            rules,
-                            license,
-                            repo,
-                        } = res;
-                        for branch in branches {
-                            println!("\tStale branch: {} - {}", branch.0, branch.1);
-                        }
-                        for rule in rules {
-                            rule.print(repo);
-                        }
-                        if let Some(license) = license {
-                            if let Some(name) = license.name.as_ref() {
-                                println!("\tLicense: {name}");
-                            }
-                        }
-                    }
-                } else if let Some(repository) = repository {
-                    let result = client
-                        .check_repository(repository, blacklist, checks)
-                        .await?;
-                    let Checks {
-                        branches,
-                        rules,
-                        license,
-                        repo,
-                    } = &result;
-                    let branches = branches
-                        .iter()
-                        .map(|(b, d)| vec![b.to_string(), d.to_string()])
-                        .collect();
-                    client.display_check_results(
-                        vec!["Branch".to_string(), "Date".to_string()],
-                        branches,
-                        rules,
-                        license.clone(),
-                        repo,
-                    );
-                    /*println!("Rules for '{repo}':");
-                    for rule in rules {
-                        println!("{rule}");
-                    }
-                    */
-                } else {
-                    return Err(GitError::MissingRepositoryName);
-                }
-            }
-        },
-        Command::Branch { cmd } => match cmd {
-            BranchCommand::Create(create_cmd) => {
-                let repository = create_cmd.repository.as_ref();
-                let (base, new) = (
-                    create_cmd.base_branch.clone(),
-                    create_cmd.new_branch.clone(),
-                );
-                if create_cmd.all {
-                    client.create_all_branches(&base, &new, &repos).await?;
-                } else if let Some(repository) = repository {
-                    client.create_branch(repository, &base, &new).await?;
-                }
-            }
-            BranchCommand::Delete(delete_cmd) => {
-                let repository = delete_cmd.repository.as_ref();
-                if delete_cmd.all {
-                    client
-                        .delete_all_branches(&delete_cmd.branch, &repos)
-                        .await?;
-                } else if let Some(repository) = repository {
-                    client.delete_branch(repository, &delete_cmd.branch).await?;
-                }
-            }
-        },
-        Command::Release { cmd } => match cmd {
-            ReleaseCommand::Create(create_cmd) => {
-                let repository = create_cmd.repository.as_ref();
-                if create_cmd.all {
-                    {}
-                } else if let Some(repository) = repository {
-                    client
-                        .create_release(
-                            repository,
-                            &create_cmd.current_release,
-                            &create_cmd.previous_release,
-                            create_cmd.release_name.as_deref(),
-                        )
-                        .await?;
-                }
-            }
-        },
-        Command::PR { cmd } => match cmd {
-            PRCommand::Open(open_cmd) => {
-                let repository = open_cmd.repository.clone().unwrap_or_default();
-                let merge = open_cmd.merge;
-                println!("Merge is {merge}");
-                let opts = CreatePrOptions {
-                    url: repository.clone(),
-                    head: open_cmd.head.clone(),
-                    base: open_cmd.base.clone(),
-                    title: open_cmd.title.clone(),
-                    body: open_cmd.body.clone(),
-                    reviewers: open_cmd.reviewers.clone(),
-                };
-
-                let mut merge_opts = if merge {
-                    Some(MergePrOptions {
-                        url: repository.clone(),
-                        pr_number: 0,
-                        method: open_cmd.merge_method,
-                        title: open_cmd.merge_title.clone(),
-                        message: open_cmd.merge_body.clone(),
-                        sha: open_cmd.sha.clone(),
-                    })
-                } else {
-                    None
-                };
-                if open_cmd.all {
-                    let pr_numbers = client.create_all_prs(&opts, merge_opts, repos).await?;
-                    // Do some stuff here
-                } else if !repository.len() > 0 {
-                    let pr_number = client.create_pr(&opts).await?;
-                    println!("Created PR #{pr_number} in {repository}");
-                    if let Some(opts) = merge_opts.as_mut() {
-                        opts.pr_number = pr_number;
-                        client.merge_pr(opts).await?;
-                    }
-                } else {
-                    return Err(GitError::MissingRepositoryName);
-                }
-            }
-        },
+        Command::Tag { cmd } => match_tag_cmds(client, repos, cmd).await?,
+        Command::Repo { cmd } => match_repo_cmds(client, repos, config, cmd).await?,
+        Command::Branch { cmd } => match_branch_cmds(client, repos, cmd).await?,
+        Command::Release { cmd } => match_release_cmds(client, repos, config, cmd).await?,
+        Command::PR { cmd } => match_pr_cmds(client, repos, config, cmd).await?,
         Command::Config { file, force } => {
             generate_config(file.as_ref(), *force)?;
         }
@@ -324,6 +110,274 @@ pub async fn match_arguments(app: &AppArgs, config: Config) -> Result<(), GitErr
             }
         }
     }
+    Ok(())
+}
+
+/// Process all Tag commands
+async fn match_tag_cmds(
+    client: GithubClient,
+    repos: Vec<String>,
+    cmd: &TagCommand,
+) -> Result<(), GitError> {
+    match cmd {
+        TagCommand::Compare(compare_cmd) => {
+            compare_cmd.validate().map_err(GitError::Other)?;
+            let repository = compare_cmd.repository.as_ref();
+            if compare_cmd.all && !repos.is_empty() {
+                client.diff_all_tags(repos).await?;
+            } else if compare_cmd.all && repos.is_empty() {
+                return Err(GitError::NoReposConfigured);
+            } else if let Some(repository) = repository {
+                let _diffs = client.diff_tags(repository).await?;
+            } else {
+                return Err(GitError::MissingRepositoryName);
+            }
+        }
+        TagCommand::Create(create_cmd) => {
+            let tag = &create_cmd.tag;
+            let branch = &create_cmd.branch;
+            let repository = create_cmd.repository.as_ref();
+
+            if create_cmd.all {
+                client.create_all_tags(tag, branch, repos).await?;
+            } else if let Some(repository) = repository {
+                client
+                    .create_tag(repository, &create_cmd.tag, &create_cmd.branch)
+                    .await?;
+            } else {
+                return Err(GitError::MissingRepositoryName);
+            }
+        }
+        TagCommand::Delete(delete_cmd) => {
+            let repository = delete_cmd.repository.as_ref();
+
+            if delete_cmd.all {
+                client.delete_all_tags(&delete_cmd.tag, &repos).await?;
+            } else if let Some(repository) = repository {
+                client.delete_tag(repository, &delete_cmd.tag).await?;
+            } else {
+                return Err(GitError::MissingRepositoryName);
+            }
+        }
+        TagCommand::Sync(sync_cmd) => {
+            let repository = sync_cmd.repository.as_ref();
+            // By default, this is false
+            let process_annotated_tags = sync_cmd.without_annotated;
+            if sync_cmd.all {
+                client.sync_all_tags(process_annotated_tags, repos).await?;
+            } else if let Some(repository) = repository {
+                client.sync_tags(repository, process_annotated_tags).await?;
+            } else {
+                return Err(GitError::MissingRepositoryName);
+            }
+        }
+    }
+    Ok(())
+}
+/// Process all Branch commands
+async fn match_branch_cmds(
+    client: GithubClient,
+    repos: Vec<String>,
+    cmd: &BranchCommand,
+) -> Result<(), GitError> {
+    match cmd {
+        BranchCommand::Create(create_cmd) => {
+            let repository = create_cmd.repository.as_ref();
+            let (base, new) = (
+                create_cmd.base_branch.clone(),
+                create_cmd.new_branch.clone(),
+            );
+            if create_cmd.all {
+                client.create_all_branches(&base, &new, &repos).await?;
+            } else if let Some(repository) = repository {
+                client.create_branch(repository, &base, &new).await?;
+            }
+        }
+        BranchCommand::Delete(delete_cmd) => {
+            let repository = delete_cmd.repository.as_ref();
+            if delete_cmd.all {
+                client
+                    .delete_all_branches(&delete_cmd.branch, &repos)
+                    .await?;
+            } else if let Some(repository) = repository {
+                client.delete_branch(repository, &delete_cmd.branch).await?;
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Process all Repo commands
+async fn match_repo_cmds(
+    client: GithubClient,
+    repos: Vec<String>,
+    config: Config,
+    cmd: &RepoCommand,
+) -> Result<(), GitError> {
+    match cmd {
+        RepoCommand::Sync(sync_cmd) => {
+            let repository = sync_cmd.repository.as_ref();
+            if sync_cmd.all {
+                client.sync_all_forks(repos).await?;
+            } else if let Some(repository) = repository {
+                client.sync_fork(repository).await?;
+            } else {
+                return Err(GitError::MissingRepositoryName);
+            }
+        }
+        RepoCommand::Check(check_cmd) => {
+            let repository = check_cmd.repository.as_ref();
+            let (protected, license) = (check_cmd.protected, check_cmd.license);
+            let old_branches = (check_cmd.old_branches, check_cmd.days_ago);
+            let blacklist = config.misc.branch_blacklist.unwrap_or_default();
+            let filter = check_cmd.branch_filter.clone();
+            let branch_filter = if let Some(filter) = filter {
+                Some(Regex::new(&filter).map_err(GitError::RegexError)?)
+            } else {
+                None
+            };
+            let checks = &RepoChecks {
+                protected,
+                license,
+                old_branches,
+                branch_filter: branch_filter.clone(),
+            };
+
+            if check_cmd.all {
+                let result = client
+                    .check_all_repositories(repos, checks, &blacklist)
+                    .await?;
+
+                for res in &result {
+                    let Checks {
+                        branches,
+                        rules,
+                        license,
+                        repo,
+                    } = res;
+                    for branch in branches {
+                        println!("\tStale branch: {} - {}", branch.0, branch.1);
+                    }
+                    for rule in rules {
+                        rule.print(repo);
+                    }
+                    if let Some(license) = license {
+                        if let Some(name) = license.name.as_ref() {
+                            println!("\tLicense: {name}");
+                        }
+                    }
+                }
+            } else if let Some(repository) = repository {
+                let result = client
+                    .check_repository(repository, blacklist, checks)
+                    .await?;
+                let Checks {
+                    branches,
+                    rules,
+                    license,
+                    repo,
+                } = &result;
+                let branches = branches
+                    .iter()
+                    .map(|(b, d)| vec![b.to_string(), d.to_string()])
+                    .collect();
+                GithubClient::display_check_results(
+                    vec!["Branch".to_string(), "Date".to_string()],
+                    branches,
+                    rules,
+                    license.clone(),
+                    repo,
+                );
+            } else {
+                return Err(GitError::MissingRepositoryName);
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Process all PR commands
+async fn match_pr_cmds(
+    client: GithubClient,
+    repos: Vec<String>,
+    config: Config,
+    cmd: &PRCommand,
+) -> Result<(), GitError> {
+    match cmd {
+        PRCommand::Open(open_cmd) => {
+            let repository = open_cmd.repository.clone().unwrap_or_default();
+            let merge = open_cmd.merge;
+            println!("Merge is {merge}");
+            let opts = CreatePrOptions {
+                url: repository.clone(),
+                head: open_cmd.head.clone(),
+                base: open_cmd.base.clone(),
+                title: open_cmd.title.clone(),
+                body: open_cmd.body.clone(),
+                reviewers: open_cmd.reviewers.clone(),
+            };
+
+            let mut merge_opts = if merge {
+                Some(MergePrOptions {
+                    url: repository.clone(),
+                    pr_number: 0,
+                    method: open_cmd.merge_method,
+                    title: open_cmd.merge_title.clone(),
+                    message: open_cmd.merge_body.clone(),
+                    sha: open_cmd.sha.clone(),
+                })
+            } else {
+                None
+            };
+            if open_cmd.all {
+                let pr_numbers = client.create_all_prs(&opts, merge_opts, repos).await?;
+                // Do some stuff here
+            } else if !repository.len() > 0 {
+                let pr_number = client.create_pr(&opts).await?;
+                println!("Created PR #{pr_number} in {repository}");
+                if let Some(opts) = merge_opts.as_mut() {
+                    opts.pr_number = pr_number;
+                    client.merge_pr(opts).await?;
+                }
+            } else {
+                return Err(GitError::MissingRepositoryName);
+            }
+        }
+    }
+    Ok(())
+}
+
+async fn match_release_cmds(
+    client: GithubClient,
+    repos: Vec<String>,
+    config: Config,
+    cmd: &ReleaseCommand,
+) -> Result<(), GitError> {
+    match cmd {
+        ReleaseCommand::Create(create_cmd) => {
+            let repository = create_cmd.repository.as_ref();
+            if create_cmd.all {
+                client
+                    .create_all_releases(
+                        &create_cmd.current_release,
+                        &create_cmd.previous_release,
+                        create_cmd.release_name.as_deref(),
+                        repos,
+                    )
+                    .await?;
+            } else if let Some(repository) = repository {
+                client
+                    .create_release(
+                        repository,
+                        &create_cmd.current_release,
+                        &create_cmd.previous_release,
+                        create_cmd.release_name.as_deref(),
+                    )
+                    .await?;
+            }
+        }
+    }
+
     Ok(())
 }
 
