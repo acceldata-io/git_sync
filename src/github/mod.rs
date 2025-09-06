@@ -19,6 +19,7 @@ under the License.
 pub mod branch;
 pub mod check;
 pub mod client;
+pub mod fork;
 pub mod parse;
 pub mod pr;
 pub mod release;

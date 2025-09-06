@@ -16,15 +16,18 @@ KIND, either express or implied.  See the License for the
 specific language governing permissions and limitations
 under the License.
 */
+use crate::async_retry;
 use crate::config::Config;
 use crate::error::{GitError, is_retryable};
 use crate::utils::repo::{RepoInfo, TagInfo, get_repo_info_from_url};
-use crate::{async_retry, handle_api_response};
 use chrono::{DateTime, Local, TimeZone, Utc};
-use futures::{StreamExt, stream::FuturesUnordered};
 use octocrab::Octocrab;
 
 use indexmap::IndexSet;
+use tokio::sync::Semaphore;
+
+use std::cmp;
+use std::sync::Arc;
 
 /// Contains information about tags for a forked repo, its parent,
 /// and the tags that are missing from the fork
@@ -39,15 +42,22 @@ pub struct Comparison {
 pub struct GithubClient {
     /// Octocrab client. This can be trivially cloned
     pub octocrab: Octocrab,
+    /// A semaphore to control the maximum number of jobs that can be run in parallel
+    pub semaphore: Arc<Semaphore>,
 }
 
 impl GithubClient {
-    pub fn new(github_token: &str, _config: &Config) -> Result<Self, GitError> {
+    pub fn new(github_token: &str, _config: &Config, max_jobs: usize) -> Result<Self, GitError> {
         let octocrab = Octocrab::builder()
             .personal_token(github_token)
             .build()
             .map_err(GitError::GithubApiError)?;
-        Ok(Self { octocrab })
+        // Shadow max_jobs. This value makes no sense if it's less than 1
+        let max_jobs: usize = cmp::max(1, max_jobs);
+        Ok(Self {
+            octocrab,
+            semaphore: Arc::new(Semaphore::new(max_jobs)),
+        })
     }
     /// Get the parent repository of a github repository.
     pub async fn get_parent_repo(&self, url: &str) -> Result<RepoInfo, GitError> {
@@ -70,61 +80,6 @@ impl GithubClient {
             main_branch: parent.default_branch,
         })
     }
-
-    /// Sync a single repository with its parent repository.
-    pub async fn sync_fork(&self, url: &str) -> Result<(), GitError> {
-        let info = get_repo_info_from_url(url)?;
-        let (owner, repo) = (info.owner, info.repo_name);
-        println!("Syncing {owner}/{repo} with its parent repository...");
-
-        let parent = self.get_parent_repo(url).await?;
-        let body = serde_json::json!({"branch": parent.main_branch});
-        let response: Result<serde_json::Value, octocrab::Error> = self
-            .octocrab
-            .clone()
-            .post(format!("/repos/{owner}/{repo}/merge-upstream"), Some(&body))
-            .await;
-
-        handle_api_response!(
-            response,
-            format!("Unable to sync {owner}/{repo} with its parent repository"),
-            |_| {
-                println!("Successfully synced {owner}/{repo} with its parent repository");
-                Ok::<(), GitError>(())
-            },
-        )?;
-        Ok(())
-    }
-
-    /// Sync all configured repositories. Only repositories that have a parent repository
-    /// should be passed to this function
-    pub async fn sync_all_forks(&self, repositories: Vec<String>) -> Result<(), GitError> {
-        let mut futures = FuturesUnordered::new();
-        for repo in repositories {
-            println!("   Processing {repo}");
-            futures.push(async move {
-                let result = self.sync_fork(&repo).await;
-                (repo, result)
-            });
-        }
-        let mut errors: Vec<(String, GitError)> = Vec::new();
-        while let Some((repo, result)) = futures.next().await {
-            match result {
-                Ok(()) => {
-                    println!("✅ Successfully synced {repo}");
-                }
-                Err(e) => {
-                    println!("❌ Failed to sync {repo}: {e}");
-                    errors.push((repo.to_string(), e));
-                }
-            }
-        }
-        if !errors.is_empty() {
-            return Err(GitError::MultipleErrors(errors));
-        }
-        Ok(())
-    }
-
     /// Get the number of api calls left at the moment. Generally, the maximum number is 5000 in
     /// one hour.
     pub async fn get_rate_limit(&self) -> Result<(), GitError> {

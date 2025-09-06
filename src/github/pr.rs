@@ -32,6 +32,9 @@ impl GithubClient {
         let (owner, repo) = (info.owner, info.repo_name);
         let octocrab = self.octocrab.clone();
 
+        // Acquire a lock on the semaphore
+        let _permit = self.semaphore.clone().acquire_owned().await?;
+
         let retries = 3;
         let pr_number: u64;
         let pr_result: Result<_, octocrab::Error> = async_retry!(
@@ -146,6 +149,9 @@ impl GithubClient {
         let info = get_repo_info_from_url(&opts.url)?;
         let (owner, repo) = (info.owner, info.repo_name);
         let pr_number = opts.pr_number;
+
+        // Acquire a lock on the semaphore
+        let _permit = self.semaphore.clone().acquire_owned().await?;
 
         let merge_result: Result<_, octocrab::Error> = async_retry!(
             ms = 100,

@@ -47,6 +47,10 @@ pub struct AppArgs {
     /// Verbose output
     #[arg(long, default_value_t = false, global = true)]
     pub verbose: bool,
+
+    /// The maximum number of parallel tasks to run
+    #[arg(short = 'j', long, global = true, value_parser = clap::value_parser!(u32).range(1..64))]
+    pub jobs: Option<usize>,
 }
 
 /// Valid options for `repository_type` for cli arguments

@@ -97,6 +97,10 @@ impl GithubClient {
     pub async fn get_tags(&self, url: &str) -> Result<IndexSet<TagInfo>, GitError> {
         let info = get_repo_info_from_url(url)?;
         let (owner, repo) = (info.owner, info.repo_name);
+
+        // Acquire a lock on the semaphore
+        let _permit = self.semaphore.clone().acquire_owned().await?;
+
         //let mut all_tags: Vec<TagInfo> = Vec::new();
         let mut all_tags: IndexSet<TagInfo> = IndexSet::new();
         let mut has_next_page = true;
@@ -225,6 +229,9 @@ impl GithubClient {
             return Ok(());
         }
 
+        // Acquire a lock on the semaphore
+        let _permit = self.semaphore.clone().acquire_owned().await?;
+
         let lightweight: IndexSet<TagInfo> = missing
             .iter()
             .filter(|t| t.tag_type == TagType::Lightweight)
@@ -287,21 +294,28 @@ impl GithubClient {
         process_annotated: bool,
         repositories: Vec<String>,
     ) -> Result<(), GitError> {
-        handle_futures_unordered!(
-            repositories.into_iter().map(|url| {
-                let url = url.clone();
-                let info = get_repo_info_from_url(&url).unwrap();
-                let (owner, repo) = (info.owner, info.repo_name);
-                (owner, repo, url)
-            }),
-            |owner, repo , url| self.sync_tags(&url.clone(), process_annotated).map(move |result| (url, owner, repo, result)),
-            (url, owner, repo, result) {
-                match result {
-                    Ok(()) => println!("Successfully synced tags for {owner}/{repo}: {url}"),
-                    Err(e) => eprintln!("Failed to sync tags for repo {owner}/{repo}: {e}"),
+        let mut futures = FuturesUnordered::new();
+        for url in repositories {
+            futures.push(async move {
+                let result = self.sync_tags(&url, process_annotated).await;
+                (url, result)
+            });
+        }
+        let mut errors: Vec<(String, GitError)> = Vec::new();
+        while let Some((repo, result)) = futures.next().await {
+            match result {
+                Ok(()) => {
+                    println!("✅ Successfully synced tags for {repo}");
+                }
+                Err(e) => {
+                    println!("❌ Failed to sync tags for {repo}");
+                    errors.push((repo, e));
                 }
             }
-        );
+        }
+        if !errors.is_empty() {
+            return Err(GitError::MultipleErrors(errors));
+        }
 
         Ok(())
     }
@@ -360,7 +374,6 @@ impl GithubClient {
         if tags.is_empty() {
             return Ok(());
         }
-        println!("{tags:#?}");
 
         // Use a temp directory for the git repository so it's cleaned up automatically
         let tmp_dir = TempDir::new()
@@ -369,8 +382,6 @@ impl GithubClient {
         let tmp_str = tmp
             .to_str()
             .ok_or_else(|| GitError::Other("Temp dir not valid UTF-8".to_string()))?;
-
-        println!("{parent_url} - {ssh_url}");
 
         // Clone with the bare minimum information to reduce the amount we download
         Command::new("git")
@@ -479,7 +490,8 @@ impl GithubClient {
         let info = get_repo_info_from_url(url)?;
         let sha = self.get_branch_sha(url, branch).await?;
         let (owner, repo) = (info.owner, info.repo_name);
-
+        // Acquire a lock on the semaphore
+        let _permit = self.semaphore.clone().acquire_owned().await?;
         let res: Result<Ref, octocrab::Error> = async_retry!(
             ms = 100,
             timeout = 5000,
@@ -532,7 +544,8 @@ impl GithubClient {
         let info = get_repo_info_from_url(url)?;
         let (owner, repo) = (info.owner, info.repo_name);
 
-        //let result = self.octocrab.clone().repos(owner, repo).delete_ref(&Reference::Tag(tag.to_string())).await;
+        // Acquire a lock on the semaphore
+        let _permit = self.semaphore.clone().acquire_owned().await?;
 
         let response = self
             .octocrab

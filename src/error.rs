@@ -74,6 +74,9 @@ pub enum GitError {
     #[error("Timezone error: {0}")]
     GetTimezoneError(#[from] iana_time_zone::GetTimezoneError),
 
+    #[error("Semaphore acquire failure: {0}")]
+    SemaphoreError(#[from] tokio::sync::AcquireError),
+
     #[error("Error: {0}")]
     Other(String),
 }
@@ -181,6 +184,12 @@ impl GitError {
                 message: format!("Timezone error: {e}"),
                 suggestion: Some("Check your timezone string or system settings.".into()),
             },
+            GitError::SemaphoreError(e) => UserError {
+                code: None,
+                message: format!("Semaphore Error: {e}"),
+                suggestion: None,
+            },
+
             GitError::Other(msg) => UserError {
                 code: None,
                 message: msg.clone(),

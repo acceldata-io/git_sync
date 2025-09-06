@@ -48,6 +48,9 @@ impl GithubClient {
 
         let octocrab = self.octocrab.clone();
 
+        // Acquire a lock on the semaphore
+        let _permit = self.semaphore.clone().acquire_owned().await?;
+
         let tag_info = async_retry!(
             ms = 100,
             timeout = 5000,
@@ -133,13 +136,6 @@ impl GithubClient {
                     new_commits.push(commit_line.clone());
                 }
             }
-            /*new_commits.extend(
-                commits
-                    .items
-                    .iter()
-                    .map(|c| c.commit.message.lines().next().unwrap().to_string()),
-            );
-            */
 
             if commits.items.len() < per_page as usize {
                 break;
@@ -176,11 +172,6 @@ impl GithubClient {
                 other.push(s.clone());
             }
         }
-
-        /*let mut body_header = tag.replace("-tag", "");
-        body_header = body_header.replace("ODP-", "");
-        body_header = format!("# Release Notes for {capitalized} {body_header}");
-        */
 
         let body_header = format!(
             "# Release Notes for {capitalized} {}",
@@ -245,8 +236,10 @@ impl GithubClient {
         } else {
             current_tag.to_string()
         };
-        // ExponentialBackoff, with a max of three tries in case something fails for a tarnsient
-        // reason.
+
+        // Acquire a lock on the semaphore
+        let _permit = self.semaphore.clone().acquire_owned().await?;
+
         let retries = 3;
 
         let release = async_retry!(

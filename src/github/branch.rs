@@ -29,6 +29,10 @@ impl GithubClient {
     pub async fn get_branch_sha(&self, url: &str, branch: &str) -> Result<String, GitError> {
         let info = get_repo_info_from_url(url)?;
         let (owner, repo) = (info.owner, info.repo_name);
+
+        // Acquire a lock on the semaphore
+        let _permit = self.semaphore.clone().acquire_owned().await?;
+
         let res: Result<_, octocrab::Error> = async_retry!(
             ms = 100,
             timeout = 5000,
@@ -48,11 +52,7 @@ impl GithubClient {
                 let octocrab::models::repos::Object::Commit { sha, .. } = r.object else {
                     return Err(GitError::NoSuchBranch(branch.to_string()));
                 };
-                /*let sha = match r.object {
-                    octocrab::models::repos::Object::Commit { sha, .. } => sha,
-                    _ => return Err(GitError::NoSuchBranch(branch.to_string())),
-                };
-                */
+
                 Ok(sha)
             }
             Err(e) => Err(GitError::GithubApiError(e)),
@@ -67,6 +67,10 @@ impl GithubClient {
     ) -> Result<(), GitError> {
         let info = get_repo_info_from_url(url)?;
         let (owner, repo) = (info.owner, info.repo_name);
+
+        // Acquire a lock on the semaphore
+        let _permit = self.semaphore.clone().acquire_owned().await?;
+
         let res: Result<_, octocrab::Error> = async_retry!(
             ms = 100,
             timeout = 5000,
@@ -86,13 +90,7 @@ impl GithubClient {
                 return Err(GitError::GithubApiError(e));
             }
         };
-        /*let response = self
-            .octocrab
-            .clone()
-            .repos(&owner, &repo)
-            .get_ref(&Reference::Branch(base_branch.to_string()))
-            .await?;
-        */
+
         let octocrab::models::repos::Object::Commit { sha, .. } = response.object else {
             return Err(GitError::NoSuchBranch(base_branch.to_string()));
         };
@@ -114,13 +112,6 @@ impl GithubClient {
             Ok(_) => Ok(()),
             Err(e) => Err(GitError::GithubApiError(e)),
         }
-        /*let response = self
-            .octocrab
-            .clone()
-            .repos(&owner, &repo)
-            .create_ref(&Reference::Branch(new_branch.to_string()), sha)
-            .await;
-        */
     }
     /// Create the passed branch for each repository provided
     pub async fn create_all_branches(
@@ -131,10 +122,14 @@ impl GithubClient {
     ) -> Result<(), GitError> {
         let mut futures = FuturesUnordered::new();
         for repo in repositories {
-            println!("   Processing {repo}");
+            // Limit the number of jobs
+            let semaphore_permit = self.semaphore.clone().acquire_owned().await?;
 
             futures.push(async move {
                 let result = self.create_branch(repo, base_branch, new_branch).await;
+                // Drop this variable after the above function has finished.
+                // Free a slot for another job to run
+                drop(semaphore_permit);
                 (repo, result)
             });
         }
@@ -161,6 +156,8 @@ impl GithubClient {
     pub async fn delete_branch(&self, url: &str, branch: &str) -> Result<(), GitError> {
         let info = get_repo_info_from_url(url)?;
         let (owner, repo) = (info.owner, info.repo_name);
+        // Acquire a lock on the semaphore
+        let _permit = self.semaphore.clone().acquire_owned().await?;
         let result: Result<_, octocrab::Error> = async_retry!(
             ms = 100,
             timeout = 5000,
@@ -174,13 +171,7 @@ impl GithubClient {
                     .await
             },
         );
-        /*let result = self
-            .octocrab
-            .clone()
-            .repos(&owner, &repo)
-            .delete_ref(&Reference::Branch(branch.to_string()))
-            .await;
-        */
+
         match result {
             Ok(()) => {
                 println!("✅ Successfully deleted branch '{branch}' for {repo}");
@@ -200,10 +191,13 @@ impl GithubClient {
     ) -> Result<(), GitError> {
         let mut futures = FuturesUnordered::new();
         for repo in repositories {
-            println!("   Processing {repo}");
-            println!("   Processing {repo}");
+            // Limit the number of jobs
+            let permit = self.semaphore.clone().acquire_owned().await?;
             futures.push(async move {
                 let result = self.delete_branch(repo, branch).await;
+                // Drop this variable after the above function has finished.
+                // Free a slot for another job to run
+                drop(permit);
                 (repo, result)
             });
         }

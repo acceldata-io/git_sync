@@ -48,6 +48,10 @@ impl GithubClient {
 
         let mut protection_rules: Vec<BranchProtectionRule> = Vec::new();
         let mut license: Option<LicenseInfo>;
+
+        // Acquire a lock on the semaphore
+        let _permit = self.semaphore.clone().acquire_owned().await?;
+
         // Use a graphql query to drastically reduce the number of api calls we need to make.
         // This lets us get the repo name and latest commit date in one call, instead of two.
         // This makes a huge difference for very large repositories with many branches.

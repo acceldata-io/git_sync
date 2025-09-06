@@ -57,8 +57,12 @@ pub async fn match_arguments(app: &AppArgs, config: Config) -> Result<(), GitErr
         RepositoryType::Fork => config.get_fork_repositories(),
         RepositoryType::All => config.get_all_repositories(),
     };
-
-    let client = GithubClient::new(&token, &config)?;
+    let default_jobs = std::thread::available_parallelism()
+        .map(std::num::NonZero::get)
+        .unwrap_or(4);
+    let jobs: usize = app.jobs.unwrap_or(default_jobs);
+    println!("Max number of jobs: {jobs}");
+    let client = GithubClient::new(&token, &config, jobs)?;
     if !token.is_empty() && verbose {
         let (rest_limit, graphql_limit) =
             tokio::join!(client.get_rate_limit(), client.get_graphql_limit());
