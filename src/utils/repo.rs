@@ -18,7 +18,7 @@ under the License.
 */
 use crate::error::GitError;
 use regex::Regex;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use std::fmt;
 use std::fmt::Write as _;
 use std::hash::{Hash, Hasher};
@@ -44,7 +44,7 @@ pub struct RepoInfo {
 
 /// Struct for holding tag information.
 /// This is for both annotated and lightweight tags.
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Deserialize, Clone)]
 pub struct TagInfo {
     pub name: String,
     pub tag_type: TagType,
@@ -54,7 +54,6 @@ pub struct TagInfo {
     pub tagger_email: Option<String>,
     pub tagger_date: Option<String>,
     pub parent_url: Option<String>,
-    pub ssh_url: String,
 }
 
 /// Implements checking for equality based on the tag name only. This is needed for
@@ -74,7 +73,7 @@ impl Hash for TagInfo {
 }
 
 /// The different types of tags
-#[derive(Debug, Serialize, Deserialize, PartialEq, Eq, Hash, Clone)]
+#[derive(Debug, Deserialize, PartialEq, Eq, Hash, Clone)]
 pub enum TagType {
     Annotated,
     Lightweight,
@@ -187,7 +186,7 @@ impl fmt::Display for BranchProtectionRule {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Deserialize, Clone)]
 pub struct LicenseInfo {
     pub name: Option<String>,
     #[serde(rename = "spdxId")]

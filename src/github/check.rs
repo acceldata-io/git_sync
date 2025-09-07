@@ -49,9 +49,6 @@ impl GithubClient {
         let mut protection_rules: Vec<BranchProtectionRule> = Vec::new();
         let mut license: Option<LicenseInfo>;
 
-        // Acquire a lock on the semaphore
-        let _permit = self.semaphore.clone().acquire_owned().await?;
-
         // Use a graphql query to drastically reduce the number of api calls we need to make.
         // This lets us get the repo name and latest commit date in one call, instead of two.
         // This makes a huge difference for very large repositories with many branches.
@@ -101,6 +98,9 @@ impl GithubClient {
         let mut after: Option<String> = None;
 
         loop {
+            // Acquire a lock on the semaphore
+            let permit = self.semaphore.clone().acquire_owned().await?;
+
             // Paginated results, so we have to loop over until there aren't any more pages left
             let payload = serde_json::json!({
                 "query": query,
@@ -120,6 +120,7 @@ impl GithubClient {
                 error_predicate = |e: &octocrab::Error| is_retryable(e),
                 body = { octocrab.graphql(&payload).await },
             )?;
+            drop(permit);
             let refs = &response["data"]["repository"]["refs"];
             license = response["data"]["repository"]["licenseInfo"]
                 .as_object()

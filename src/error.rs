@@ -23,6 +23,7 @@ use std::io::ErrorKind::{
     HostUnreachable, NetworkUnreachable, NotConnected, TimedOut, WouldBlock,
 };
 use thiserror::Error;
+
 /// Error type to make it easier to handle returning from functions
 #[derive(Error, Debug)]
 pub enum GitError {
@@ -66,7 +67,8 @@ pub enum GitError {
         "Missing GitHub token. Please provide a token via --token, GITHUB_TOKEN environment variable, or in your config file."
     )]
     MissingToken,
-
+    #[error("Join error: {0}")]
+    JoinError(#[from] tokio::task::JoinError),
     #[error("IO error: {0}")]
     IoError(#[from] std::io::Error),
     #[error("JSON error: {0}")]
@@ -168,6 +170,11 @@ impl GitError {
                 code: None,
                 message: "Missing GitHub token. Please provide a token via --token, GITHUB_TOKEN environment variable, or in your config file.".into(),
                 suggestion: Some("Provide a GitHub token using --token, environment variable, or config file.".into()),
+            },
+            GitError::JoinError(e) => UserError {
+                code: None,
+                message: format!("Failed to join tasks: {e}"),
+                suggestion: None,
             },
             GitError::IoError(e) => UserError {
                 code: None,

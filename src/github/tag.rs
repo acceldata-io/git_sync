@@ -98,16 +98,12 @@ impl GithubClient {
         let info = get_repo_info_from_url(url)?;
         let (owner, repo) = (info.owner, info.repo_name);
 
-        // Acquire a lock on the semaphore
-        let _permit = self.semaphore.clone().acquire_owned().await?;
-
-        //let mut all_tags: Vec<TagInfo> = Vec::new();
         let mut all_tags: IndexSet<TagInfo> = IndexSet::new();
         let mut has_next_page = true;
         let mut after: Option<String> = None;
         let per_page = 100;
 
-        //let octocrab = self.octocrab.clone();
+        let octocrab = self.octocrab.clone();
         let query = r#"
         query($owner: String!, $repo: String!, $first: Int!, $after: String) {
             repository(owner: $owner, name: $repo) {
@@ -140,6 +136,9 @@ impl GithubClient {
         "#;
 
         while has_next_page {
+            // Acquire a lock on the semaphore
+            let permit = self.semaphore.clone().acquire_owned().await?;
+
             let payload = json!({
                 "query": query,
                 "variables": {
@@ -154,13 +153,16 @@ impl GithubClient {
                 timeout = 5000,
                 retries = 3,
                 error_predicate = |e: &octocrab::Error| is_retryable(e),
-                body = { self.octocrab.graphql(&payload).await },
+                body = { octocrab.graphql(&payload).await },
             )?;
 
-            let repo = &res.data.repository;
-            let parent_url = repo.parent.as_ref().map(|p| p.url.clone());
+            // Drop the lock on the semaphore so other network activities can potentially run
+            drop(permit);
 
-            for tag in &repo.refs.nodes {
+            let mut repo = res.data.repository;
+            let mut parent_url = repo.parent.as_ref().map(|p| p.url.clone());
+
+            for tag in &mut repo.refs.nodes {
                 let tag_type = match tag.target.typename.as_str() {
                     "Tag" => TagType::Annotated,
                     "Commit" => TagType::Lightweight,
@@ -179,22 +181,20 @@ impl GithubClient {
                         (None, None, None, None)
                     };
 
-                let ssh_url = http_to_ssh_repo(url)?;
-
                 all_tags.insert(TagInfo {
-                    name: tag.name.clone(),
+                    name: std::mem::take(&mut tag.name),
                     tag_type,
-                    sha: tag.target.oid.clone(),
+                    sha: std::mem::take(&mut tag.target.oid),
                     message,
                     tagger_name,
                     tagger_email,
                     tagger_date,
-                    parent_url: parent_url.clone(),
-                    ssh_url,
+                    parent_url: std::mem::take(&mut parent_url),
                 });
             }
             has_next_page = repo.refs.page_info.has_next_page;
-            after.clone_from(&repo.refs.page_info.end_cursor);
+            after = repo.refs.page_info.end_cursor;
+            //after.clone_from(&repo.refs.page_info.end_cursor);
         }
 
         Ok(all_tags)
@@ -217,222 +217,6 @@ impl GithubClient {
         };
         Ok(compare)
     }
-    /// Sync many tags asynchronously. We can use the github api to sync lightweight tags, but to
-    /// sync annotated tags we need to use git. Unfortunately there's no way around that.
-    pub async fn sync_tags(&self, url: &str, process_annotated: bool) -> Result<(), GitError> {
-        let info = get_repo_info_from_url(url)?;
-        let parent = self.get_parent_repo(url).await?;
-        let (owner, repo) = (info.owner, info.repo_name);
-        let missing = self.compare_tags(url, &parent).await?.missing_in_fork;
-        if missing.is_empty() {
-            println!("No missing tags in {url}");
-            return Ok(());
-        }
-
-        // Acquire a lock on the semaphore
-        let _permit = self.semaphore.clone().acquire_owned().await?;
-
-        let lightweight: IndexSet<TagInfo> = missing
-            .iter()
-            .filter(|t| t.tag_type == TagType::Lightweight)
-            .cloned()
-            .collect();
-
-        let annotated: IndexSet<TagInfo> = missing
-            .into_iter()
-            .filter(|t| t.tag_type == TagType::Annotated)
-            .collect();
-
-        let lightweight_fut = async {
-            handle_futures_unordered!(
-                lightweight.into_iter().map(|tag| {
-                    let owner = owner.clone();
-                    let repo = repo.clone();
-                    let name = tag.name.clone();
-                    (repo, name, owner, tag)
-                }),
-                |repo, name, owner, tag| self.sync_lightweight_tag(&owner, &repo.clone(), &tag).map(|result|(repo, name, result)),
-                (repo, name, result) {
-                    match result {
-                        Ok(()) => println!("Successfully synced tag '{name}' in '{repo}'"),
-                        Err(e) => eprintln!("Failed to sync '{name}' for '{repo}': {e}")
-                    }
-                }
-            );
-            Ok::<(), GitError>(())
-        };
-        // Run both of these at the same time. Annotated tags are much slower to sync than
-        // ligthweight tags since we need to clone, fetch from upstream, then push.
-        if process_annotated {
-            let ssh_url = http_to_ssh_repo(url)?;
-            let output = tokio::join!(
-                async { self.sync_annotated_tags(&annotated, &parent.url, &ssh_url) },
-                lightweight_fut,
-            );
-            let (annotated, lightweight) = output;
-            if annotated.is_err() {
-                eprintln!(
-                    "Failed to sync annotated tags for {owner}/{repo}: {}",
-                    annotated.err().unwrap()
-                );
-            }
-            if lightweight.is_err() {
-                eprintln!(
-                    "Failed to sync lightweight tags for {owner}/{repo}: {}",
-                    lightweight.err().unwrap()
-                );
-            }
-        } else {
-            lightweight_fut.await?;
-        }
-
-        Ok(())
-    }
-    /// Sync tags for all configured repositories
-    pub async fn sync_all_tags(
-        &self,
-        process_annotated: bool,
-        repositories: Vec<String>,
-    ) -> Result<(), GitError> {
-        let mut futures = FuturesUnordered::new();
-        for url in repositories {
-            futures.push(async move {
-                let result = self.sync_tags(&url, process_annotated).await;
-                (url, result)
-            });
-        }
-        let mut errors: Vec<(String, GitError)> = Vec::new();
-        while let Some((repo, result)) = futures.next().await {
-            match result {
-                Ok(()) => {
-                    println!("✅ Successfully synced tags for {repo}");
-                }
-                Err(e) => {
-                    println!("❌ Failed to sync tags for {repo}");
-                    errors.push((repo, e));
-                }
-            }
-        }
-        if !errors.is_empty() {
-            return Err(GitError::MultipleErrors(errors));
-        }
-
-        Ok(())
-    }
-    /// Sync lightweight tags from the parent repo to the forked repo. This can be trivially done
-    /// using the github api, so we don't need to call out to
-    pub async fn sync_lightweight_tag(
-        &self,
-        owner: &str,
-        repo: &str,
-        tag: &TagInfo,
-    ) -> Result<(), GitError> {
-        let body = json!({
-            "ref": format!("refs/tags/{}", tag.name),
-            "sha": tag.sha,
-        });
-        let response: Result<serde_json::Value, octocrab::Error> = async_retry!(
-            ms = 100,
-            timeout = 5000,
-            retries = 3,
-            error_predicate = |e: &octocrab::Error| is_retryable(e),
-            body = {
-                self.octocrab
-                    .clone()
-                    .post::<serde_json::Value, _>(
-                        format!("/repos/{owner}/{repo}/git/refs"),
-                        Some(&body),
-                    )
-                    .await
-            },
-        );
-
-        handle_api_response!(
-            response,
-            format!("Unable to sync tag {} in {owner}/{repo}", tag.name),
-            |_| {
-                println!(
-                    "Successfully synced lightweight tag '{}' {owner}/{repo}",
-                    tag.name
-                );
-                Ok::<(), GitError>(())
-            },
-        )?;
-        Ok(())
-    }
-
-    /// Sync all new annotated tags from a forked repo with its parent.
-    /// Doing this *requires* using git (or some re-implementation of git). Syncing annotated tags
-    /// through the github api with all of its fields, including signing, is currently not
-    /// possible.
-    pub fn sync_annotated_tags(
-        &self,
-        tags: &IndexSet<TagInfo>,
-        parent_url: &str,
-        ssh_url: &str,
-    ) -> Result<(), GitError> {
-        if tags.is_empty() {
-            return Ok(());
-        }
-
-        // Use a temp directory for the git repository so it's cleaned up automatically
-        let tmp_dir = TempDir::new()
-            .map_err(|e| GitError::Other(format!("Failed to create temp dir: {e}")))?;
-        let tmp = tmp_dir.path();
-        let tmp_str = tmp
-            .to_str()
-            .ok_or_else(|| GitError::Other("Temp dir not valid UTF-8".to_string()))?;
-
-        // Clone with the bare minimum information to reduce the amount we download
-        Command::new("git")
-            .args([
-                "clone",
-                "--bare",
-                "--filter=blob:none",
-                "--depth=1",
-                ssh_url,
-                tmp_str,
-            ])
-            .status()?;
-
-        let output = Command::new("git")
-            .args(["-C", tmp_str, "remote", "get-url", "upstream"])
-            .output()?;
-        if output.status.success() {
-            Command::new("git")
-                .args(["-C", tmp_str, "remote", "set-url", "upstream", parent_url])
-                .status()?;
-        } else {
-            Command::new("git")
-                .args(["-C", tmp_str, "remote", "add", "upstream", parent_url])
-                .status()?;
-        }
-
-        // Only fetch the annotated tags that we're interested in adding to our fork.
-        // Lightweight tags can be synced automatically with github
-        let mut fetch_args = vec![
-            "-C",
-            tmp_str,
-            "fetch",
-            "--filter=blob:none",
-            "--depth=1",
-            "upstream",
-        ];
-        for tag in tags {
-            fetch_args.push("tag");
-            fetch_args.push(tag.name.as_str());
-        }
-
-        Command::new("git").args(&fetch_args).status()?;
-
-        // Only push the newly added annotated tags
-        let mut push_args = vec!["-C", tmp_str, "push", "origin"];
-        push_args.extend(tags.iter().map(|tag| tag.name.as_str()));
-
-        Command::new("git").args(&push_args).status()?;
-        Ok(())
-    }
-
     /// Get a diff of tags between a single forked repository and its parent repository.
     pub async fn diff_tags(&self, url: &str) -> Result<Comparison, GitError> {
         let parent = self.get_parent_repo(url).await?;
@@ -485,6 +269,229 @@ impl GithubClient {
         }
         Ok(())
     }
+
+    /// Sync many tags asynchronously. We can use the github api to sync lightweight tags, but to
+    /// sync annotated tags we need to use git. Unfortunately there's no way around that.
+    pub async fn sync_tags(&self, url: &str, process_annotated: bool) -> Result<(), GitError> {
+        let info = get_repo_info_from_url(url)?;
+        let parent = self.get_parent_repo(url).await?;
+        let (owner, repo) = (info.owner, info.repo_name);
+        let missing = self.compare_tags(url, &parent).await?.missing_in_fork;
+        if missing.is_empty() {
+            println!("No missing tags in {url}");
+            return Ok(());
+        }
+
+        let (lightweight, annotated): (IndexSet<TagInfo>, IndexSet<TagInfo>) = missing
+            .into_iter()
+            .partition(|t| t.tag_type == TagType::Lightweight);
+
+        let lightweight_fut = async {
+            handle_futures_unordered!(
+                lightweight.into_iter().map(|tag| {
+                    let owner = owner.clone();
+                    let repo = repo.clone();
+                    let name = tag.name.clone();
+                    (repo, name, owner, tag)
+                }),
+                |repo, name, owner, tag| self.sync_lightweight_tag(&owner, &repo.clone(), &tag).map(|result|(repo, name, result)),
+                (repo, name, result) {
+                    match result {
+                        Ok(()) => println!("Successfully synced tag '{name}' in '{repo}'"),
+                        Err(e) => eprintln!("Failed to sync '{name}' for '{repo}': {e}")
+                    }
+                }
+            );
+            Ok::<(), GitError>(())
+        };
+        // Run both of these at the same time. Annotated tags are much slower to sync than
+        // ligthweight tags since we need to clone, fetch from upstream, then push.
+        if process_annotated {
+            let ssh_url = http_to_ssh_repo(url)?;
+            let output = tokio::join!(
+                self.sync_annotated_tags(&annotated, &ssh_url),
+                lightweight_fut,
+            );
+            let (annotated, lightweight) = output;
+            if annotated.is_err() {
+                eprintln!(
+                    "Failed to sync annotated tags for {owner}/{repo}: {}",
+                    annotated.err().unwrap()
+                );
+            }
+            if lightweight.is_err() {
+                eprintln!(
+                    "Failed to sync lightweight tags for {owner}/{repo}: {}",
+                    lightweight.err().unwrap()
+                );
+            }
+        // If we're only processing lightweight tags, skip all of the above
+        } else {
+            lightweight_fut.await?;
+        }
+
+        Ok(())
+    }
+    /// Sync tags for all configured repositories
+    pub async fn sync_all_tags(
+        &self,
+        process_annotated: bool,
+        repositories: Vec<String>,
+    ) -> Result<(), GitError> {
+        let mut futures = FuturesUnordered::new();
+        for url in repositories {
+            futures.push(async move {
+                let result = self.sync_tags(&url, process_annotated).await;
+                (url, result)
+            });
+        }
+        let mut errors: Vec<(String, GitError)> = Vec::new();
+        while let Some((repo, result)) = futures.next().await {
+            match result {
+                Ok(()) => {
+                    println!("✅ Successfully synced tags for {repo}");
+                }
+                Err(e) => {
+                    println!("❌ Failed to sync tags for {repo}");
+                    errors.push((repo, e));
+                }
+            }
+        }
+        if !errors.is_empty() {
+            return Err(GitError::MultipleErrors(errors));
+        }
+
+        Ok(())
+    }
+    /// Sync lightweight tags from the parent repo to the forked repo. This can be trivially done
+    /// using the github api, so we don't need to call out to
+    pub async fn sync_lightweight_tag(
+        &self,
+        owner: &str,
+        repo: &str,
+        tag: &TagInfo,
+    ) -> Result<(), GitError> {
+        let body = json!({
+            "ref": format!("refs/tags/{}", tag.name),
+            "sha": tag.sha,
+        });
+        let _lock = self.semaphore.clone().acquire_owned().await?;
+
+        let response: Result<serde_json::Value, octocrab::Error> = async_retry!(
+            ms = 100,
+            timeout = 5000,
+            retries = 3,
+            error_predicate = |e: &octocrab::Error| is_retryable(e),
+            body = {
+                self.octocrab
+                    .clone()
+                    .post::<serde_json::Value, _>(
+                        format!("/repos/{owner}/{repo}/git/refs"),
+                        Some(&body),
+                    )
+                    .await
+            },
+        );
+
+        handle_api_response!(
+            response,
+            format!("Unable to sync tag {} in {owner}/{repo}", tag.name),
+            |_| {
+                println!(
+                    "Successfully synced lightweight tag '{}' {owner}/{repo}",
+                    tag.name
+                );
+                Ok::<(), GitError>(())
+            },
+        )?;
+        Ok(())
+    }
+
+    /// Sync all new annotated tags from a forked repo with its parent.
+    /// Doing this *requires* using git (or some re-implementation of git). Syncing annotated tags
+    /// through the github api with all of its fields, including signing, is currently not
+    /// possible.
+    ///
+    /// We use `tokio::task::spawn_blocking` to make sure we don't make any other async functions
+    /// hang. `Command::new` does block.
+    pub async fn sync_annotated_tags(
+        &self,
+        tags: &IndexSet<TagInfo>,
+        ssh_url: &str,
+    ) -> Result<(), GitError> {
+        if tags.is_empty() {
+            return Ok(());
+        }
+        let _semaphore_lock = self.semaphore.clone().acquire_owned().await?;
+        let tags = tags.clone();
+        let ssh_url = ssh_url.to_string();
+        tokio::task::spawn_blocking(move || {
+            let first_tag = tags.first().unwrap();
+
+            let Some(parent_url) = &first_tag.parent_url else {
+                return Err(GitError::NoUpstreamRepo);
+            };
+
+            // Use a temp directory for the git repository so it's cleaned up automatically
+            let tmp_dir = TempDir::new()
+                .map_err(|e| GitError::Other(format!("Failed to create temp dir: {e}")))?;
+            let tmp = tmp_dir.path();
+            let tmp_str = tmp
+                .to_str()
+                .ok_or_else(|| GitError::Other("Temp dir not valid UTF-8".to_string()))?;
+
+            // Clone with the bare minimum information to reduce the amount we download
+            Command::new("git")
+                .args([
+                    "clone",
+                    "--bare",
+                    "--filter=blob:none",
+                    "--depth=1",
+                    &ssh_url,
+                    tmp_str,
+                ])
+                .status()?;
+
+            let output = Command::new("git")
+                .args(["-C", tmp_str, "remote", "get-url", "upstream"])
+                .output()?;
+            if output.status.success() {
+                Command::new("git")
+                    .args(["-C", tmp_str, "remote", "set-url", "upstream", parent_url])
+                    .status()?;
+            } else {
+                Command::new("git")
+                    .args(["-C", tmp_str, "remote", "add", "upstream", parent_url])
+                    .status()?;
+            }
+
+            // Only fetch the annotated tags that we're interested in adding to our fork.
+            // Lightweight tags can be synced automatically with github
+            let mut fetch_args = vec![
+                "-C",
+                tmp_str,
+                "fetch",
+                "--filter=blob:none",
+                "--depth=1",
+                "upstream",
+            ];
+            for tag in &tags {
+                fetch_args.push("tag");
+                fetch_args.push(tag.name.as_str());
+            }
+
+            Command::new("git").args(&fetch_args).status()?;
+
+            // Only push the newly added annotated tags
+            let mut push_args = vec!["-C", tmp_str, "push", "origin"];
+            push_args.extend(tags.iter().map(|tag| tag.name.as_str()));
+
+            Command::new("git").args(&push_args).status()?;
+            Ok(())
+        })
+        .await?
+    }
+
     /// Create a tag for a specific repository
     pub async fn create_tag(&self, url: &str, tag: &str, branch: &str) -> Result<(), GitError> {
         let info = get_repo_info_from_url(url)?;
@@ -539,7 +546,8 @@ impl GithubClient {
         Ok(())
     }
 
-    /// Delete the specified tag for a repository
+    /// Delete the specified tag for a repository. Deleting a tag does not necessarily return a
+    /// json response, so we handle this one differently
     pub async fn delete_tag(&self, url: &str, tag: &str) -> Result<(), GitError> {
         let info = get_repo_info_from_url(url)?;
         let (owner, repo) = (info.owner, info.repo_name);
@@ -601,22 +609,5 @@ impl GithubClient {
             }
         }
         Ok(())
-    }
-    /// Get the sha of a tag
-    #[allow(dead_code)]
-    async fn get_tag_sha(&self, url: &str, tag: &str) -> Result<String, GitError> {
-        let info = get_repo_info_from_url(url)?;
-        let (owner, repo) = (info.owner, info.repo_name);
-        let response = self
-            .octocrab
-            .clone()
-            .repos(&owner, &repo)
-            .get_ref(&Reference::Tag(tag.to_string()))
-            .await?;
-
-        let octocrab::models::repos::Object::Tag { sha, .. } = response.object else {
-            return Err(GitError::NoSuchTag(tag.to_string()));
-        };
-        Ok(sha)
     }
 }

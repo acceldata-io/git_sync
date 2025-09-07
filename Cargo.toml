@@ -43,9 +43,13 @@ console = "0.16.0"
 indexmap = { version = "2.11", features = ["serde"] }
 
 [dev-dependencies]
-httpmock = { version = "0.7.0" }
+wiremock = "0.6"
+
 criterion = { version = "0.7", features = [
   "async",
   "async_tokio",
   "html_reports",
 ] }
+
+[profile.release]
+lto = true

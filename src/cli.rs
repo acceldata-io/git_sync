@@ -16,15 +16,17 @@ KIND, either express or implied.  See the License for the
 specific language governing permissions and limitations
 under the License.
 */
+
 use crate::utils::pr::MergeMethod;
 use clap::{ArgGroup, Args, CommandFactory, Parser, Subcommand, ValueEnum};
 use std::fmt;
 use std::path::PathBuf;
+
 /// `git_sync` is an application for managing multiple github repositories at once.
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
 pub struct AppArgs {
-    ///Github Personal Access Token
+    /// Github Personal Access Token
     #[arg(short, long, env = "GITHUB_TOKEN")]
     pub token: Option<String>,
 
@@ -53,6 +55,8 @@ pub struct AppArgs {
     pub jobs: Option<usize>,
 }
 
+// === Enums ===
+
 /// Valid options for `repository_type` for cli arguments
 #[derive(Copy, Clone, PartialEq, Eq, Debug, ValueEnum)]
 pub enum RepositoryType {
@@ -61,6 +65,28 @@ pub enum RepositoryType {
     Fork,
     All,
 }
+
+/// Valid options that can be passed to `make_latest` in the github api.
+#[derive(Copy, Clone, PartialEq, Eq, Debug, ValueEnum)]
+pub enum MakeLatest {
+    True,
+    False,
+    Legacy,
+}
+
+impl fmt::Display for MakeLatest {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            MakeLatest::True => write!(f, "true"),
+            MakeLatest::False => write!(f, "false"),
+            MakeLatest::Legacy => write!(f, "legacy"),
+        }
+    }
+}
+
+// === Command Structs ===
+
+// --- Tag Commands ---
 
 /// Options for the 'create' tag command
 #[derive(Args, Clone, Debug)]
@@ -78,29 +104,29 @@ pub struct CreateTagCommand {
     pub branch: String,
     /// The url of the repository to create the tag in. If --all is specified, this is
     /// not a valid option.
-    #[arg(short, long, required = false)]
+    #[arg(short, long)]
     pub repository: Option<String>,
     /// Create this tag for all configured repositories, all using the same branch.
     /// If --repository is specified, this is not a valid option.
     #[arg(short, long, default_value_t = false)]
     pub all: bool,
 }
+
 /// Options for the 'comparison' tag command
 #[derive(Args, Clone, Debug)]
 pub struct CompareTagCommand {
     /// The base repository to compare against
-    #[arg(short, long, required = false)]
+    #[arg(short, long)]
     pub repository: Option<String>,
-    #[arg(short, long, required = false)]
+    #[arg(short, long)]
     pub parent: Option<String>,
     /// Apply to all configured repositories
     #[arg(short, long, default_value_t = false)]
     pub all: bool,
 }
+
 impl CompareTagCommand {
     /// Validate that both --repository and --parent are specified, or that --all is.
-    /// We have to use a user defined function for this since clap doesn't have a way
-    /// to enforce this through the type system or macros.
     pub fn validate(&self) -> Result<(), String> {
         match (&self.repository, &self.parent, self.all) {
             (Some(_), Some(_), _) | (None, None, true) => Ok(()),
@@ -108,6 +134,7 @@ impl CompareTagCommand {
         }
     }
 }
+
 /// Defines the arguments for the 'delete' tag subcommand
 #[derive(Args, Clone, Debug)]
 #[command(group(
@@ -117,7 +144,7 @@ impl CompareTagCommand {
 ))]
 pub struct DeleteTagCommand {
     /// The target repository. Not a valid option if 'all' is set
-    #[arg(short, long, required = false)]
+    #[arg(short, long)]
     pub repository: Option<String>,
     /// The tag to delete
     #[arg(short, long, required = true)]
@@ -127,6 +154,7 @@ pub struct DeleteTagCommand {
     pub all: bool,
 }
 
+/// Sync tags for a forked repository with its parent
 #[derive(Args, Clone, Debug)]
 #[command(group(
     ArgGroup::new("target")
@@ -135,16 +163,17 @@ pub struct DeleteTagCommand {
 ))]
 pub struct SyncTagCommand {
     /// The Repository to sync tags for. Not valid if '--all' is set
-    #[arg(short, long, required = false)]
+    #[arg(short, long)]
     pub repository: Option<String>,
     /// Sync tags for all configured repositories. Not valid if '--repository' is set
     #[arg(short, long, default_value_t = false)]
     pub all: bool,
-    /// Disable syncing annotated tags. Syncing annotated tags requires git to be setup with commit access
-    /// to the repositories you are attempting to manage.
+    /// Disable syncing annotated tags.
     #[arg(short, long, default_value_t = false)]
     pub without_annotated: bool,
 }
+
+// --- Repo Commands ---
 
 /// Sync a repository. If the repository is already up to date, no error is reported.
 #[derive(Args, Clone, Debug)]
@@ -155,12 +184,13 @@ pub struct SyncTagCommand {
 ))]
 pub struct SyncRepoCommand {
     /// The repository to sync
-    #[arg(short, long, required = false)]
+    #[arg(short, long)]
     pub repository: Option<String>,
     #[arg(short, long, default_value_t = false)]
     pub all: bool,
 }
-/// Define the arguments for the 'check' repository command
+
+/// Check repositories for various conditions
 #[derive(Args, Clone, Debug)]
 #[command(
     group(
@@ -189,11 +219,10 @@ NOTES:
         "
 
 )]
-/// Check repositories for various conditions
 #[allow(clippy::struct_excessive_bools)]
 pub struct CheckRepoCommand {
     /// The repository to check
-    #[arg(short, long, required = false)]
+    #[arg(short, long)]
     pub repository: Option<String>,
     /// Check all repositories
     #[arg(short, long, default_value_t = false)]
@@ -207,16 +236,20 @@ pub struct CheckRepoCommand {
     /// Specify the branch to check. Required when '--protected' is enabled
     #[arg(long, required_if_eq("protected", "true"))]
     pub branch: Option<String>,
-    #[arg(short, long, default_value_t = false)]
     /// Enable checking for old branches in target repository
+    #[arg(short, long, default_value_t = false)]
     pub old_branches: bool,
     /// Number of days of inactivity after which a branch is flagged
     #[arg(short, long, default_value_t = 30)]
     pub days_ago: i64,
     /// Regex that can be used to filter branches
-    #[arg(short, long, required = false)]
+    #[arg(short, long)]
     pub branch_filter: Option<String>,
 }
+
+// --- PR Commands ---
+
+/// Open a PR to merge <branch> into <`base_branch`>
 #[derive(Args, Clone, Debug)]
 #[command(
     group(
@@ -225,10 +258,9 @@ pub struct CheckRepoCommand {
         .args(&["all", "repository"])
     )
 )]
-/// Open a PR to merge <branch> into <`base_branch`>
 pub struct CreatePRCommand {
     /// Repository for which you are creating a PR
-    #[arg(short, long, required = false)]
+    #[arg(short, long)]
     pub repository: Option<String>,
     /// Create a PR for all configured repositories
     #[arg(short, long, default_value_t = false)]
@@ -242,13 +274,10 @@ pub struct CreatePRCommand {
     /// The title for the PR
     #[arg(short, long)]
     pub title: String,
-
     /// The body for the PR
     #[arg(long)]
     pub body: Option<String>,
-
-    /// Attempt to merge the PR after creating it. This will only succeed if the PR is mergeable and
-    /// has no conflicts.
+    /// Attempt to merge the PR after creating it.
     #[arg(long, default_value_t = false)]
     pub merge: bool,
     /// Title for the automatic commit message
@@ -261,12 +290,14 @@ pub struct CreatePRCommand {
     #[arg(long, value_enum, default_value = "merge")]
     pub merge_method: MergeMethod,
     /// SHA that the pull request head must match to permit merging
-    #[arg(long, required = false)]
+    #[arg(long)]
     pub sha: Option<String>,
     /// A list of reviewers to request a review from
-    #[arg(long, required = false)]
+    #[arg(long)]
     pub reviewers: Option<Vec<String>>,
 }
+
+/// Close a PR for a repository.
 #[derive(Args, Clone, Debug)]
 #[command(
     group(
@@ -277,7 +308,7 @@ pub struct CreatePRCommand {
 )]
 pub struct ClosePRCommand {
     /// Repository for which you are closing a PR
-    #[arg(short, long, required = false)]
+    #[arg(short, long)]
     pub repository: Option<String>,
     /// Close a PR for all configured repositories
     #[arg(short, long, default_value_t = false)]
@@ -285,13 +316,12 @@ pub struct ClosePRCommand {
     /// The PR number
     #[arg(short, long, required = true)]
     pub id: u64,
-
     /// The base branch of the PR to close
     #[arg(short, long, required = true)]
     pub base_branch: String,
 }
 
-/// Merge a PR. This will only work if the PR is mergeable and has no conflicts.
+/// Merge a PR.
 #[derive(Args, Clone, Debug)]
 #[command(
     group(
@@ -302,32 +332,31 @@ pub struct ClosePRCommand {
 )]
 pub struct MergePRCommand {
     /// Repository for which you are merging a PR
-    #[arg(short, long, required = false)]
+    #[arg(short, long)]
     pub repository: Option<String>,
     /// The PR number
     #[arg(short, long, required = true, name = "pull_number")]
     pub id: u64,
-
     /// The base branch of the PR to close
     #[arg(short, long, required = true)]
     pub base_branch: String,
     /// The method to use when merging the PR
     #[arg(short, long, value_parser = ["merge", "squash", "rebase"], default_value = "squash")]
     pub merge_method: String,
-
     /// Title for the automatic commit message
-    #[arg(long, required = false)]
+    #[arg(long)]
     pub commit_title: Option<String>,
-
     /// Extra detail to append to the automatic commit message
-    #[arg(long, required = false)]
+    #[arg(long)]
     pub commit_message: Option<String>,
-
     /// SHA that the pull request head must match to permit merging
-    #[arg(long, required = false)]
+    #[arg(long)]
     pub sha: Option<String>,
 }
-/// Define the arguments for the 'delete' branch command
+
+// --- Branch Commands ---
+
+/// Delete a branch from a repository
 #[derive(Args, Clone, Debug)]
 #[command(
     group(
@@ -338,7 +367,7 @@ pub struct MergePRCommand {
 )]
 pub struct DeleteBranchCommand {
     /// Delete a branch from a repository
-    #[arg(short, long, required = false)]
+    #[arg(short, long)]
     pub repository: Option<String>,
     /// Branch to delete
     #[arg(short, long, required = true)]
@@ -348,7 +377,7 @@ pub struct DeleteBranchCommand {
     pub all: bool,
 }
 
-/// Create a new branch. This will return an error if the branch already exists.
+/// Create a new branch.
 #[derive(Args, Clone, Debug)]
 #[command(
     group(
@@ -359,7 +388,7 @@ pub struct DeleteBranchCommand {
 )]
 pub struct CreateBranchCommand {
     /// Create a branch in this repository
-    #[arg(short, long, required = false)]
+    #[arg(short, long)]
     pub repository: Option<String>,
     /// New branch to create
     #[arg(short, long, required = true)]
@@ -372,6 +401,9 @@ pub struct CreateBranchCommand {
     pub all: bool,
 }
 
+// --- Release Commands ---
+
+/// Create a release for a repository.
 #[derive(Args, Clone, Debug)]
 #[command(
     group(
@@ -388,74 +420,49 @@ pub struct CreateReleaseCommand {
     #[arg(short, long, required = true)]
     pub previous_release: String,
     /// The repository for which to create the release
-    #[arg(short, long, required = false)]
+    #[arg(short, long)]
     pub repository: Option<String>,
-
     /// The name of the release. If not specified, the tag name will be used
-    #[arg(long, required = false)]
+    #[arg(long)]
     pub release_name: Option<String>,
-
     /// Set this release to the latest
     #[arg(short, long, default_value_t = MakeLatest::True)]
     pub latest: MakeLatest,
-    /// Specify whether this release should use 'legacy' to determine if it's the newest release.
-    /// 'legacy' specifies that the latest release should be determined using creation date and a
-    /// higher version number
-
     /// Create this release for all configured repositories
     #[arg(short, long, default_value_t = false)]
     pub all: bool,
-
     /// Disable release note generation. This decreases the number of api calls
     #[arg(short, long, default_value_t = false)]
     pub no_release_notes: bool,
 }
-/// All valid commands concerning PRs
+
+// === Subcommand Enums ===
+
+/// Define all the valid commands for acting on pull requests
 #[derive(Subcommand, Clone, Debug)]
 pub enum PRCommand {
     /// Create a new PR
     Open(CreatePRCommand),
 }
-/// All valid commands concerning releases
+
+/// Define all the valid commands for actiong on releases
 #[derive(Subcommand, Clone, Debug)]
 pub enum ReleaseCommand {
     /// Create a new release
     Create(CreateReleaseCommand),
-    // Delete a release
-    //Delete(DeleteReleaseCommand)
-}
-/// Valid options that can be passed to `make_latest` in the github api.
-/// True makes this the latest release, false makes it not the latest release,
-/// Legacy looks at both the date, and the semantic version to decide if this should be the latest
-#[derive(Copy, Clone, PartialEq, Eq, Debug, ValueEnum)]
-pub enum MakeLatest {
-    True,
-    False,
-    Legacy,
-}
-/// Implement `fmt::Display` so this type can be printed to the cli
-impl fmt::Display for MakeLatest {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            MakeLatest::True => write!(f, "true"),
-            MakeLatest::False => write!(f, "false"),
-            MakeLatest::Legacy => write!(f, "legacy"),
-        }
-    }
+    // Delete(DeleteReleaseCommand)
 }
 
 /// Define all the valid commands for acting on Tags
 #[derive(Subcommand, Clone, Debug)]
 pub enum TagCommand {
-    /// Sync tags
-    //Sync(SyncTagCommand),
     /// Compare tags between repositories
     Compare(CompareTagCommand),
     /// Create a new tag
     Create(CreateTagCommand),
     /// Delete a tag
     Delete(DeleteTagCommand),
-    /// Sync tags for a forked repository with its parent
+    /// Sync tags
     Sync(SyncTagCommand),
 }
 
@@ -464,8 +471,7 @@ pub enum TagCommand {
 pub enum RepoCommand {
     /// Sync repositories
     Sync(SyncRepoCommand),
-    /// Check repositories for various conditions, such as branch protection being enabled, stale
-    /// branches, etc.
+    /// Check repositories for various conditions
     Check(CheckRepoCommand),
 }
 
@@ -477,13 +483,13 @@ pub enum BranchCommand {
     /// Create a branch for repositories
     Create(CreateBranchCommand),
 }
+
 /// The top-level command enum for the CLI
 #[derive(Subcommand, Debug)]
 pub enum Command {
     /// Manage branches
     #[command(arg_required_else_help = true)]
     Branch {
-        /// Manage branches
         #[command(subcommand)]
         cmd: BranchCommand,
     },
@@ -493,7 +499,6 @@ pub enum Command {
         /// Path to save the config file.
         #[arg(short, long)]
         file: Option<PathBuf>,
-
         /// Overwrite existing config file if it exists
         #[arg(long, default_value_t = false)]
         force: bool,
@@ -501,45 +506,42 @@ pub enum Command {
     /// Manage repositories
     #[command(arg_required_else_help = true)]
     Repo {
-        /// Sync all configured repositories
         #[command(subcommand)]
         cmd: RepoCommand,
     },
     /// Manage tags
     #[command(arg_required_else_help = true)]
     Tag {
-        /// Command to run
         #[command(subcommand)]
         cmd: TagCommand,
     },
+    /// Manage releases
     #[command(arg_required_else_help = true)]
     Release {
-        /// Command to run
         #[command(subcommand)]
         cmd: ReleaseCommand,
     },
+    /// Manage Pull Requests
     #[command(arg_required_else_help = true)]
     PR {
-        /// Manage PRs
         #[command(subcommand)]
         cmd: PRCommand,
     },
-    /// Generate completions or a manpage. This command is hidden by default since it should really
-    /// done at build time
+    /// Generate completions or a manpage.
     #[command(hide = true)]
     Generate {
-        /// What to generate. Can be shell completion for bash, zsh, or fish; or manpages.
+        /// What to generate. Can be shell completion for bash, zsh, fish, or manpages.
         #[arg(long, value_parser = ["bash", "zsh", "fish", "man"])]
         kind: String,
         /// An optional output path. If not specified, the current directory will be used instead
         #[arg(long)]
-        out: Option<std::path::PathBuf>,
+        out: Option<PathBuf>,
     },
 }
+
+// === CLI Entrypoints ===
+
 /// Parse the command line arguments and validate them.
-/// This function uses clap to generate the `AppArgs` struct,
-/// and then runs a small amount of validation on it that can't be
-/// enforced by the type system or macros.
 pub fn parse_args() -> AppArgs {
     let app = AppArgs::try_parse();
     let app = match app {
@@ -555,7 +557,6 @@ pub fn parse_args() -> AppArgs {
     {
         if let Err(e) = compare.validate() {
             eprintln!("Error validating compare command: {e}");
-
             std::process::exit(1);
         }
     }
