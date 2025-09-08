@@ -41,6 +41,9 @@ pub struct Config {
     #[serde(default)]
     pub repos: RepoConfig,
 
+    #[serde(default)]
+    pub slack: SlackConfig,
+
     #[allow(dead_code)]
     #[serde(default)]
     pub info: InfoConfig,
@@ -52,6 +55,11 @@ pub struct Config {
 #[derive(Debug, Deserialize, Default)]
 pub struct MiscSettings {
     pub branch_blacklist: Option<HashSet<String>>,
+}
+
+#[derive(Debug, Deserialize, Default)]
+pub struct SlackConfig {
+    pub webhook_url: Option<String>,
 }
 
 /// Github configuration struct

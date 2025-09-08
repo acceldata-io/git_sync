@@ -22,6 +22,7 @@ mod config;
 mod error;
 mod github;
 mod init;
+mod slack;
 mod utils;
 
 use cli::parse_args;
@@ -46,6 +47,7 @@ async fn main() -> Result<(), GitError> {
         let config = Config::new(args.file.as_ref())?;
         parse::match_arguments(&args, config).await
     };
+    println!("{result:?}");
     // Get nice error messages, with simple suggestions instead of huge structs
     if let Err(e) = result {
         if e.is_broken_pipe() {
@@ -53,7 +55,7 @@ async fn main() -> Result<(), GitError> {
         }
         let error = e.to_user_error();
 
-        eprintln!("{error}");
+        eprintln!("My error: {error}");
         std::process::exit(1);
     }
 

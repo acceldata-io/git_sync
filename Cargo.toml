@@ -36,7 +36,12 @@ rustls = { version = "0.23", features = ["aws_lc_rs"] }
 aws-lc-rs = "1.13"
 temp-dir = "0.1"
 tokio-retry = "0.3"
-reqwest = { version = "0.12", default-features = false, features = [] }
+reqwest = { version = "0.12", default-features = false, features = ["__tls",
+             "charset",
+             "rustls-tls",
+             "h2",
+             "http2",
+             "macos-system-configuration", "json" ] }
 hyper = { version = "1.7.0", default-features = false }
 indicatif = { version = "0.18.0", features = ["tokio"] }
 console = "0.16.0"
@@ -44,12 +49,16 @@ indexmap = { version = "2.11", features = ["serde"] }
 
 [dev-dependencies]
 wiremock = "0.6"
-
 criterion = { version = "0.7", features = [
   "async",
   "async_tokio",
   "html_reports",
 ] }
+
+[features]
+default = ["slack"]
+slack = []
+
 
 [profile.release]
 lto = true

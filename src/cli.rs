@@ -53,6 +53,11 @@ pub struct AppArgs {
     /// The maximum number of parallel tasks to run
     #[arg(short = 'j', long, global = true, value_parser = clap::value_parser!(u32).range(1..64))]
     pub jobs: Option<usize>,
+
+    /// Enable sending the results of the operation to a slack channel using the
+    /// configured webhook in git-manage.toml
+    #[arg(short, long, global = true, default_value_t = false)]
+    pub slack: bool,
 }
 
 // === Enums ===

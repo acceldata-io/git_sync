@@ -27,6 +27,7 @@ use crate::init::generate_config;
 use crate::utils::pr::{CreatePrOptions, MergePrOptions};
 use crate::utils::repo::Checks;
 use crate::utils::repo::RepoChecks;
+
 use clap_complete::{
     generate_to,
     shells::{Bash, Fish, Zsh},
@@ -48,7 +49,7 @@ pub async fn match_arguments(app: &AppArgs, config: Config) -> Result<(), GitErr
             .or_else(|| config.get_github_token().clone())
             .ok_or(GitError::MissingToken)?,
     };
-
+    let send_slack_messages = app.slack;
     let verbose = app.verbose;
 
     let repos = match app.repository_type {
@@ -75,11 +76,11 @@ pub async fn match_arguments(app: &AppArgs, config: Config) -> Result<(), GitErr
         }
     }
     match &app.command {
-        Command::Tag { cmd } => match_tag_cmds(client, repos, cmd).await?,
-        Command::Repo { cmd } => match_repo_cmds(client, repos, config, cmd).await?,
-        Command::Branch { cmd } => match_branch_cmds(client, repos, cmd).await?,
-        Command::Release { cmd } => match_release_cmds(client, repos, config, cmd).await?,
-        Command::PR { cmd } => match_pr_cmds(client, repos, config, cmd).await?,
+        Command::Tag { cmd } => match_tag_cmds(&client, repos, cmd).await?,
+        Command::Repo { cmd } => match_repo_cmds(&client, repos, config, cmd).await?,
+        Command::Branch { cmd } => match_branch_cmds(&client, repos, cmd).await?,
+        Command::Release { cmd } => match_release_cmds(&client, repos, config, cmd).await?,
+        Command::PR { cmd } => match_pr_cmds(&client, repos, config, cmd).await?,
         Command::Config { file, force } => {
             generate_config(file.as_ref(), *force)?;
         }
@@ -114,73 +115,85 @@ pub async fn match_arguments(app: &AppArgs, config: Config) -> Result<(), GitErr
             }
         }
     }
+    if send_slack_messages {
+        client.slack_message().await;
+    }
     Ok(())
 }
 
 /// Process all Tag commands
 async fn match_tag_cmds(
-    client: GithubClient,
+    client: &GithubClient,
     repos: Vec<String>,
     cmd: &TagCommand,
 ) -> Result<(), GitError> {
-    match cmd {
-        TagCommand::Compare(compare_cmd) => {
-            compare_cmd.validate().map_err(GitError::Other)?;
-            let repository = compare_cmd.repository.as_ref();
-            if compare_cmd.all && !repos.is_empty() {
-                client.diff_all_tags(repos).await?;
-            } else if compare_cmd.all && repos.is_empty() {
-                return Err(GitError::NoReposConfigured);
-            } else if let Some(repository) = repository {
-                let _diffs = client.diff_tags(repository).await?;
-            } else {
-                return Err(GitError::MissingRepositoryName);
+    let result = async {
+        match cmd {
+            TagCommand::Compare(compare_cmd) => {
+                compare_cmd.validate().map_err(GitError::Other)?;
+                let repository = compare_cmd.repository.as_ref();
+                if compare_cmd.all && !repos.is_empty() {
+                    client.diff_all_tags(repos).await?;
+                } else if compare_cmd.all && repos.is_empty() {
+                    return Err(GitError::NoReposConfigured);
+                } else if let Some(repository) = repository {
+                    let _diffs = client.diff_tags(repository).await?;
+                } else {
+                    return Err(GitError::MissingRepositoryName);
+                }
             }
-        }
-        TagCommand::Create(create_cmd) => {
-            let tag = &create_cmd.tag;
-            let branch = &create_cmd.branch;
-            let repository = create_cmd.repository.as_ref();
+            TagCommand::Create(create_cmd) => {
+                let tag = &create_cmd.tag;
+                let branch = &create_cmd.branch;
+                let repository = create_cmd.repository.as_ref();
 
-            if create_cmd.all {
-                client.create_all_tags(tag, branch, repos).await?;
-            } else if let Some(repository) = repository {
-                client
-                    .create_tag(repository, &create_cmd.tag, &create_cmd.branch)
-                    .await?;
-            } else {
-                return Err(GitError::MissingRepositoryName);
+                if create_cmd.all {
+                    client.create_all_tags(tag, branch, repos).await?;
+                } else if let Some(repository) = repository {
+                    client
+                        .create_tag(repository, &create_cmd.tag, &create_cmd.branch)
+                        .await?;
+                } else {
+                    return Err(GitError::MissingRepositoryName);
+                }
             }
-        }
-        TagCommand::Delete(delete_cmd) => {
-            let repository = delete_cmd.repository.as_ref();
+            TagCommand::Delete(delete_cmd) => {
+                let repository = delete_cmd.repository.as_ref();
 
-            if delete_cmd.all {
-                client.delete_all_tags(&delete_cmd.tag, &repos).await?;
-            } else if let Some(repository) = repository {
-                client.delete_tag(repository, &delete_cmd.tag).await?;
-            } else {
-                return Err(GitError::MissingRepositoryName);
+                if delete_cmd.all {
+                    client.delete_all_tags(&delete_cmd.tag, &repos).await?;
+                } else if let Some(repository) = repository {
+                    client.delete_tag(repository, &delete_cmd.tag).await?;
+                } else {
+                    return Err(GitError::MissingRepositoryName);
+                }
+            }
+            TagCommand::Sync(sync_cmd) => {
+                let repository = sync_cmd.repository.as_ref();
+                // By default, this is false
+                let process_annotated_tags = sync_cmd.without_annotated;
+                if sync_cmd.all {
+                    client.sync_all_tags(process_annotated_tags, repos).await?;
+                } else if let Some(repository) = repository {
+                    client.sync_tags(repository, process_annotated_tags).await?;
+                } else {
+                    return Err(GitError::MissingRepositoryName);
+                }
             }
         }
-        TagCommand::Sync(sync_cmd) => {
-            let repository = sync_cmd.repository.as_ref();
-            // By default, this is false
-            let process_annotated_tags = sync_cmd.without_annotated;
-            if sync_cmd.all {
-                client.sync_all_tags(process_annotated_tags, repos).await?;
-            } else if let Some(repository) = repository {
-                client.sync_tags(repository, process_annotated_tags).await?;
-            } else {
-                return Err(GitError::MissingRepositoryName);
-            }
-        }
+        Ok(())
+    }
+    .await;
+
+    if let Err(e) = result {
+        client.slack_message().await;
+        return Err(e);
     }
     Ok(())
 }
 /// Process all Branch commands
 async fn match_branch_cmds(
-    client: GithubClient,
+    client: &GithubClient,
     repos: Vec<String>,
     cmd: &BranchCommand,
 ) -> Result<(), GitError> {
@@ -213,7 +226,7 @@ async fn match_branch_cmds(
 
 /// Process all Repo commands
 async fn match_repo_cmds(
-    client: GithubClient,
+    client: &GithubClient,
     repos: Vec<String>,
     config: Config,
     cmd: &RepoCommand,
@@ -297,12 +310,13 @@ async fn match_repo_cmds(
             }
         }
     }
+
     Ok(())
 }
 
 /// Process all PR commands
 async fn match_pr_cmds(
-    client: GithubClient,
+    client: &GithubClient,
     repos: Vec<String>,
     config: Config,
     cmd: &PRCommand,
@@ -334,7 +348,7 @@ async fn match_pr_cmds(
                 None
             };
             if open_cmd.all {
-                let pr_numbers = client.create_all_prs(&opts, merge_opts, repos).await?;
+                let _pr_numbers = client.create_all_prs(&opts, merge_opts, repos).await?;
                 // Do some stuff here
             } else if !repository.len() > 0 {
                 let pr_number = client.create_pr(&opts).await?;
@@ -352,7 +366,7 @@ async fn match_pr_cmds(
 }
 
 async fn match_release_cmds(
-    client: GithubClient,
+    client: &GithubClient,
     repos: Vec<String>,
     config: Config,
     cmd: &ReleaseCommand,

@@ -27,11 +27,13 @@ use octocrab::models::repos::Ref;
 use octocrab::params::repos::Reference;
 use serde::Deserialize;
 use std::collections::HashMap;
+use std::error::Error;
 use std::process::Command;
 use temp_dir::TempDir;
 
 use indexmap::IndexSet;
 use serde_json::json;
+use std::fmt::Write as _;
 
 use crate::github::client::GithubClient;
 
@@ -194,7 +196,6 @@ impl GithubClient {
             }
             has_next_page = repo.refs.page_info.has_next_page;
             after = repo.refs.page_info.end_cursor;
-            //after.clone_from(&repo.refs.page_info.end_cursor);
         }
 
         Ok(all_tags)
@@ -210,6 +211,41 @@ impl GithubClient {
 
         let missing_in_fork: IndexSet<TagInfo> =
             parent_tags.difference(&fork_tags).cloned().collect();
+        let missing = missing_in_fork.len();
+
+        if missing > 0 {
+            let mut slack_message = String::new();
+            let missing_annotated: IndexSet<TagInfo> = missing_in_fork
+                .iter()
+                .filter(|t| t.tag_type == TagType::Annotated)
+                .cloned()
+                .collect();
+
+            if missing == 1 {
+                let _ = writeln!(
+                    slack_message,
+                    "*:information_source: *Missing 1 tag in {url}*:"
+                );
+            } else {
+                let _ = writeln!(
+                    slack_message,
+                    ":information_source: *Missing {missing} tags in {url}*:"
+                );
+            }
+
+            if !missing_annotated.is_empty() {
+                slack_message.push_str("The following annotated tags are missing:\n");
+                for tag in &missing_annotated {
+                    let _ = writeln!(slack_message, ">• `{}`", tag.name);
+                }
+            }
+            self.append_slack_message(slack_message).await;
+        } else {
+            println!("Tags are up to date for {url}");
+            self.append_slack_message(format!(":white_check_mark: Tags are up to date for {url}"))
+                .await;
+        }
+
         let compare = Comparison {
             fork_tags,
             parent_tags,
@@ -254,10 +290,10 @@ impl GithubClient {
                 match result {
                     Ok(r) => {
                         diffs.insert(repo.to_string(), r);
-                        println!("✅ Successfully diffed {owner}/{repo}");
+                        println!("✅ Successfully diffed tags for {owner}/{repo}");
                     },
                     Err(e) => {
-                        println!("❌ {owner}/{repo}: {e}");
+                        eprintln!("❌ Failed to diff tags for {owner}/{repo}: {e}");
                         errors.push((format!("{owner}/{repo}"), e));
                     }
                 }
@@ -282,6 +318,7 @@ impl GithubClient {
             return Ok(());
         }
 
+        // Split `missing` into two different `IndexSet`, based on their type of tag
         let (lightweight, annotated): (IndexSet<TagInfo>, IndexSet<TagInfo>) = missing
             .into_iter()
             .partition(|t| t.tag_type == TagType::Lightweight);
@@ -308,28 +345,28 @@ impl GithubClient {
         // ligthweight tags since we need to clone, fetch from upstream, then push.
         if process_annotated {
             let ssh_url = http_to_ssh_repo(url)?;
-            let output = tokio::join!(
+            let (annotated, lightweight) = tokio::join!(
                 self.sync_annotated_tags(&annotated, &ssh_url),
                 lightweight_fut,
             );
-            let (annotated, lightweight) = output;
-            if annotated.is_err() {
-                eprintln!(
-                    "Failed to sync annotated tags for {owner}/{repo}: {}",
-                    annotated.err().unwrap()
-                );
-            }
-            if lightweight.is_err() {
-                eprintln!(
-                    "Failed to sync lightweight tags for {owner}/{repo}: {}",
-                    lightweight.err().unwrap()
-                );
+            let tag_results = [("annotated", annotated), ("lightweight", lightweight)];
+
+            for (tag_type, result) in tag_results {
+                if let Err(e) = result {
+                    eprintln!("Failed to sync {tag_type} tags for {owner}/{repo}: {e}");
+                    self.append_slack_error(format!(
+                        "❌ Failed to sync {tag_type} tags for {owner}/{repo}: {e}",
+                    ))
+                    .await;
+                }
             }
         // If we're only processing lightweight tags, skip all of the above
         } else {
             lightweight_fut.await?;
         }
 
+        self.append_slack_message(format!("✅ Successfully synced tags for {owner}/{repo}"))
+            .await;
         Ok(())
     }
     /// Sync tags for all configured repositories
@@ -349,10 +386,14 @@ impl GithubClient {
         while let Some((repo, result)) = futures.next().await {
             match result {
                 Ok(()) => {
+                    self.append_slack_message(format!("✅ Successfully synced tags for {repo}"))
+                        .await;
                     println!("✅ Successfully synced tags for {repo}");
                 }
                 Err(e) => {
-                    println!("❌ Failed to sync tags for {repo}");
+                    self.append_slack_error(format!("❌ Failed to sync tags for {repo}: {e}"))
+                        .await;
+                    eprintln!("❌ Failed to sync tags for {repo}");
                     errors.push((repo, e));
                 }
             }
@@ -515,10 +556,22 @@ impl GithubClient {
 
         match res {
             Ok(_) => {
+                let tag = tag.to_string();
+                let repo = repo.to_string();
+
+                let message =
+                    format!(":white_check_mark: Successfully created tag '{tag}' for {repo}");
+
+                self.append_slack_message(message).await;
                 println!("Successfully created tag '{tag}' for {repo}");
                 Ok(())
             }
-            Err(e) => Err(GitError::GithubApiError(e)),
+            Err(e) => {
+                let a = e.source().unwrap();
+                self.append_slack_error(format!(":x: Failed to create '{tag}' for {repo}: {a}"))
+                    .await;
+                Err(GitError::GithubApiError(e))
+            }
         }
     }
 

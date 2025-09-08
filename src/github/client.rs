@@ -22,13 +22,14 @@ use crate::error::{GitError, is_retryable};
 use crate::utils::repo::{RepoInfo, TagInfo, get_repo_info_from_url};
 use chrono::{DateTime, Local, TimeZone, Utc};
 use octocrab::Octocrab;
+use tokio::sync::Mutex;
 
 use indexmap::IndexSet;
 use tokio::sync::Semaphore;
 
 use std::cmp;
+use std::fmt::Write as _;
 use std::sync::Arc;
-
 /// Contains information about tags for a forked repo, its parent,
 /// and the tags that are missing from the fork
 #[derive(Debug)]
@@ -44,26 +45,51 @@ pub struct GithubClient {
     pub octocrab: Octocrab,
     /// A semaphore to control the maximum number of jobs that can be run in parallel
     pub semaphore: Arc<Semaphore>,
+    /// An optional webook for posting to slack, if that feature is enabled
+    pub webhook_url: String,
+    /// A message that gets sent to slack at the end of all processing, if it has any contents
+    slack_messages: Arc<Mutex<Vec<String>>>,
+    /// An error message that will get sent to slack at the end of all processing,
+    /// if it has any contents
+    slack_errors: Arc<Mutex<Vec<String>>>,
 }
 
 impl GithubClient {
-    pub fn new(github_token: &str, _config: &Config, max_jobs: usize) -> Result<Self, GitError> {
+    pub fn new(github_token: &str, config: &Config, max_jobs: usize) -> Result<Self, GitError> {
         let octocrab = Octocrab::builder()
             .personal_token(github_token)
             .build()
             .map_err(GitError::GithubApiError)?;
         // Shadow max_jobs. This value makes no sense if it's less than 1
         let max_jobs: usize = cmp::max(1, max_jobs);
+        let webhook_url: String = config.slack.webhook_url.clone().unwrap_or_default();
         Ok(Self {
             octocrab,
             semaphore: Arc::new(Semaphore::new(max_jobs)),
+            webhook_url,
+            // Arbitrary initial capacity to avoid allocations if there aren't that many messages
+            slack_messages: Arc::new(Mutex::new(Vec::with_capacity(100))),
+            slack_errors: Arc::new(Mutex::new(Vec::with_capacity(100))),
         })
     }
     /// Get the parent repository of a github repository.
     pub async fn get_parent_repo(&self, url: &str) -> Result<RepoInfo, GitError> {
         let info = get_repo_info_from_url(url)?;
         let (owner, repo) = (info.owner, info.repo_name);
-        let repo_info = self.octocrab.clone().repos(owner, repo).get().await?;
+        let octocrab = self.octocrab.clone();
+
+        let _permit = self.semaphore.clone().acquire_owned().await?;
+        let repo_info = async_retry!(
+            ms = 100,
+            timeout = 5000,
+            retries = 3,
+            error_predicate = |e: &octocrab::Error| is_retryable(e),
+            body = {
+                let owner = owner.clone();
+                let repo = repo.clone();
+                octocrab.repos(owner, repo).get().await
+            },
+        )?;
 
         let parent = *repo_info.parent.ok_or(GitError::NotAFork)?;
 
@@ -147,6 +173,83 @@ impl GithubClient {
                 Ok(())
             }
             Err(e) => Err(GitError::GithubApiError(e)),
+        }
+    }
+    pub async fn append_slack_message(&self, msg: String) {
+        #[cfg(feature = "slack")]
+        {
+            let mut message = self.slack_messages.lock().await;
+            message.push(msg);
+        }
+    }
+    pub async fn append_slack_error(&self, msg: String) {
+        #[cfg(feature = "slack")]
+        {
+            let mut message = self.slack_errors.lock().await;
+            message.push(msg);
+        }
+    }
+    pub async fn slack_message(&self) {
+        // If slack support is enabled, post the message
+        #[cfg(feature = "slack")]
+        {
+            use crate::slack::post_message::send_slack_message;
+            use std::collections::HashMap;
+
+            let mut slack_message = self.slack_messages.lock().await;
+            let mut slack_errors = self.slack_errors.lock().await;
+            let message_len = slack_message.len();
+            let error_len = slack_errors.len();
+
+            // There's no point in continuing if there are no messages or errors
+            if message_len > 0 && error_len > 0 {
+                return;
+            }
+
+            let now = Utc::now();
+
+            let date = now.format("%H:%M (UTC) %d-%m-%Y").to_string();
+
+            // Arbitrary initial capacity
+            let mut message = String::with_capacity(256);
+            let _ = write!(message, "---\nRun completed at {date}\n\n");
+
+            if message_len > 0 {
+                slack_message.sort();
+                for msg in slack_message.iter() {
+                    message.push_str("* ");
+                    message.push_str(msg);
+                    message.push('\n');
+                }
+            }
+            if error_len > 0 {
+                slack_errors.sort();
+                if message_len > 0 {
+                    message.push('\n');
+                }
+                message.push_str("*Errors*:\n");
+                for err in slack_errors.iter() {
+                    let first_line = err.lines().next().unwrap_or(err);
+                    message.push_str("* ");
+                    message.push_str(first_line);
+                    message.push('\n');
+                }
+            }
+
+            message.push_str("---");
+
+            if !message.is_empty() && !self.webhook_url.is_empty() {
+                // Post the message to slack
+                let mut map = HashMap::new();
+                map.insert("text".to_string(), message);
+                let response = send_slack_message(self.webhook_url.clone(), map).await;
+                if response.is_err() {
+                    eprintln!(
+                        "Failed to post message to slack: {}",
+                        response.err().unwrap()
+                    );
+                }
+            }
         }
     }
 }
