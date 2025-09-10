@@ -16,6 +16,7 @@ KIND, either express or implied.  See the License for the
 specific language governing permissions and limitations
 under the License.
 */
+use console::style;
 use std::error::Error;
 use std::fmt::Write as _;
 use std::io::ErrorKind::{
@@ -43,7 +44,7 @@ pub enum GitError {
     InvalidRepository(String),
 
     #[error("Regex error: {0}")]
-    RegexError(#[from] regex::Error),
+    RegexError(#[from] fancy_regex::Error),
 
     #[error("No repos configured")]
     NoReposConfigured,
@@ -263,12 +264,17 @@ pub struct UserError {
 impl std::fmt::Display for UserError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         if let Some(code) = self.code {
-            write!(f, " (HTTP {code:?}) ")?;
+            let message = format!("HTTP error ({code:?}): {}", self.message);
+            let formatted = format!("{}", style(message).red().bold());
+            writeln!(f, "{formatted}")?;
+        } else {
+            let message = format!("Error: {}", self.message);
+            writeln!(f, "{}", style(message).red().bold())?;
         }
-        writeln!(f, "Error: {}", self.message)?;
 
         if let Some(suggestion) = &self.suggestion {
-            write!(f, "Suggestion: {suggestion}")?;
+            let message = format!("Suggestion: {suggestion}");
+            write!(f, "{}", style(message).green())?;
         }
         Ok(())
     }

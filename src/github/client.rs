@@ -29,6 +29,7 @@ use tokio::sync::Semaphore;
 
 use std::cmp;
 use std::fmt::Write as _;
+use std::io::IsTerminal;
 use std::sync::Arc;
 /// Contains information about tags for a forked repo, its parent,
 /// and the tags that are missing from the fork
@@ -47,6 +48,8 @@ pub struct GithubClient {
     pub semaphore: Arc<Semaphore>,
     /// An optional webook for posting to slack, if that feature is enabled
     pub webhook_url: String,
+    /// Defines whether or not we're running in interactive mode
+    pub is_tty: bool,
     /// A message that gets sent to slack at the end of all processing, if it has any contents
     slack_messages: Arc<Mutex<Vec<String>>>,
     /// An error message that will get sent to slack at the end of all processing,
@@ -67,6 +70,7 @@ impl GithubClient {
             octocrab,
             semaphore: Arc::new(Semaphore::new(max_jobs)),
             webhook_url,
+            is_tty: std::io::stdout().is_terminal(),
             // Arbitrary initial capacity to avoid allocations if there aren't that many messages
             slack_messages: Arc::new(Mutex::new(Vec::with_capacity(100))),
             slack_errors: Arc::new(Mutex::new(Vec::with_capacity(100))),
@@ -127,7 +131,7 @@ impl GithubClient {
                 let local_time = reset_time.with_timezone(&Local).format("%H:%M %Y-%m-%d");
 
                 let time_zone = iana_time_zone::get_timezone()?;
-                println!(
+                eprintln!(
                     "REST API Rate limit: {remaining}/{limit} remaining. Resets at {local_time} ({time_zone})"
                 );
                 Ok(())
@@ -167,7 +171,7 @@ impl GithubClient {
                 let local_time = reset_at.with_timezone(&Local).format("%H:%M %Y-%m-%d");
                 let time_zone = iana_time_zone::get_timezone()?;
 
-                println!(
+                eprintln!(
                     "GraphQL API Rate limit: {remaining}/{limit} remaining. Resets at {local_time} ({time_zone})"
                 );
                 Ok(())

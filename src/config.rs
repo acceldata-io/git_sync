@@ -125,7 +125,6 @@ impl Config {
         }
         if let Some(home_dir) = home_dir() {
             let home_config = home_dir.join(".config").join(CONFIG_NAME);
-            println!("Checking home_dir: {}", home_config.display());
             if let Ok(home_config) = Config::from_file(&home_config) {
                 return home_config;
             }
@@ -176,7 +175,6 @@ impl Config {
     }
     /// Get a vector of repositories defined in the config file that are forks
     pub fn get_fork_repositories(&self) -> Vec<String> {
-        println!("{:?}", self.repos.fork.clone());
         self.repos.fork.clone().unwrap_or_default()
     }
     /// Get a vector of private repositories defined in the config file

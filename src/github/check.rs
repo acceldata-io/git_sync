@@ -135,7 +135,7 @@ impl GithubClient {
                 for branch in nodes {
                     if let Some(name) = branch.get("name").and_then(|v| v.as_str()) {
                         if let Some(re) = &branch_filter {
-                            if !re.is_match(name) {
+                            if !re.is_match(name)? {
                                 continue;
                             }
                         }
@@ -189,24 +189,13 @@ impl GithubClient {
             .collect();
         old_branches.sort_by_key(|(_, age)| *age);
 
-        let (old_branches, array_branch): (Vec<(String, String)>, Vec<[String; 2]>) = old_branches
+        let old_branches: Vec<(String, String)> = old_branches
             .into_iter()
             .map(|(branch, age)| {
                 let formatted = age.format("%Y-%m-%d").to_string();
-                ((branch.clone(), formatted.clone()), [branch, formatted])
+                (branch.clone(), formatted.clone())
             })
-            .unzip();
-        let table = Table::builder(tabled::settings::style::Style::ascii())
-            .title("Old Branches")
-            .header(["Branch name", "Age"])
-            .rows(array_branch)
-            .centre(false)
-            .align(tabled::settings::Alignment::center())
-            .build();
-
-        //let table = create_table(["Branch name", "Age"], array_branch, "Old Branches");
-        println!("{table}");
-        println!("Protection rules: {protection_rules:#?}");
+            .collect();
 
         Ok(Checks {
             branches: old_branches,
@@ -219,29 +208,45 @@ impl GithubClient {
         header: Vec<String>,
         rows: Vec<Vec<String>>,
         rules: &Vec<BranchProtectionRule>,
-        license: Option<LicenseInfo>,
+        license: Option<&LicenseInfo>,
         repo: &str,
     ) {
         let table = Table::builder(tabled::settings::style::Style::ascii())
-            .title("Stale Branches")
+            .title(format!("Stale Branches for {repo}"))
             .header(header)
             .rows(rows)
             .centre(false)
             .align(tabled::settings::Alignment::center())
             .build();
-        println!("Results for {repo}");
         println!("{table}");
         if !rules.is_empty() {
             for rule in rules {
                 println!("{rule}");
             }
         }
-        println!(
-            "License: {}",
-            license
-                .and_then(|l| l.name)
-                .unwrap_or("No license found".to_string())
-        );
+        if let Some(license) = &license {
+            if let Some(name) = &license.name {
+                println!("License: {name}");
+            }
+        }
+    }
+    /// TODO: This function is currently not used, but could be useful in the future
+    pub fn display_all_check_results(
+        header: Vec<String>,
+        rows: Vec<Vec<String>>,
+        rules: &Vec<BranchProtectionRule>,
+        license: Option<&LicenseInfo>,
+        title: &str,
+        repo: &str,
+    ) {
+        let table = Table::builder(tabled::settings::style::Style::ascii())
+            .title(title)
+            .header(header)
+            .rows(rows)
+            .centre(false)
+            .align(tabled::settings::Alignment::center())
+            .build();
+        println!("{table}");
     }
     /// Run the selected checks against all configured repositories
     pub async fn check_all_repositories(

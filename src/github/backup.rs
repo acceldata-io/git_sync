@@ -26,6 +26,9 @@ use octocrab::params::repos::Reference;
 
 impl GithubClient {
     pub async fn backup_repo(&self, ssh_url: &str, folder: &Path) -> Result<(), GitError> {
-
+        
+    }
+    pub async fn backup_to_s3(&self, ssh_url: &str, file_path: &Path, bucket: &str) -> Result<(), GitError> {
+        
     }
 }

@@ -33,7 +33,7 @@ use clap_complete::{
     shells::{Bash, Fish, Zsh},
 };
 use clap_mangen::Man;
-use regex::Regex;
+use fancy_regex::Regex;
 use std::fs::File;
 use std::path::{Path, PathBuf};
 
@@ -62,7 +62,6 @@ pub async fn match_arguments(app: &AppArgs, config: Config) -> Result<(), GitErr
         .map(std::num::NonZero::get)
         .unwrap_or(4);
     let jobs: usize = app.jobs.unwrap_or(default_jobs);
-    println!("Max number of jobs: {jobs}");
     let client = GithubClient::new(&token, &config, jobs)?;
     if !token.is_empty() && verbose {
         let (rest_limit, graphql_limit) =
@@ -272,17 +271,18 @@ async fn match_repo_cmds(
                         license,
                         repo,
                     } = res;
-                    for branch in branches {
-                        println!("\tStale branch: {} - {}", branch.0, branch.1);
-                    }
-                    for rule in rules {
-                        rule.print(repo);
-                    }
-                    if let Some(license) = license {
-                        if let Some(name) = license.name.as_ref() {
-                            println!("\tLicense: {name}");
-                        }
-                    }
+
+                    let branches = branches
+                        .iter()
+                        .map(|(b, d)| vec![b.to_string(), d.to_string()])
+                        .collect();
+                    GithubClient::display_check_results(
+                        vec!["Branch".to_string(), "Date".to_string()],
+                        branches,
+                        rules,
+                        license.as_ref(),
+                        repo,
+                    );
                 }
             } else if let Some(repository) = repository {
                 let result = client
@@ -302,7 +302,7 @@ async fn match_repo_cmds(
                     vec!["Branch".to_string(), "Date".to_string()],
                     branches,
                     rules,
-                    license.clone(),
+                    license.as_ref(),
                     repo,
                 );
             } else {
@@ -325,7 +325,6 @@ async fn match_pr_cmds(
         PRCommand::Open(open_cmd) => {
             let repository = open_cmd.repository.clone().unwrap_or_default();
             let merge = open_cmd.merge;
-            println!("Merge is {merge}");
             let opts = CreatePrOptions {
                 url: repository.clone(),
                 head: open_cmd.head.clone(),
@@ -352,7 +351,6 @@ async fn match_pr_cmds(
                 // Do some stuff here
             } else if !repository.len() > 0 {
                 let pr_number = client.create_pr(&opts).await?;
-                println!("Created PR #{pr_number} in {repository}");
                 if let Some(opts) = merge_opts.as_mut() {
                     opts.pr_number = pr_number;
                     client.merge_pr(opts).await?;

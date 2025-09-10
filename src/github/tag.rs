@@ -118,14 +118,6 @@ impl GithubClient {
                         target {
                             __typename
                             oid
-                            ... on Tag {
-                                message
-                                tagger {
-                                    name
-                                    email
-                                    date
-                                }
-                            }
                         }
                     }
                     pageInfo {
@@ -171,26 +163,10 @@ impl GithubClient {
                     other => return Err(GitError::Other(format!("Unknown tag type '{other}'"))),
                 };
 
-                let (message, tagger_name, tagger_email, tagger_date) =
-                    if let Some(tagger) = &tag.target.tagger {
-                        (
-                            tag.target.message.clone(),
-                            tagger.name.clone(),
-                            tagger.email.clone(),
-                            tagger.date.clone(),
-                        )
-                    } else {
-                        (None, None, None, None)
-                    };
-
                 all_tags.insert(TagInfo {
                     name: std::mem::take(&mut tag.name),
                     tag_type,
                     sha: std::mem::take(&mut tag.target.oid),
-                    message,
-                    tagger_name,
-                    tagger_email,
-                    tagger_date,
                     parent_url: std::mem::take(&mut parent_url),
                 });
             }
@@ -203,11 +179,13 @@ impl GithubClient {
     pub async fn compare_tags(&self, url: &str, parent: &RepoInfo) -> Result<Comparison, GitError> {
         let (fork_tags, parent_tags) =
             try_join(self.get_tags(url), self.get_tags(&parent.url)).await?;
-        println!(
-            "Fork tags: {}\nParent tags: {}",
-            fork_tags.len(),
-            parent_tags.len()
-        );
+        if self.is_tty {
+            println!(
+                "Fork tags: {}\nParent tags: {}",
+                fork_tags.len(),
+                parent_tags.len()
+            );
+        }
 
         let missing_in_fork: IndexSet<TagInfo> =
             parent_tags.difference(&fork_tags).cloned().collect();
@@ -224,24 +202,37 @@ impl GithubClient {
             if missing == 1 {
                 let _ = writeln!(
                     slack_message,
-                    "*:information_source: *Missing 1 tag in {url}*:"
+                    ":information_source: Missing 1 tag in {url}:"
                 );
             } else {
                 let _ = writeln!(
                     slack_message,
-                    ":information_source: *Missing {missing} tags in {url}*:"
+                    ":information_source: Missing {missing} tags in {url}:"
                 );
             }
 
-            if !missing_annotated.is_empty() {
+            let total_annotated = missing_annotated.len();
+            let max_tags_display = std::cmp::min(10, total_annotated);
+            if total_annotated > max_tags_display {
+                writeln!(
+                    slack_message,
+                    "The following annotated tags are missing, as well as {} others",
+                    total_annotated - max_tags_display
+                )
+                .unwrap();
+            } else if total_annotated > 0 {
                 slack_message.push_str("The following annotated tags are missing:\n");
-                for tag in &missing_annotated {
-                    let _ = writeln!(slack_message, ">• `{}`", tag.name);
-                }
             }
+
+            for tag in &missing_annotated[0..max_tags_display] {
+                let _ = writeln!(slack_message, ">• `{}`", tag.name);
+            }
+
             self.append_slack_message(slack_message).await;
         } else {
-            println!("Tags are up to date for {url}");
+            if self.is_tty {
+                println!("Tags are up to date for {url}");
+            }
             self.append_slack_message(format!(":white_check_mark: Tags are up to date for {url}"))
                 .await;
         }
@@ -257,12 +248,6 @@ impl GithubClient {
     pub async fn diff_tags(&self, url: &str) -> Result<Comparison, GitError> {
         let parent = self.get_parent_repo(url).await?;
         let comparison = self.compare_tags(url, &parent).await?;
-
-        println!(
-            "Fork has {} tags, parent has {} tags",
-            comparison.fork_tags.len(),
-            comparison.parent_tags.len()
-        );
 
         Ok(comparison)
     }
@@ -282,7 +267,9 @@ impl GithubClient {
                 let url = repo.url.clone();
                 let owner = repo.owner.clone();
                 let repo_name = repo.repo_name.clone();
-                println!("   Processing {owner}/{repo_name}");
+                if self.is_tty {
+                    println!("   Processing {owner}/{repo_name}");
+                }
                 (owner, repo_name, url )
             }),
             |owner, repo, url| self.diff_tags(&url).map(|result| (owner, repo, result)),
@@ -290,7 +277,11 @@ impl GithubClient {
                 match result {
                     Ok(r) => {
                         diffs.insert(repo.to_string(), r);
-                        println!("✅ Successfully diffed tags for {owner}/{repo}");
+                        if self.is_tty {
+                            println!("✅ Successfully diffed tags for {owner}/{repo}");
+                        } else {
+                            println!("{owner}/{repo}");
+                        }
                     },
                     Err(e) => {
                         eprintln!("❌ Failed to diff tags for {owner}/{repo}: {e}");
@@ -314,7 +305,9 @@ impl GithubClient {
         let (owner, repo) = (info.owner, info.repo_name);
         let missing = self.compare_tags(url, &parent).await?.missing_in_fork;
         if missing.is_empty() {
-            println!("No missing tags in {url}");
+            if self.is_tty {
+                println!("No missing tags in {url}");
+            }
             return Ok(());
         }
 
@@ -334,7 +327,11 @@ impl GithubClient {
                 |repo, name, owner, tag| self.sync_lightweight_tag(&owner, &repo.clone(), &tag).map(|result|(repo, name, result)),
                 (repo, name, result) {
                     match result {
-                        Ok(()) => println!("Successfully synced tag '{name}' in '{repo}'"),
+                        Ok(()) => {
+                            if self.is_tty {
+                                println!("Successfully synced tag '{name}' in '{repo}'");
+                            }
+                        },
                         Err(e) => eprintln!("Failed to sync '{name}' for '{repo}': {e}")
                     }
                 }
@@ -388,7 +385,9 @@ impl GithubClient {
                 Ok(()) => {
                     self.append_slack_message(format!("✅ Successfully synced tags for {repo}"))
                         .await;
-                    println!("✅ Successfully synced tags for {repo}");
+                    if self.is_tty {
+                        println!("✅ Successfully synced tags for {repo}");
+                    }
                 }
                 Err(e) => {
                     self.append_slack_error(format!("❌ Failed to sync tags for {repo}: {e}"))
@@ -438,10 +437,12 @@ impl GithubClient {
             response,
             format!("Unable to sync tag {} in {owner}/{repo}", tag.name),
             |_| {
-                println!(
-                    "Successfully synced lightweight tag '{}' {owner}/{repo}",
-                    tag.name
-                );
+                if self.is_tty {
+                    println!(
+                        "Successfully synced lightweight tag '{}' {owner}/{repo}",
+                        tag.name
+                    );
+                }
                 Ok::<(), GitError>(())
             },
         )?;
@@ -563,7 +564,9 @@ impl GithubClient {
                     format!(":white_check_mark: Successfully created tag '{tag}' for {repo}");
 
                 self.append_slack_message(message).await;
-                println!("Successfully created tag '{tag}' for {repo}");
+                if self.is_tty {
+                    println!("Successfully created tag '{tag}' for {repo}");
+                }
                 Ok(())
             }
             Err(e) => {
@@ -592,7 +595,11 @@ impl GithubClient {
 
         while let Some((repo, result)) = futures.next().await {
             match result {
-                Ok(()) => println!("Successfully created tag '{tag}' for '{repo}'"),
+                Ok(()) => {
+                    if self.is_tty {
+                        println!("Successfully created tag '{tag}' for '{repo}'");
+                    }
+                }
                 Err(e) => eprintln!("Failed to create tag '{tag}' for '{repo}': {e}"),
             }
         }
@@ -620,14 +627,20 @@ impl GithubClient {
         match response {
             Ok(resp) => {
                 if resp.status().is_success() {
-                    println!("Successfully deleted tag '{tag}' for {repo}");
+                    if self.is_tty {
+                        println!("Successfully deleted tag '{tag}' for {repo}");
+                    }
                     Ok(())
                 } else {
                     let status_code = resp.status().as_u16();
 
                     match status_code {
                         422 => {
-                            println!("Tag '{tag}' does not exist in {repo}. Nothing to delete.");
+                            if self.is_tty {
+                                println!(
+                                    "Tag '{tag}' does not exist in {repo}. Nothing to delete."
+                                );
+                            }
                             Ok(())
                         }
                         _ => Err(GitError::Other(format!(
@@ -657,7 +670,11 @@ impl GithubClient {
 
         while let Some((repo, result)) = futures.next().await {
             match result {
-                Ok(()) => println!("Successfully deleted tag '{tag}' for {repo}"),
+                Ok(()) => {
+                    if self.is_tty {
+                        println!("Successfully deleted tag '{tag}' for {repo}");
+                    }
+                }
                 Err(e) => eprintln!("Failed to delete tag '{tag}' for {repo}: {e}"),
             }
         }

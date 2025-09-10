@@ -17,7 +17,7 @@ specific language governing permissions and limitations
 under the License.
 */
 use crate::error::GitError;
-use regex::Regex;
+use fancy_regex::Regex;
 use serde::Deserialize;
 use std::fmt;
 use std::fmt::Write as _;
@@ -49,10 +49,6 @@ pub struct TagInfo {
     pub name: String,
     pub tag_type: TagType,
     pub sha: String,
-    pub message: Option<String>,
-    pub tagger_name: Option<String>,
-    pub tagger_email: Option<String>,
-    pub tagger_date: Option<String>,
     pub parent_url: Option<String>,
 }
 
@@ -189,9 +185,6 @@ impl fmt::Display for BranchProtectionRule {
 #[derive(Debug, Deserialize, Clone)]
 pub struct LicenseInfo {
     pub name: Option<String>,
-    #[serde(rename = "spdxId")]
-    pub spdx_id: Option<String>,
-    pub url: Option<String>,
 }
 
 /// A holder for things that can be checked for a repository
@@ -226,7 +219,7 @@ pub fn get_repo_info_from_url(url: &str) -> Result<RepoInfo, GitError> {
         .expect(&msg)
     });
     let url = url.trim();
-    if let Some(captures) = repo_regex.captures(url) {
+    if let Some(captures) = repo_regex.captures(url)? {
         let owner = match captures.name("owner") {
             Some(m) => m.as_str().to_string(),
             None => return Err(GitError::InvalidRepository(url.to_string())),

@@ -22,10 +22,10 @@ use crate::error::{GitError, is_retryable};
 use crate::github::client::GithubClient;
 use crate::utils::repo::get_repo_info_from_url;
 use chrono::{DateTime, Duration, Utc};
+use fancy_regex::Regex;
 use futures::{StreamExt, stream::FuturesUnordered};
 use octocrab::models::repos::ReleaseNotes;
 use octocrab::params::repos::Reference;
-use regex::Regex;
 use std::sync::OnceLock;
 
 // Static, compiled on first use, to prevent recompiling them each time we use them
@@ -161,12 +161,12 @@ impl GithubClient {
 
         for s in &new_commits {
             let s_upper = s.to_ascii_uppercase();
-            if cve.is_match(&s_upper) {
+            if cve.is_match(&s_upper)? {
                 vulnerabilities.push(s.clone());
             // We don't want to match not upper case names for components, so take the line as is
-            } else if re.is_match(s) {
+            } else if re.is_match(s)? {
                 component_match.push(s.clone());
-            } else if odp.is_match(&s_upper) {
+            } else if odp.is_match(&s_upper)? {
                 odp_changes.push(s.clone());
             } else {
                 other.push(s.clone());
