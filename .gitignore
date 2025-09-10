@@ -3,3 +3,4 @@ git-manage.toml
 .DS_Store
 .license_report.md
 flamegraph.*
+THIRDPARTY.toml
