@@ -17,18 +17,59 @@ specific language governing permissions and limitations
 under the License.
 */
 
-use crate::async_retry;
-use crate::error::{GitError, is_retryable};
+use crate::error::GitError;
 use crate::github::client::GithubClient;
-use crate::utils::repo::get_repo_info_from_url;
-use futures::{StreamExt, stream::FuturesUnordered};
-use octocrab::params::repos::Reference;
+use std::path::Path;
+use std::process::Command;
 
 impl GithubClient {
-    pub async fn backup_repo(&self, ssh_url: &str, folder: &Path) -> Result<(), GitError> {
-        
+    pub async fn backup_repo(&self, ssh_url: &str, path: &Path) -> Result<(), GitError> {
+        let _semaphore_lock = self.semaphore.clone().acquire_owned().await?;
+        let ssh_url = ssh_url.to_string();
+        let canonical_path = if let Ok(p) = path.canonicalize() {
+            p
+        } else {
+            path.to_path_buf()
+        };
+        let path = canonical_path.to_string_lossy().to_string();
+        let result = tokio::task::spawn_blocking(move || {
+            // Clone the reposittory as a mirror
+            let output = Command::new("git")
+                .args(["clone", "--mirror", &ssh_url, &path])
+                .status();
+            match output {
+                Ok(s) if s.success() => Ok::<_, GitError>(format!(
+                    "Successfully backed up repository: {ssh_url} to path: {path}"
+                )),
+                Ok(s) => Err(GitError::Other(format!(
+                    "Failed to back up repository: {ssh_url}, git exited with status: {s}"
+                ))),
+                Err(e) => Err(GitError::Other(format!(
+                    "Failed to back up repository: {ssh_url}, error: {e}"
+                ))),
+            }
+        })
+        .await?;
+
+        match result {
+            Ok(m) => {
+                if self.is_tty {
+                    println!("{m}");
+                }
+                self.append_slack_message(m).await;
+            }
+            Err(e) => {
+                if self.is_tty {
+                    eprintln!("{e}");
+                }
+                self.append_slack_error(e.to_string()).await;
+                return Err(e);
+            }
+        }
+
+        Ok(())
     }
-    pub async fn backup_to_s3(&self, ssh_url: &str, file_path: &Path, bucket: &str) -> Result<(), GitError> {
-        
-    }
+    /*pub async fn backup_to_s3(&self, ssh_url: &str, file_path: &Path, bucket: &str, key: &str) -> Result<(), GitError> {
+        Ok(())
+    }*/
 }

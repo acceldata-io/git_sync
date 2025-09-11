@@ -79,6 +79,23 @@ pub enum MakeLatest {
     Legacy,
 }
 
+#[derive(Copy, Clone, PartialEq, Eq, Debug, ValueEnum)]
+pub enum BackupDestination {
+    Local,
+    S3,
+    Gcp,
+}
+
+impl fmt::Display for BackupDestination {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            BackupDestination::Local => write!(f, "local"),
+            BackupDestination::S3 => write!(f, "s3"),
+            BackupDestination::Gcp => write!(f, "gcp"),
+        }
+    }
+}
+
 impl fmt::Display for MakeLatest {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -441,6 +458,42 @@ pub struct CreateReleaseCommand {
     pub no_release_notes: bool,
 }
 
+// --- Backup Commands ---
+
+/// Backup repositories
+#[derive(Args, Clone, Debug)]
+#[command(
+    group(
+        ArgGroup::new("target")
+        .required(true)
+        .args(&["all", "repository"])
+    )
+)]
+pub struct BackupRepoCommand {
+    /// The repository to backup
+    #[arg(short, long)]
+    pub repository: Option<String>,
+    /// Backup all configured repositories
+    #[arg(short, long, default_value_t = false)]
+    pub all: bool,
+    /// The directory to store the backups in. If not specified, the current directory will be used
+    #[arg(short, long)]
+    pub directory: Option<PathBuf>,
+    /// The destination for the backup
+    #[arg(short, long, default_value_t = BackupDestination::Local, value_parser = ["local", "s3", "gcp"])]
+    pub destination: BackupDestination,
+
+    /// Update an existing backup instead of making a new mirror clone.
+    #[arg(short, long, default_value_t = false)]
+    pub update: bool,
+}
+#[derive(Args, Clone, Debug)]
+pub struct CleanBackupCommand {
+    /// Path to the backup directory. This is only implemented for local backups
+    #[arg(short, long)]
+    pub directory: Option<PathBuf>,
+}
+
 // === Subcommand Enums ===
 
 /// Define all the valid commands for acting on pull requests
@@ -448,6 +501,15 @@ pub struct CreateReleaseCommand {
 pub enum PRCommand {
     /// Create a new PR
     Open(CreatePRCommand),
+}
+
+/// Define all the valid commands for acting on backups
+#[derive(Subcommand, Clone, Debug)]
+pub enum BackupCommand {
+    /// Create new backups
+    Create(BackupRepoCommand),
+    /// Clean up old backups
+    Clean(CleanBackupCommand),
 }
 
 /// Define all the valid commands for actiong on releases
@@ -525,6 +587,12 @@ pub enum Command {
     Release {
         #[command(subcommand)]
         cmd: ReleaseCommand,
+    },
+    /// Manage backups of repositories
+    #[command(arg_required_else_help = true)]
+    Backup {
+        #[command(subcommand)]
+        cmd: BackupCommand,
     },
     /// Manage Pull Requests
     #[command(arg_required_else_help = true)]

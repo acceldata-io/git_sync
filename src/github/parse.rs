@@ -18,8 +18,8 @@ under the License.
 */
 use crate::GitError;
 use crate::cli::{
-    AppArgs, BranchCommand, Command, PRCommand, ReleaseCommand, RepoCommand, RepositoryType,
-    TagCommand, cli,
+    AppArgs, BackupCommand, BranchCommand, Command, PRCommand, ReleaseCommand, RepoCommand,
+    RepositoryType, TagCommand, cli,
 };
 use crate::config::Config;
 use crate::github::client::GithubClient;
@@ -80,6 +80,7 @@ pub async fn match_arguments(app: &AppArgs, config: Config) -> Result<(), GitErr
         Command::Branch { cmd } => match_branch_cmds(&client, repos, cmd).await?,
         Command::Release { cmd } => match_release_cmds(&client, repos, config, cmd).await?,
         Command::PR { cmd } => match_pr_cmds(&client, repos, config, cmd).await?,
+        Command::Backup { cmd } => match_backup_cmds(&client, repos, config, cmd).await?,
         Command::Config { file, force } => {
             generate_config(file.as_ref(), *force)?;
         }
@@ -394,6 +395,42 @@ async fn match_release_cmds(
         }
     }
 
+    Ok(())
+}
+
+async fn match_backup_cmds(
+    client: &GithubClient,
+    repos: Vec<String>,
+    config: Config,
+    cmd: &BackupCommand,
+) -> Result<(), GitError> {
+    match cmd {
+        BackupCommand::Create(create_cmd) => {
+            let repository = create_cmd.repository.as_ref();
+            let path = create_cmd.directory.as_ref();
+            if create_cmd.all {
+                println!("Do something...");
+                //client.backup_all_repos(path, repos).await?;
+            } else if let Some(repository) = repository {
+                if let Some(path) = path {
+                    client.backup_repo(repository, path).await?;
+                } else {
+                    return Err(GitError::Other("Invalid backup directory".to_string()));
+                }
+            } else {
+                return Err(GitError::MissingRepositoryName);
+            }
+        }
+        BackupCommand::Clean(clean_cmd) => {
+            let path = clean_cmd.directory.as_ref();
+            if let Some(path) = path {
+                //client.clean_backup(path).await?;
+                println!("Do some backup cleanup");
+            } else {
+                return Err(GitError::Other("Invalid backup directory".to_string()));
+            }
+        }
+    }
     Ok(())
 }
 

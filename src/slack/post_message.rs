@@ -27,7 +27,6 @@ pub async fn send_slack_message(
     webhook_url: String,
     data: HashMap<String, String>,
 ) -> Result<(), reqwest::Error> {
-    println!("Running post to channel...");
     let client = Client::new();
     let res = client
         .post(webhook_url.to_string())
@@ -41,6 +40,5 @@ pub async fn send_slack_message(
             res.status()
         );
     }
-    println!("Finished!!");
     Ok(())
 }

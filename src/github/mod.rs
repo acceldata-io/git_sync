@@ -16,6 +16,7 @@ KIND, either express or implied.  See the License for the
 specific language governing permissions and limitations
 under the License.
 */
+pub mod backup;
 pub mod branch;
 pub mod check;
 pub mod client;
