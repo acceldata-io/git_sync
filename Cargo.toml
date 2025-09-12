@@ -48,6 +48,7 @@ indexmap = { version = "2.11", features = ["serde"] }
 
 aws-sdk-s3 = { version = "1.105", optional = true }
 fancy-regex = "0.16"
+sqlx = {version = "0.8.6", optional = true, default-features = false, features = ["runtime-tokio-rustls", "tls-rustls-aws-lc-rs", "macros", "migrate", "derive", "chrono", "time", "json"]}
 
 [dev-dependencies]
 wiremock = "0.6"
@@ -55,13 +56,15 @@ criterion = { version = "0.7", features = [
   "async",
   "async_tokio",
   "html_reports",
-] }
+]}
 
 [features]
-default = ["slack"]
-slack = []
+default = ["slack", "sqlite"]
 aws = ["dep:aws-sdk-s3"]
-
+postgres = ["sql","sqlx/postgres"]
+slack = []
+sql = ["dep:sqlx"]
+sqlite = ["sql", "sqlx/sqlite"]
 
 [profile.release]
 lto = true

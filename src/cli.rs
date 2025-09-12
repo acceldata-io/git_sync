@@ -477,16 +477,26 @@ pub struct BackupRepoCommand {
     #[arg(short, long, default_value_t = false)]
     pub all: bool,
     /// The directory to store the backups in. If not specified, the current directory will be used
-    #[arg(short, long)]
-    pub directory: Option<PathBuf>,
+    #[arg(short, long, value_parser = dir_exists)]
+    pub path: Option<PathBuf>,
     /// The destination for the backup
-    #[arg(short, long, default_value_t = BackupDestination::Local, value_parser = ["local", "s3", "gcp"])]
+    #[arg(short, long, default_value_t = BackupDestination::Local)]
     pub destination: BackupDestination,
 
     /// Update an existing backup instead of making a new mirror clone.
     #[arg(short, long, default_value_t = false)]
     pub update: bool,
 }
+
+fn dir_exists(s: &str) -> Result<PathBuf, String> {
+    let p = PathBuf::from(s);
+    if p.is_dir() {
+        Ok(p)
+    } else {
+        Err(format!("{s} is not a valid directory"))
+    }
+}
+
 #[derive(Args, Clone, Debug)]
 pub struct CleanBackupCommand {
     /// Path to the backup directory. This is only implemented for local backups
@@ -506,7 +516,7 @@ pub enum PRCommand {
 /// Define all the valid commands for acting on backups
 #[derive(Subcommand, Clone, Debug)]
 pub enum BackupCommand {
-    /// Create new backups
+    /// Create new backups. This operation can take a long time depending on the size of the repo.
     Create(BackupRepoCommand),
     /// Clean up old backups
     Clean(CleanBackupCommand),

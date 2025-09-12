@@ -43,8 +43,9 @@ pub enum GitError {
     #[error("Invalid repository URL: {0}")]
     InvalidRepository(String),
 
+    /// This error is too big, so we wrap it in a Box, then implement the conversion below
     #[error("Regex error: {0}")]
-    RegexError(#[from] fancy_regex::Error),
+    RegexError(#[from] Box<fancy_regex::Error>),
 
     #[error("No repos configured")]
     NoReposConfigured,
@@ -241,6 +242,11 @@ impl GitError {
     }
 }
 
+impl From<fancy_regex::Error> for GitError {
+    fn from(err: fancy_regex::Error) -> Self {
+        GitError::RegexError(Box::new(err))
+    }
+}
 /// Different categories of errors for user-friendly messages
 #[derive(Debug)]
 pub enum ErrorCategory {

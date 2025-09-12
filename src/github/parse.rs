@@ -22,7 +22,7 @@ use crate::cli::{
     RepositoryType, TagCommand, cli,
 };
 use crate::config::Config;
-use crate::github::client::GithubClient;
+use crate::github::client::{GithubClient, OutputMode};
 use crate::init::generate_config;
 use crate::utils::pr::{CreatePrOptions, MergePrOptions};
 use crate::utils::repo::Checks;
@@ -34,6 +34,7 @@ use clap_complete::{
 };
 use clap_mangen::Man;
 use fancy_regex::Regex;
+use std::env;
 use std::fs::File;
 use std::path::{Path, PathBuf};
 
@@ -49,7 +50,6 @@ pub async fn match_arguments(app: &AppArgs, config: Config) -> Result<(), GitErr
             .or_else(|| config.get_github_token().clone())
             .ok_or(GitError::MissingToken)?,
     };
-    let send_slack_messages = app.slack;
     let verbose = app.verbose;
 
     let repos = match app.repository_type {
@@ -115,7 +115,8 @@ pub async fn match_arguments(app: &AppArgs, config: Config) -> Result<(), GitErr
             }
         }
     }
-    if send_slack_messages {
+    #[cfg(feature = "slack")]
+    if app.slack {
         client.slack_message().await;
     }
     Ok(())
@@ -249,7 +250,7 @@ async fn match_repo_cmds(
             let blacklist = config.misc.branch_blacklist.unwrap_or_default();
             let filter = check_cmd.branch_filter.clone();
             let branch_filter = if let Some(filter) = filter {
-                Some(Regex::new(&filter).map_err(GitError::RegexError)?)
+                Some(Regex::new(&filter).map_err(|err| GitError::RegexError(Box::new(err)))?)
             } else {
                 None
             };
@@ -407,18 +408,23 @@ async fn match_backup_cmds(
     match cmd {
         BackupCommand::Create(create_cmd) => {
             let repository = create_cmd.repository.as_ref();
-            let path = create_cmd.directory.as_ref();
-            if create_cmd.all {
-                println!("Do something...");
-                //client.backup_all_repos(path, repos).await?;
-            } else if let Some(repository) = repository {
-                if let Some(path) = path {
-                    client.backup_repo(repository, path).await?;
-                } else {
-                    return Err(GitError::Other("Invalid backup directory".to_string()));
-                }
+            let passed_path = create_cmd.path.as_ref();
+            let current_dir;
+            let path = if let Some(p) = passed_path {
+                p
             } else {
-                return Err(GitError::MissingRepositoryName);
+                current_dir = env::current_dir()?;
+                current_dir.as_path()
+            };
+            if create_cmd.all {
+                if client.is_tty {
+                    if client.output.set(OutputMode::Progress).is_err() {
+                        eprintln!("Arc<OnceCell> already set!");
+                    }
+                }
+                client.backup_all_repos(repos, path).await?;
+            } else if let Some(repository) = repository {
+                client.backup_repo(repository.to_string(), path).await?;
             }
         }
         BackupCommand::Clean(clean_cmd) => {
