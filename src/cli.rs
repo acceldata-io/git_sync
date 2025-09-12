@@ -51,13 +51,24 @@ pub struct AppArgs {
     pub verbose: bool,
 
     /// The maximum number of parallel tasks to run
-    #[arg(short = 'j', long, global = true, value_parser = clap::value_parser!(u32).range(1..64))]
+    #[arg(short = 'j', long, global = true, value_parser = validate_jobs)]
     pub jobs: Option<usize>,
 
     /// Enable sending the results of the operation to a slack channel using the
     /// configured webhook in git-manage.toml
     #[arg(short, long, global = true, default_value_t = false)]
     pub slack: bool,
+}
+
+fn validate_jobs(s: &str) -> Result<usize, String> {
+    let parsed: usize = s
+        .parse()
+        .map_err(|_| format!("'{s}' is not a valid positive integer"))?;
+    if (1..=64).contains(&parsed) {
+        Ok(parsed)
+    } else {
+        Err("Jobs must be between 1 and 64".to_string())
+    }
 }
 
 // === Enums ===
