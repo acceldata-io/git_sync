@@ -43,6 +43,7 @@
           pkgs.openssl.dev
           pkgs.cargo-audit
           pkgs.cargo-auditable
+          pkgs.git
         ] ++ extraDevInputs;
 
       in {
