@@ -61,6 +61,8 @@ sqlx = { version = "0.8.6", optional = true, default-features = false, features 
   "time",
   "json",
 ] }
+aws-config = {version = "1.8.6", features = ["rustls"]}
+flate2 = "1.1.2"
 
 [dev-dependencies]
 wiremock = "0.6"
@@ -71,7 +73,7 @@ criterion = { version = "0.7", features = [
 ] }
 
 [features]
-default = ["slack", "sqlite"]
+default = ["slack", "sqlite", "aws"]
 aws = ["dep:aws-sdk-s3"]
 postgres = ["sql", "sqlx/postgres"]
 slack = []

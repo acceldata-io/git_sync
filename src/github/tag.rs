@@ -237,11 +237,7 @@ impl GithubClient {
                 .await;
         }
 
-        let compare = Comparison {
-            fork_tags,
-            parent_tags,
-            missing_in_fork,
-        };
+        let compare = Comparison { missing_in_fork };
         Ok(compare)
     }
     /// Get a diff of tags between a single forked repository and its parent repository.

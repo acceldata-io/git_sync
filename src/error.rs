@@ -37,6 +37,9 @@ pub enum GitError {
     #[error("Upstream not found for fork")]
     NoUpstreamRepo,
 
+    #[cfg(feature = "aws")]
+    #[error("AWS error: {0}")]
+    AWSError(String),
     #[error("Date parse error: {0}")]
     DateParseError(#[from] chrono::ParseError),
 
@@ -176,6 +179,12 @@ impl GitError {
             GitError::JoinError(e) => UserError {
                 code: None,
                 message: format!("Failed to join tasks: {e}"),
+                suggestion: None,
+            },
+            #[cfg(feature = "aws")]
+            GitError::AWSError(e) => UserError {
+                code: None,
+                message: format!("AWS Error: {e}"),
                 suggestion: None,
             },
             GitError::IoError(e) => UserError {

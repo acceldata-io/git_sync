@@ -56,10 +56,14 @@ pub struct AppArgs {
 
     /// Enable sending the results of the operation to a slack channel using the
     /// configured webhook in git-manage.toml
+    #[cfg(feature = "slack")]
     #[arg(short, long, global = true, default_value_t = false)]
     pub slack: bool,
 }
 
+/// Validate that the maximum number of paralllel jobs is between 1 and 64.
+/// Strictly speaking, there isn't a reason that this couldn't be higher, but
+/// there isn't much point in allowing more jobs than cpu cores available
 fn validate_jobs(s: &str) -> Result<usize, String> {
     let parsed: usize = s
         .parse()
@@ -93,16 +97,16 @@ pub enum MakeLatest {
 #[derive(Copy, Clone, PartialEq, Eq, Debug, ValueEnum)]
 pub enum BackupDestination {
     Local,
+    #[cfg(feature = "aws")]
     S3,
-    Gcp,
 }
 
 impl fmt::Display for BackupDestination {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             BackupDestination::Local => write!(f, "local"),
+            #[cfg(feature = "aws")]
             BackupDestination::S3 => write!(f, "s3"),
-            BackupDestination::Gcp => write!(f, "gcp"),
         }
     }
 }
@@ -478,7 +482,7 @@ pub struct CreateReleaseCommand {
         ArgGroup::new("target")
         .required(true)
         .args(&["all", "repository"])
-    )
+    ),
 )]
 pub struct BackupRepoCommand {
     /// The repository to backup
@@ -497,22 +501,27 @@ pub struct BackupRepoCommand {
     /// Update an existing backup instead of making a new mirror clone.
     #[arg(short, long, default_value_t = false)]
     pub update: bool,
+    /// Bucket name for where you want to store your backup if using `S3`
+    #[cfg(feature = "aws")]
+    pub bucket: Option<String>,
 }
 
 fn dir_exists(s: &str) -> Result<PathBuf, String> {
     let p = PathBuf::from(s);
-    if p.is_dir() {
+    Ok(p)
+    /*if p.is_dir() {
         Ok(p)
     } else {
         Err(format!("{s} is not a valid directory"))
     }
+    */
 }
 
 #[derive(Args, Clone, Debug)]
-pub struct CleanBackupCommand {
+pub struct PruneBackupCommand {
     /// Path to the backup directory. This is only implemented for local backups
-    #[arg(short, long)]
-    pub directory: Option<PathBuf>,
+    #[arg(short, long, value_parser = dir_exists)]
+    pub directory: PathBuf,
 }
 
 // === Subcommand Enums ===
@@ -530,7 +539,7 @@ pub enum BackupCommand {
     /// Create new backups. This operation can take a long time depending on the size of the repo.
     Create(BackupRepoCommand),
     /// Clean up old backups
-    Clean(CleanBackupCommand),
+    Clean(PruneBackupCommand),
 }
 
 /// Define all the valid commands for actiong on releases

@@ -18,8 +18,8 @@ under the License.
 */
 use crate::GitError;
 use crate::cli::{
-    AppArgs, BackupCommand, BranchCommand, Command, PRCommand, ReleaseCommand, RepoCommand,
-    RepositoryType, TagCommand, cli,
+    AppArgs, BackupCommand, BackupDestination, BranchCommand, Command, PRCommand, ReleaseCommand,
+    RepoCommand, RepositoryType, TagCommand, cli,
 };
 use crate::config::Config;
 use crate::github::client::{GithubClient, OutputMode};
@@ -410,31 +410,30 @@ async fn match_backup_cmds(
             let repository = create_cmd.repository.as_ref();
             let passed_path = create_cmd.path.as_ref();
             let current_dir;
+            let dest = create_cmd.destination;
             let path = if let Some(p) = passed_path {
                 p
             } else {
                 current_dir = env::current_dir()?;
                 current_dir.as_path()
             };
+
+            if dest == BackupDestination::S3 {
+                client
+                    .backup_to_s3(path, "git-backup-test-bucket-can", "Clickhouse.git.tar.gz")
+                    .await?;
+                return Ok(());
+            }
+
             if create_cmd.all {
-                if client.is_tty {
-                    if client.output.set(OutputMode::Progress).is_err() {
-                        eprintln!("Arc<OnceCell> already set!");
-                    }
-                }
                 client.backup_all_repos(repos, path).await?;
             } else if let Some(repository) = repository {
                 client.backup_repo(repository.to_string(), path).await?;
             }
         }
         BackupCommand::Clean(clean_cmd) => {
-            let path = clean_cmd.directory.as_ref();
-            if let Some(path) = path {
-                //client.clean_backup(path).await?;
-                println!("Do some backup cleanup");
-            } else {
-                return Err(GitError::Other("Invalid backup directory".to_string()));
-            }
+            let path = clean_cmd.directory.clone();
+            client.prune_backup(&path, None).await?;
         }
     }
     Ok(())

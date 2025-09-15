@@ -36,8 +36,6 @@ use tokio::sync::OnceCell;
 /// and the tags that are missing from the fork
 #[derive(Debug)]
 pub struct Comparison {
-    pub fork_tags: IndexSet<TagInfo>,
-    pub parent_tags: IndexSet<TagInfo>,
     pub missing_in_fork: IndexSet<TagInfo>,
 }
 
