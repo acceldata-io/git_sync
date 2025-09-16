@@ -37,7 +37,10 @@ use tokio::sync::OnceCell;
 
 #[derive(Debug)]
 pub struct Comparison {
+    /// An ordered set of tags that are missing in the fork repository
     pub missing_in_fork: IndexSet<TagInfo>,
+    /// A hashset of the parent repositories. If you have a fork of a fork, you might have more
+    /// than one parent URL.
     pub parent_urls: HashSet<String>,
 }
 
@@ -63,8 +66,14 @@ pub struct GithubClient {
 #[derive(Default, PartialEq, Eq)]
 pub enum OutputMode {
     #[default]
+    /// No output
     None,
+    /// Print output to stdout. This is useful for when we do want info in the console, but aren't
+    /// a tty, such as when we're piping output to some other command
     Print,
+    /// This is to display a progress bar. Some actions take a very long time and this is a way to
+    /// make it clear the program hasn't hanged. This should only be enabled when this is being run
+    /// in an interactive terminal.
     Progress,
 }
 
