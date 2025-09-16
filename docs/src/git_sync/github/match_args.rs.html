@@ -22,7 +22,7 @@
 <a href=#22 id=22 data-nosnippet>22</a>    RepoCommand, RepositoryType, TagCommand, cli,
 <a href=#23 id=23 data-nosnippet>23</a>};
 <a href=#24 id=24 data-nosnippet>24</a><span class="kw">use </span><span class="kw">crate</span>::config::Config;
-<a href=#25 id=25 data-nosnippet>25</a><span class="kw">use </span><span class="kw">crate</span>::github::client::{GithubClient};
+<a href=#25 id=25 data-nosnippet>25</a><span class="kw">use </span><span class="kw">crate</span>::github::client::GithubClient;
 <a href=#26 id=26 data-nosnippet>26</a><span class="kw">use </span><span class="kw">crate</span>::init::generate_config;
 <a href=#27 id=27 data-nosnippet>27</a><span class="kw">use </span><span class="kw">crate</span>::utils::pr::{CreatePrOptions, MergePrOptions};
 <a href=#28 id=28 data-nosnippet>28</a><span class="kw">use </span><span class="kw">crate</span>::utils::repo::Checks;
@@ -172,7 +172,7 @@
 <a href=#172 id=172 data-nosnippet>172</a>            TagCommand::Sync(sync_cmd) =&gt; {
 <a href=#173 id=173 data-nosnippet>173</a>                <span class="kw">let </span>repository = sync_cmd.repository.as_ref();
 <a href=#174 id=174 data-nosnippet>174</a>                <span class="comment">// By default, this is false
-<a href=#175 id=175 data-nosnippet>175</a>                </span><span class="kw">let </span>process_annotated_tags = sync_cmd.without_annotated;
+<a href=#175 id=175 data-nosnippet>175</a>                </span><span class="kw">let </span>process_annotated_tags = sync_cmd.with_annotated;
 <a href=#176 id=176 data-nosnippet>176</a>                <span class="kw">if </span>sync_cmd.all {
 <a href=#177 id=177 data-nosnippet>177</a>                    client.sync_all_tags(process_annotated_tags, repos).<span class="kw">await</span><span class="question-mark">?</span>;
 <a href=#178 id=178 data-nosnippet>178</a>                } <span class="kw">else if let </span><span class="prelude-val">Some</span>(repository) = repository {

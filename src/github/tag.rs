@@ -37,29 +37,35 @@ use std::fmt::Write as _;
 
 use crate::github::client::GithubClient;
 
+/// The root level response from github
 #[derive(Deserialize)]
 pub struct RepoResponse {
     pub data: RepoData,
 }
+/// Struct to deserialize the repository data into
 #[derive(Deserialize)]
 pub struct RepoData {
     pub repository: Repository,
 }
+/// An actual repository containing its parent if it has one
 #[derive(Deserialize)]
 pub struct Repository {
     pub parent: Option<ParentRepo>,
     pub refs: Refs,
 }
+/// A parent repository
 #[derive(Deserialize)]
 pub struct ParentRepo {
     pub url: String,
 }
+/// The refs in a repository
 #[derive(Deserialize)]
 pub struct Refs {
     pub nodes: Vec<TagNode>,
     #[serde(rename = "pageInfo")]
     pub page_info: PageInfo,
 }
+/// Information about pagination needed for queries
 #[derive(Deserialize)]
 pub struct PageInfo {
     #[serde(rename = "hasNextPage")]
@@ -67,11 +73,13 @@ pub struct PageInfo {
     #[serde(rename = "endCursor")]
     pub end_cursor: Option<String>,
 }
+/// The actual tag node
 #[derive(Deserialize)]
 pub struct TagNode {
     pub name: String,
     pub target: TagTarget,
 }
+/// Information about the tag, particularly it's type (annotated or lightweight)
 #[derive(Deserialize)]
 pub struct TagTarget {
     #[serde(rename = "__typename")]

@@ -18,7 +18,7 @@
 <a href=#18 id=18 data-nosnippet>18</a>*/
 <a href=#19 id=19 data-nosnippet>19</a></span><span class="kw">use </span><span class="kw">crate</span>::error::GitError;
 <a href=#20 id=20 data-nosnippet>20</a><span class="kw">use </span><span class="kw">crate</span>::utils::user::UserDetails;
-<a href=#21 id=21 data-nosnippet>21</a><span class="kw">use </span>dirs::home_dir;
+<a href=#21 id=21 data-nosnippet>21</a><span class="kw">use </span>microxdg::Xdg;
 <a href=#22 id=22 data-nosnippet>22</a><span class="kw">use </span>serde::Deserialize;
 <a href=#23 id=23 data-nosnippet>23</a><span class="kw">use </span>std::collections::HashSet;
 <a href=#24 id=24 data-nosnippet>24</a><span class="kw">use </span>std::fs;
@@ -114,7 +114,7 @@
 <a href=#114 id=114 data-nosnippet>114</a>        }
 <a href=#115 id=115 data-nosnippet>115</a>    }
 <a href=#116 id=116 data-nosnippet>116</a>    <span class="doccomment">/// Try to load the config from expected locations. Checks in the current directory first,
-<a href=#117 id=117 data-nosnippet>117</a>    /// then checks for the configuration file in ~/.config/ next. If all else fails, it sets
+<a href=#117 id=117 data-nosnippet>117</a>    /// then checks for the configuration file in `$XDG_CONFIG_HOME`, then the user's $HOME/.config/. If all else fails, it sets
 <a href=#118 id=118 data-nosnippet>118</a>    /// everything to the default.
 <a href=#119 id=119 data-nosnippet>119</a>    /// In the default case, as long as you have the `GITHUB_TOKEN` defined as an environment
 <a href=#120 id=120 data-nosnippet>120</a>    /// variable, you can still perform operations through the github api.
@@ -123,75 +123,81 @@
 <a href=#123 id=123 data-nosnippet>123</a>        <span class="kw">if let </span><span class="prelude-val">Ok</span>(local_config) = Config::from_file(Path::new(CONFIG_NAME)) {
 <a href=#124 id=124 data-nosnippet>124</a>            <span class="kw">return </span>local_config;
 <a href=#125 id=125 data-nosnippet>125</a>        }
-<a href=#126 id=126 data-nosnippet>126</a>        <span class="kw">if let </span><span class="prelude-val">Some</span>(home_dir) = home_dir() {
-<a href=#127 id=127 data-nosnippet>127</a>            <span class="kw">let </span>home_config = home_dir.join(<span class="string">".config"</span>).join(CONFIG_NAME);
-<a href=#128 id=128 data-nosnippet>128</a>            <span class="kw">if let </span><span class="prelude-val">Ok</span>(home_config) = Config::from_file(<span class="kw-2">&amp;</span>home_config) {
-<a href=#129 id=129 data-nosnippet>129</a>                <span class="kw">return </span>home_config;
-<a href=#130 id=130 data-nosnippet>130</a>            }
-<a href=#131 id=131 data-nosnippet>131</a>        }
-<a href=#132 id=132 data-nosnippet>132</a>        <span class="comment">// Config not found, return the default
-<a href=#133 id=133 data-nosnippet>133</a>        </span><span class="macro">eprintln!</span>(<span class="string">"Unable to find {CONFIG_NAME}, setting values to their default"</span>);
-<a href=#134 id=134 data-nosnippet>134</a>        Config::default()
-<a href=#135 id=135 data-nosnippet>135</a>    }
-<a href=#136 id=136 data-nosnippet>136</a>
-<a href=#137 id=137 data-nosnippet>137</a>    <span class="doccomment">/// Get a github api token
-<a href=#138 id=138 data-nosnippet>138</a>    </span><span class="kw">pub fn </span>get_github_token(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;String&gt; {
-<a href=#139 id=139 data-nosnippet>139</a>        <span class="comment">// Check for the env variable GITHUB_TOKEN
-<a href=#140 id=140 data-nosnippet>140</a>        </span><span class="kw">if let </span><span class="prelude-val">Ok</span>(token) = std::env::var(<span class="string">"GITHUB_TOKEN"</span>) {
-<a href=#141 id=141 data-nosnippet>141</a>            <span class="kw">return </span><span class="prelude-val">Some</span>(token);
-<a href=#142 id=142 data-nosnippet>142</a>        }
-<a href=#143 id=143 data-nosnippet>143</a>
-<a href=#144 id=144 data-nosnippet>144</a>        <span class="comment">// Use the config file value if the above isn't defined
-<a href=#145 id=145 data-nosnippet>145</a>        </span><span class="self">self</span>.github.token.clone()
-<a href=#146 id=146 data-nosnippet>146</a>    }
-<a href=#147 id=147 data-nosnippet>147</a>    <span class="doccomment">/// Get git information about the current user, first from the environment,
-<a href=#148 id=148 data-nosnippet>148</a>    /// then from the toml configuration, and as a last resort, from git itself.
-<a href=#149 id=149 data-nosnippet>149</a>    </span><span class="attr">#[allow(dead_code)]
-<a href=#150 id=150 data-nosnippet>150</a>    </span><span class="kw">pub fn </span>get_user_info(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;UserDetails&gt; {
-<a href=#151 id=151 data-nosnippet>151</a>        <span class="kw">let </span>name = <span class="kw">if let </span><span class="prelude-val">Ok</span>(name) = std::env::var(<span class="string">"GIT_USER"</span>) {
-<a href=#152 id=152 data-nosnippet>152</a>            <span class="prelude-val">Some</span>(name)
-<a href=#153 id=153 data-nosnippet>153</a>        } <span class="kw">else </span>{
-<a href=#154 id=154 data-nosnippet>154</a>            <span class="self">self</span>.info.name.clone()
-<a href=#155 id=155 data-nosnippet>155</a>        };
-<a href=#156 id=156 data-nosnippet>156</a>        <span class="kw">let </span>email = <span class="kw">if let </span><span class="prelude-val">Ok</span>(email) = std::env::var(<span class="string">"GIT_EMAIL"</span>) {
-<a href=#157 id=157 data-nosnippet>157</a>            <span class="prelude-val">Some</span>(email)
-<a href=#158 id=158 data-nosnippet>158</a>        } <span class="kw">else </span>{
-<a href=#159 id=159 data-nosnippet>159</a>            <span class="self">self</span>.info.email.clone()
-<a href=#160 id=160 data-nosnippet>160</a>        };
-<a href=#161 id=161 data-nosnippet>161</a>
-<a href=#162 id=162 data-nosnippet>162</a>        <span class="kw">match </span>(name, email) {
-<a href=#163 id=163 data-nosnippet>163</a>            (<span class="prelude-val">Some</span>(name), <span class="prelude-val">Some</span>(email)) =&gt; <span class="prelude-val">Some</span>(UserDetails::new(name, email)),
-<a href=#164 id=164 data-nosnippet>164</a>            <span class="kw">_ </span>=&gt; UserDetails::new_from_git().ok(),
-<a href=#165 id=165 data-nosnippet>165</a>        }
-<a href=#166 id=166 data-nosnippet>166</a>    }
+<a href=#126 id=126 data-nosnippet>126</a>        <span class="kw">let </span>xdg = Xdg::new();
+<a href=#127 id=127 data-nosnippet>127</a>        <span class="kw">match </span>xdg {
+<a href=#128 id=128 data-nosnippet>128</a>            <span class="prelude-val">Ok</span>(xdg) =&gt; {
+<a href=#129 id=129 data-nosnippet>129</a>                <span class="kw">if let </span><span class="prelude-val">Ok</span>(xdg_config) = xdg.config_file(CONFIG_NAME) {
+<a href=#130 id=130 data-nosnippet>130</a>                    <span class="kw">if let </span><span class="prelude-val">Ok</span>(home_config) = Config::from_file(<span class="kw-2">&amp;</span>xdg_config) {
+<a href=#131 id=131 data-nosnippet>131</a>                        <span class="kw">return </span>home_config;
+<a href=#132 id=132 data-nosnippet>132</a>                    }
+<a href=#133 id=133 data-nosnippet>133</a>                }
+<a href=#134 id=134 data-nosnippet>134</a>            }
+<a href=#135 id=135 data-nosnippet>135</a>            <span class="prelude-val">Err</span>(e) =&gt; <span class="macro">eprintln!</span>(<span class="string">"Unable to get $HOME or $XDG_CONFIG_HOME: {e}"</span>),
+<a href=#136 id=136 data-nosnippet>136</a>        }
+<a href=#137 id=137 data-nosnippet>137</a>
+<a href=#138 id=138 data-nosnippet>138</a>        <span class="comment">// Config not found, return the default
+<a href=#139 id=139 data-nosnippet>139</a>        </span><span class="macro">eprintln!</span>(<span class="string">"Unable to find {CONFIG_NAME}, setting values to their default"</span>);
+<a href=#140 id=140 data-nosnippet>140</a>        Config::default()
+<a href=#141 id=141 data-nosnippet>141</a>    }
+<a href=#142 id=142 data-nosnippet>142</a>
+<a href=#143 id=143 data-nosnippet>143</a>    <span class="doccomment">/// Get a github api token
+<a href=#144 id=144 data-nosnippet>144</a>    </span><span class="kw">pub fn </span>get_github_token(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;String&gt; {
+<a href=#145 id=145 data-nosnippet>145</a>        <span class="comment">// Check for the env variable GITHUB_TOKEN
+<a href=#146 id=146 data-nosnippet>146</a>        </span><span class="kw">if let </span><span class="prelude-val">Ok</span>(token) = std::env::var(<span class="string">"GITHUB_TOKEN"</span>) {
+<a href=#147 id=147 data-nosnippet>147</a>            <span class="kw">return </span><span class="prelude-val">Some</span>(token);
+<a href=#148 id=148 data-nosnippet>148</a>        }
+<a href=#149 id=149 data-nosnippet>149</a>
+<a href=#150 id=150 data-nosnippet>150</a>        <span class="comment">// Use the config file value if the above isn't defined
+<a href=#151 id=151 data-nosnippet>151</a>        </span><span class="self">self</span>.github.token.clone()
+<a href=#152 id=152 data-nosnippet>152</a>    }
+<a href=#153 id=153 data-nosnippet>153</a>    <span class="doccomment">/// Get git information about the current user, first from the environment,
+<a href=#154 id=154 data-nosnippet>154</a>    /// then from the toml configuration, and as a last resort, from git itself.
+<a href=#155 id=155 data-nosnippet>155</a>    </span><span class="attr">#[allow(dead_code)]
+<a href=#156 id=156 data-nosnippet>156</a>    </span><span class="kw">pub fn </span>get_user_info(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;UserDetails&gt; {
+<a href=#157 id=157 data-nosnippet>157</a>        <span class="kw">let </span>name = <span class="kw">if let </span><span class="prelude-val">Ok</span>(name) = std::env::var(<span class="string">"GIT_USER"</span>) {
+<a href=#158 id=158 data-nosnippet>158</a>            <span class="prelude-val">Some</span>(name)
+<a href=#159 id=159 data-nosnippet>159</a>        } <span class="kw">else </span>{
+<a href=#160 id=160 data-nosnippet>160</a>            <span class="self">self</span>.info.name.clone()
+<a href=#161 id=161 data-nosnippet>161</a>        };
+<a href=#162 id=162 data-nosnippet>162</a>        <span class="kw">let </span>email = <span class="kw">if let </span><span class="prelude-val">Ok</span>(email) = std::env::var(<span class="string">"GIT_EMAIL"</span>) {
+<a href=#163 id=163 data-nosnippet>163</a>            <span class="prelude-val">Some</span>(email)
+<a href=#164 id=164 data-nosnippet>164</a>        } <span class="kw">else </span>{
+<a href=#165 id=165 data-nosnippet>165</a>            <span class="self">self</span>.info.email.clone()
+<a href=#166 id=166 data-nosnippet>166</a>        };
 <a href=#167 id=167 data-nosnippet>167</a>
-<a href=#168 id=168 data-nosnippet>168</a>    <span class="doccomment">/// Get the repo owner
-<a href=#169 id=169 data-nosnippet>169</a>    </span><span class="attr">#[allow(dead_code)]
-<a href=#170 id=170 data-nosnippet>170</a>    </span><span class="kw">pub fn </span>get_owner(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;String&gt; {
-<a href=#171 id=171 data-nosnippet>171</a>        <span class="kw">if let </span><span class="prelude-val">Ok</span>(name) = std::env::var(<span class="string">"GIT_OWNER"</span>) {
-<a href=#172 id=172 data-nosnippet>172</a>            <span class="kw">return </span><span class="prelude-val">Some</span>(name);
-<a href=#173 id=173 data-nosnippet>173</a>        }
-<a href=#174 id=174 data-nosnippet>174</a>        <span class="self">self</span>.git.owner.clone()
-<a href=#175 id=175 data-nosnippet>175</a>    }
-<a href=#176 id=176 data-nosnippet>176</a>    <span class="doccomment">/// Get a vector of repositories defined in the config file that are forks
-<a href=#177 id=177 data-nosnippet>177</a>    </span><span class="kw">pub fn </span>get_fork_repositories(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; Vec&lt;String&gt; {
-<a href=#178 id=178 data-nosnippet>178</a>        <span class="self">self</span>.repos.fork.clone().unwrap_or_default()
-<a href=#179 id=179 data-nosnippet>179</a>    }
-<a href=#180 id=180 data-nosnippet>180</a>    <span class="doccomment">/// Get a vector of private repositories defined in the config file
-<a href=#181 id=181 data-nosnippet>181</a>    </span><span class="kw">pub fn </span>get_private_repositories(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; Vec&lt;String&gt; {
-<a href=#182 id=182 data-nosnippet>182</a>        <span class="self">self</span>.repos.private.clone().unwrap_or_default()
-<a href=#183 id=183 data-nosnippet>183</a>    }
-<a href=#184 id=184 data-nosnippet>184</a>    <span class="kw">pub fn </span>get_public_repositories(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; Vec&lt;String&gt; {
-<a href=#185 id=185 data-nosnippet>185</a>        <span class="self">self</span>.repos.public.clone().unwrap_or_default()
-<a href=#186 id=186 data-nosnippet>186</a>    }
-<a href=#187 id=187 data-nosnippet>187</a>    <span class="kw">pub fn </span>get_all_repositories(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; Vec&lt;String&gt; {
-<a href=#188 id=188 data-nosnippet>188</a>        <span class="self">self</span>.repos
-<a href=#189 id=189 data-nosnippet>189</a>            .public
-<a href=#190 id=190 data-nosnippet>190</a>            .clone()
-<a href=#191 id=191 data-nosnippet>191</a>            .unwrap_or_default()
-<a href=#192 id=192 data-nosnippet>192</a>            .into_iter()
-<a href=#193 id=193 data-nosnippet>193</a>            .chain(<span class="self">self</span>.get_fork_repositories())
-<a href=#194 id=194 data-nosnippet>194</a>            .chain(<span class="self">self</span>.get_private_repositories())
-<a href=#195 id=195 data-nosnippet>195</a>            .collect()
-<a href=#196 id=196 data-nosnippet>196</a>    }
-<a href=#197 id=197 data-nosnippet>197</a>}</code></pre></div></section></main></body></html>
+<a href=#168 id=168 data-nosnippet>168</a>        <span class="kw">match </span>(name, email) {
+<a href=#169 id=169 data-nosnippet>169</a>            (<span class="prelude-val">Some</span>(name), <span class="prelude-val">Some</span>(email)) =&gt; <span class="prelude-val">Some</span>(UserDetails::new(name, email)),
+<a href=#170 id=170 data-nosnippet>170</a>            <span class="kw">_ </span>=&gt; UserDetails::new_from_git().ok(),
+<a href=#171 id=171 data-nosnippet>171</a>        }
+<a href=#172 id=172 data-nosnippet>172</a>    }
+<a href=#173 id=173 data-nosnippet>173</a>
+<a href=#174 id=174 data-nosnippet>174</a>    <span class="doccomment">/// Get the repo owner
+<a href=#175 id=175 data-nosnippet>175</a>    </span><span class="attr">#[allow(dead_code)]
+<a href=#176 id=176 data-nosnippet>176</a>    </span><span class="kw">pub fn </span>get_owner(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;String&gt; {
+<a href=#177 id=177 data-nosnippet>177</a>        <span class="kw">if let </span><span class="prelude-val">Ok</span>(name) = std::env::var(<span class="string">"GIT_OWNER"</span>) {
+<a href=#178 id=178 data-nosnippet>178</a>            <span class="kw">return </span><span class="prelude-val">Some</span>(name);
+<a href=#179 id=179 data-nosnippet>179</a>        }
+<a href=#180 id=180 data-nosnippet>180</a>        <span class="self">self</span>.git.owner.clone()
+<a href=#181 id=181 data-nosnippet>181</a>    }
+<a href=#182 id=182 data-nosnippet>182</a>    <span class="doccomment">/// Get a vector of repositories defined in the config file that are forks
+<a href=#183 id=183 data-nosnippet>183</a>    </span><span class="kw">pub fn </span>get_fork_repositories(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; Vec&lt;String&gt; {
+<a href=#184 id=184 data-nosnippet>184</a>        <span class="self">self</span>.repos.fork.clone().unwrap_or_default()
+<a href=#185 id=185 data-nosnippet>185</a>    }
+<a href=#186 id=186 data-nosnippet>186</a>    <span class="doccomment">/// Get a vector of private repositories defined in the config file
+<a href=#187 id=187 data-nosnippet>187</a>    </span><span class="kw">pub fn </span>get_private_repositories(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; Vec&lt;String&gt; {
+<a href=#188 id=188 data-nosnippet>188</a>        <span class="self">self</span>.repos.private.clone().unwrap_or_default()
+<a href=#189 id=189 data-nosnippet>189</a>    }
+<a href=#190 id=190 data-nosnippet>190</a>    <span class="kw">pub fn </span>get_public_repositories(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; Vec&lt;String&gt; {
+<a href=#191 id=191 data-nosnippet>191</a>        <span class="self">self</span>.repos.public.clone().unwrap_or_default()
+<a href=#192 id=192 data-nosnippet>192</a>    }
+<a href=#193 id=193 data-nosnippet>193</a>    <span class="kw">pub fn </span>get_all_repositories(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; Vec&lt;String&gt; {
+<a href=#194 id=194 data-nosnippet>194</a>        <span class="self">self</span>.repos
+<a href=#195 id=195 data-nosnippet>195</a>            .public
+<a href=#196 id=196 data-nosnippet>196</a>            .clone()
+<a href=#197 id=197 data-nosnippet>197</a>            .unwrap_or_default()
+<a href=#198 id=198 data-nosnippet>198</a>            .into_iter()
+<a href=#199 id=199 data-nosnippet>199</a>            .chain(<span class="self">self</span>.get_fork_repositories())
+<a href=#200 id=200 data-nosnippet>200</a>            .chain(<span class="self">self</span>.get_private_repositories())
+<a href=#201 id=201 data-nosnippet>201</a>            .collect()
+<a href=#202 id=202 data-nosnippet>202</a>    }
+<a href=#203 id=203 data-nosnippet>203</a>}</code></pre></div></section></main></body></html>

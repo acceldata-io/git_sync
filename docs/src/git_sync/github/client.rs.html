@@ -32,8 +32,8 @@
 <a href=#32 id=32 data-nosnippet>32</a><span class="kw">use </span>std::io::IsTerminal;
 <a href=#33 id=33 data-nosnippet>33</a><span class="kw">use </span>std::sync::Arc;
 <a href=#34 id=34 data-nosnippet>34</a><span class="kw">use </span>tokio::sync::OnceCell;
-<a href=#35 id=35 data-nosnippet>35</a><span class="doccomment">/// Contains information about tags for a forked repo, its parent,
-<a href=#36 id=36 data-nosnippet>36</a>/// and the tags that are missing from the fork
+<a href=#35 id=35 data-nosnippet>35</a><span class="doccomment">/// Contains information about tags that are missing for a forked repo.
+<a href=#36 id=36 data-nosnippet>36</a>
 <a href=#37 id=37 data-nosnippet>37</a></span><span class="attr">#[derive(Debug)]
 <a href=#38 id=38 data-nosnippet>38</a></span><span class="kw">pub struct </span>Comparison {
 <a href=#39 id=39 data-nosnippet>39</a>    <span class="kw">pub </span>missing_in_fork: IndexSet&lt;TagInfo&gt;,
@@ -253,18 +253,21 @@
 <a href=#253 id=253 data-nosnippet>253</a>            }
 <a href=#254 id=254 data-nosnippet>254</a>
 <a href=#255 id=255 data-nosnippet>255</a>            message.push_str(<span class="string">"---"</span>);
-<a href=#256 id=256 data-nosnippet>256</a>            <span class="kw">if </span>!message.is_empty() &amp;&amp; !<span class="self">self</span>.webhook_url.is_empty() &amp;&amp; !<span class="self">self</span>.webhook_url.trim().is_empty(){
-<a href=#257 id=257 data-nosnippet>257</a>                <span class="comment">// Post the message to slack
-<a href=#258 id=258 data-nosnippet>258</a>                </span><span class="kw">let </span><span class="kw-2">mut </span>map = HashMap::new();
-<a href=#259 id=259 data-nosnippet>259</a>                map.insert(<span class="string">"text"</span>.to_string(), message);
-<a href=#260 id=260 data-nosnippet>260</a>                <span class="kw">let </span>response = send_slack_message(<span class="self">self</span>.webhook_url.clone(), map).<span class="kw">await</span>;
-<a href=#261 id=261 data-nosnippet>261</a>                <span class="kw">if </span>response.is_err() {
-<a href=#262 id=262 data-nosnippet>262</a>                    <span class="macro">eprintln!</span>(
-<a href=#263 id=263 data-nosnippet>263</a>                        <span class="string">"Failed to post message to slack: {}"</span>,
-<a href=#264 id=264 data-nosnippet>264</a>                        response.err().unwrap()
-<a href=#265 id=265 data-nosnippet>265</a>                    );
-<a href=#266 id=266 data-nosnippet>266</a>                }
-<a href=#267 id=267 data-nosnippet>267</a>            }
-<a href=#268 id=268 data-nosnippet>268</a>        }
-<a href=#269 id=269 data-nosnippet>269</a>    }
-<a href=#270 id=270 data-nosnippet>270</a>}</code></pre></div></section></main></body></html>
+<a href=#256 id=256 data-nosnippet>256</a>            <span class="kw">if </span>!message.is_empty()
+<a href=#257 id=257 data-nosnippet>257</a>                &amp;&amp; !<span class="self">self</span>.webhook_url.is_empty()
+<a href=#258 id=258 data-nosnippet>258</a>                &amp;&amp; !<span class="self">self</span>.webhook_url.trim().is_empty()
+<a href=#259 id=259 data-nosnippet>259</a>            {
+<a href=#260 id=260 data-nosnippet>260</a>                <span class="comment">// Post the message to slack
+<a href=#261 id=261 data-nosnippet>261</a>                </span><span class="kw">let </span><span class="kw-2">mut </span>map = HashMap::new();
+<a href=#262 id=262 data-nosnippet>262</a>                map.insert(<span class="string">"text"</span>.to_string(), message);
+<a href=#263 id=263 data-nosnippet>263</a>                <span class="kw">let </span>response = send_slack_message(<span class="self">self</span>.webhook_url.clone(), map).<span class="kw">await</span>;
+<a href=#264 id=264 data-nosnippet>264</a>                <span class="kw">if </span>response.is_err() {
+<a href=#265 id=265 data-nosnippet>265</a>                    <span class="macro">eprintln!</span>(
+<a href=#266 id=266 data-nosnippet>266</a>                        <span class="string">"Failed to post message to slack: {}"</span>,
+<a href=#267 id=267 data-nosnippet>267</a>                        response.err().unwrap()
+<a href=#268 id=268 data-nosnippet>268</a>                    );
+<a href=#269 id=269 data-nosnippet>269</a>                }
+<a href=#270 id=270 data-nosnippet>270</a>            }
+<a href=#271 id=271 data-nosnippet>271</a>        }
+<a href=#272 id=272 data-nosnippet>272</a>    }
+<a href=#273 id=273 data-nosnippet>273</a>}</code></pre></div></section></main></body></html>

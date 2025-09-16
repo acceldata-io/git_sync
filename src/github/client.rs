@@ -32,8 +32,8 @@ use std::fmt::Write as _;
 use std::io::IsTerminal;
 use std::sync::Arc;
 use tokio::sync::OnceCell;
-/// Contains information about tags for a forked repo, its parent,
-/// and the tags that are missing from the fork
+/// Contains information about tags that are missing for a forked repo.
+
 #[derive(Debug)]
 pub struct Comparison {
     pub missing_in_fork: IndexSet<TagInfo>,

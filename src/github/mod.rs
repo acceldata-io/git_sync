@@ -16,12 +16,20 @@ KIND, either express or implied.  See the License for the
 specific language governing permissions and limitations
 under the License.
 */
+/// Backup repositories
 pub mod backup;
+/// Managa branches for repositories
 pub mod branch;
+/// Run various checks and sanity checks for a repository
 pub mod check;
+/// The top level definition for the Github client
 pub mod client;
+/// Manages forked repositories, particularly updating the fork to match the upstream repository
 pub mod fork;
 pub mod match_args;
+/// Used to manage pull requests for libraries
 pub mod pr;
+/// Manage releases
 pub mod release;
+/// Manage tags
 pub mod tag;
