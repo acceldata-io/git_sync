@@ -18,7 +18,7 @@ under the License.
 */
 use crate::error::GitError;
 use crate::utils::user::UserDetails;
-use dirs::home_dir;
+use microxdg::Xdg;
 use serde::Deserialize;
 use std::collections::HashSet;
 use std::fs;
@@ -114,7 +114,7 @@ impl Config {
         }
     }
     /// Try to load the config from expected locations. Checks in the current directory first,
-    /// then checks for the configuration file in ~/.config/ next. If all else fails, it sets
+    /// then checks for the configuration file in `$XDG_CONFIG_HOME`, then the user's $HOME/.config/. If all else fails, it sets
     /// everything to the default.
     /// In the default case, as long as you have the `GITHUB_TOKEN` defined as an environment
     /// variable, you can still perform operations through the github api.
@@ -123,12 +123,18 @@ impl Config {
         if let Ok(local_config) = Config::from_file(Path::new(CONFIG_NAME)) {
             return local_config;
         }
-        if let Some(home_dir) = home_dir() {
-            let home_config = home_dir.join(".config").join(CONFIG_NAME);
-            if let Ok(home_config) = Config::from_file(&home_config) {
-                return home_config;
+        let xdg = Xdg::new();
+        match xdg {
+            Ok(xdg) => {
+                if let Ok(xdg_config) = xdg.config_file(CONFIG_NAME) {
+                    if let Ok(home_config) = Config::from_file(&xdg_config) {
+                        return home_config;
+                    }
+                }
             }
+            Err(e) => eprintln!("Unable to get $HOME or $XDG_CONFIG_HOME: {e}"),
         }
+
         // Config not found, return the default
         eprintln!("Unable to find {CONFIG_NAME}, setting values to their default");
         Config::default()

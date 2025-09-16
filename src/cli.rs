@@ -596,7 +596,8 @@ pub enum Command {
     /// Generate a default config
     #[command(arg_required_else_help = true)]
     Config {
-        /// Path to save the config file.
+        /// Path to save the config file. If not specified, it will default to
+        /// $XDG_CONFIG_HOME/git-manage.toml or $HOME/.config/git-manage.toml
         #[arg(short, long)]
         file: Option<PathBuf>,
         /// Overwrite existing config file if it exists

@@ -16,12 +16,11 @@ KIND, either express or implied.  See the License for the
 specific language governing permissions and limitations
 under the License.
 */
-use std::env;
-use std::fs;
-use std::path::PathBuf;
-
 use crate::config::CONFIG_NAME;
 use crate::error::GitError;
+use microxdg::Xdg;
+use std::fs;
+use std::path::PathBuf;
 /// A basic sample configuration that can be initialized
 /// by using the `config` command
 const SAMPLE_CONFIG: &str = r#"#Git repo syncing configuration
@@ -73,22 +72,16 @@ branch_blacklist = ["main", "master"]
 /// Create a sample config file
 pub fn generate_config(path: Option<&PathBuf>, force: bool) -> Result<PathBuf, GitError> {
     // This is only needed if a path isn't provided
-    let home_dir = dirs::home_dir();
-    let config_path = if let Some(config) = home_dir {
-        let config_dir = config.join(".config").join(CONFIG_NAME);
-        if !config_dir.exists() {
-            fs::create_dir(config_dir.clone())?;
-        }
-        config_dir
+    let xdg = Xdg::new();
+    let config_path = if let Ok(xdg) = xdg {
+        let f = xdg.config_file(CONFIG_NAME);
+        f.ok()
     } else {
-        // This is the current directory where this tool is being run
-        env::current_dir()
-            .expect("Failed to get current directory")
-            .join(CONFIG_NAME)
-        //PathBuf::from(CONFIG_NAME)
+        None
     };
-    match (path, force) {
-        (Some(path), true) => {
+
+    match (path, force, config_path) {
+        (Some(path), true, _) => {
             if path.exists() {
                 let mut backup = path.clone().into_os_string();
                 backup.push(".bak");
@@ -97,7 +90,7 @@ pub fn generate_config(path: Option<&PathBuf>, force: bool) -> Result<PathBuf, G
             fs::write(path, SAMPLE_CONFIG)?;
             Ok(path.clone())
         }
-        (Some(path), false) => {
+        (Some(path), false, _) => {
             if path.exists() {
                 return Err(GitError::Other(format!(
                     "Config file already exists at {}. Use --force to overwrite",
@@ -107,7 +100,7 @@ pub fn generate_config(path: Option<&PathBuf>, force: bool) -> Result<PathBuf, G
             fs::write(path, SAMPLE_CONFIG)?;
             Ok(path.clone())
         }
-        (None, true) => {
+        (None, true, Some(config_path)) => {
             if config_path.exists() {
                 let mut backup = config_path.clone().into_os_string();
                 backup.push(".bak");
@@ -116,7 +109,7 @@ pub fn generate_config(path: Option<&PathBuf>, force: bool) -> Result<PathBuf, G
             fs::write(&config_path, SAMPLE_CONFIG)?;
             Ok(config_path)
         }
-        (None, false) => {
+        (None, false, Some(config_path)) => {
             println!("{}", config_path.display());
             if config_path.exists() {
                 return Err(GitError::Other(format!(
@@ -126,6 +119,11 @@ pub fn generate_config(path: Option<&PathBuf>, force: bool) -> Result<PathBuf, G
             }
             fs::write(&config_path, SAMPLE_CONFIG)?;
             Ok(config_path)
+        }
+        (None, _, None) => {
+            panic!(
+                "No config file specified and $XDG_CONFIG_HOME or $HOME/.config could not be determined. Cannot continue"
+            );
         }
     }
     /*
