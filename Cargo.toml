@@ -2,7 +2,7 @@
 authors = ["Jeffrey Smith <jeffrey.smith7@gmail.com>"]
 edition = "2024"
 license = "Apache-2.0"
-name    = "git_sync"
+name = "git_sync"
 version = "0.2.0"
 
 
@@ -20,7 +20,7 @@ hyper = { version = "1.7.0", default-features = false }
 iana-time-zone = "0.1"
 indexmap = { version = "2.11", features = ["serde"] }
 indicatif = { version = "0.18.0", features = ["tokio"] }
-octocrab = { version = "0.44.1", default-features = false, features = [
+octocrab = { version = "0.45", default-features = false, features = [
   "default-client",
   "follow-redirect",
   "retry",
@@ -68,12 +68,12 @@ sqlx = { version = "0.8.6", optional = true, default-features = false, features 
 wiremock = "0.6"
 
 [features]
-aws      = ["dep:aws-sdk-s3"]
-default  = ["aws", "slack"]
+aws = ["dep:aws-sdk-s3"]
+default = ["aws", "slack"]
 postgres = ["sql", "sqlx/postgres"]
-slack    = []
-sql      = ["dep:sqlx"]
-sqlite   = ["sql", "sqlx/sqlite"]
+slack = []
+sql = ["dep:sqlx"]
+sqlite = ["sql", "sqlx/sqlite"]
 
 [profile.release]
 lto = true
