@@ -1,6 +1,6 @@
 [target.x86_64-unknown-linux-musl]
 linker = "x86_64-linux-musl-gcc"
-ar = "x86_64-linux-musl-ar"
+ar     = "x86_64-linux-musl-ar"
 [target.aarch64-unknown-linux-musl]
 linker = "aarch64-unknown-linux-musl"
-ar = "aarch64-linux-musl-ar"
+ar     = "aarch64-linux-musl-ar"

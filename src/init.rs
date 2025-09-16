@@ -28,21 +28,43 @@ const SAMPLE_CONFIG: &str = r#"#Git repo syncing configuration
 [github]
 #token = "Add your github api token here"
 
+# The 'git' section here doesn't currently do anything
 [git]
 #default_directory = "/path/to/repos"
 #Use shallow clones by default to use less disk space,
 #bandwidth, and decrease processing time
 shallow_by_default = true
 #owner = "set owner organization/user here"
+#email = "email here"
 
+# Needed if you want slack integration
+# webhook_url should be an https address
+[slack]
+webhook_url = ""
+
+# This can be used to change who is commiting changes and creating
+# releases, instead of using the user who is already set up for git
+# in the environment.
 [info]
 #name = "set the name of who is commiting changes"
 #email = "set the email of who is commiting changes"
 
+# All repositories should be an https url to the repository
+# Any operation that needs an ssh url will be automatically
+# converted.
 [repos]
 #fork = ["repo1", "repo2"]
+# This is for forked repositories that do not have a configured parent repository.
+# This is a map of {"forked_url": "real_upstream_url"}
+#fork_with_workaround = {}
 #private = ["repo1", "repo2"]
 #public = []
+
+[misc]
+# A list of branches that should be ignored when performing
+# a search of stale branches, AKA branches that should never be
+# reported as being old, no matter when they were last updated.
+branch_blacklist = ["main", "master"]
 
 "#;
 

@@ -204,10 +204,11 @@ impl GithubClient {
             repo: format!("{owner}/{repo}"),
         })
     }
+    /// Display the results of the various checks into a nice table
     pub fn display_check_results(
         header: Vec<String>,
         rows: Vec<Vec<String>>,
-        rules: &Vec<BranchProtectionRule>,
+        rules: &[BranchProtectionRule],
         license: Option<&LicenseInfo>,
         repo: &str,
     ) {
@@ -234,7 +235,7 @@ impl GithubClient {
     pub fn display_all_check_results(
         header: Vec<String>,
         rows: Vec<Vec<String>>,
-        rules: &Vec<BranchProtectionRule>,
+        rules: &[BranchProtectionRule],
         license: Option<&LicenseInfo>,
         title: &str,
         repo: &str,

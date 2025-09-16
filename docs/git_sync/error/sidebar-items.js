@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["ErrorCategory","GitError"],"fn":["is_network_error","is_retryable","octocrab_error_info"],"struct":["UserError"]};

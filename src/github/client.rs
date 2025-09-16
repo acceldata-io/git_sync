@@ -196,6 +196,8 @@ impl GithubClient {
             message.push(msg);
         }
     }
+    /// Append an error message to be sent to slack at the end. The message will only be sent if
+    /// slack integartion is enabled and the webhho url is set.
     pub async fn append_slack_error(&self, msg: String) {
         #[cfg(feature = "slack")]
         {
@@ -251,8 +253,10 @@ impl GithubClient {
             }
 
             message.push_str("---");
-
-            if !message.is_empty() && !self.webhook_url.is_empty() {
+            if !message.is_empty()
+                && !self.webhook_url.is_empty()
+                && !self.webhook_url.trim().is_empty()
+            {
                 // Post the message to slack
                 let mut map = HashMap::new();
                 map.insert("text".to_string(), message);

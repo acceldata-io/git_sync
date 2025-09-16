@@ -38,11 +38,10 @@ use aws_sdk_s3::{
     types::{CompletedMultipartUpload, CompletedPart},
 };
 
+#[cfg(feature = "aws")]
 const PART_SIZE: usize = 64 * 1024 * 1024;
 
-const MIN_SIZE: usize = 5 * 1024 * 1024;
 impl GithubClient {
-    #[allow(too_many_lines)]
     pub async fn backup_repo(&self, url: String, path: &Path) -> Result<(), GitError> {
         let semaphore_lock = Arc::clone(&self.semaphore).acquire_owned().await?;
         let canonical_path = if let Ok(p) = path.canonicalize() {
@@ -314,7 +313,6 @@ impl GithubClient {
     #[cfg(feature = "aws")]
     /// Upload a backup to s3. This requires your aws credentials to be configured in the
     /// environment
-    #[allow(too_many_lines)]
     pub async fn backup_to_s3(
         &self,
         file_path: &Path,

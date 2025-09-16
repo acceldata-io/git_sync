@@ -110,35 +110,7 @@ fn opt_bool(b: Option<bool>) -> &'static str {
     }
 }
 
-impl BranchProtectionRule {
-    pub fn print(&self, name: &str) {
-        println!("Branch Protection Rule for '{name}'");
-        println!("\tPattern: {}", self.pattern.as_deref().unwrap_or("N/A"));
-        println!("\tAdmin enforced: {}", opt_bool(self.admin_enforced));
-        println!(
-            "\tRequire PR approving reviews: {}",
-            opt_bool(self.requires_approving_reviews)
-        );
-        if let Some(count) = self.requires_approving_review_count {
-            println!("\tRequired PR review count: {count}");
-        } else {
-            println!("\tRequired PR review count: None");
-        }
-        println!(
-            "\tRequire status checks: {}",
-            opt_bool(self.requires_status_checks)
-        );
-        println!(
-            "\tRequire strict status checks: {}",
-            opt_bool(self.requires_strict_status_checks)
-        );
-        println!("\tRestrict pushes: {}", opt_bool(self.restricts_pushes));
-        println!(
-            "\tRestrict review dismissals: {}\n",
-            opt_bool(self.restricts_review_dismissals)
-        );
-    }
-}
+/// Implement display for  `BranchProtectionRule` so that it can be printed nicely
 impl fmt::Display for BranchProtectionRule {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut output = String::new();

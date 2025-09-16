@@ -126,7 +126,7 @@ impl GithubClient {
                         .await
                 },
             )?;
-            // Arbitrary pre-allocated length. Uses a bit more memory, but reduces
+            // Arbitrary pre-allocated length. Uses slightly more memory, but reduces
             // the number of potential resizes
             let mut commit_line = String::with_capacity(200);
             for commit in &commits.items {

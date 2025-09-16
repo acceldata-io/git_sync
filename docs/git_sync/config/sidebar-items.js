@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["CONFIG_NAME"],"struct":["Config","GitConfig","GithubConfig","InfoConfig","MiscSettings","RepoConfig","SlackConfig"]};

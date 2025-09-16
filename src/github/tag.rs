@@ -77,14 +77,6 @@ pub struct TagTarget {
     #[serde(rename = "__typename")]
     pub typename: String,
     pub oid: String,
-    pub message: Option<String>,
-    pub tagger: Option<Tagger>,
-}
-#[derive(Deserialize)]
-pub struct Tagger {
-    pub name: Option<String>,
-    pub email: Option<String>,
-    pub date: Option<String>,
 }
 
 impl GithubClient {

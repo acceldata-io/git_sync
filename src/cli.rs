@@ -286,7 +286,7 @@ pub struct CheckRepoCommand {
 
 // --- PR Commands ---
 
-/// Open a PR to merge <branch> into <`base_branch`>
+/// Open a PR to merge `head` into `branch`
 #[derive(Args, Clone, Debug)]
 #[command(
     group(
@@ -462,15 +462,12 @@ pub struct CreateReleaseCommand {
     /// The name of the release. If not specified, the tag name will be used
     #[arg(long)]
     pub release_name: Option<String>,
-    /// Set this release to the latest
+    /// Set this release to the latest.
     #[arg(short, long, default_value_t = MakeLatest::True)]
     pub latest: MakeLatest,
     /// Create this release for all configured repositories
     #[arg(short, long, default_value_t = false)]
     pub all: bool,
-    /// Disable release note generation. This decreases the number of api calls
-    #[arg(short, long, default_value_t = false)]
-    pub no_release_notes: bool,
 }
 
 // --- Backup Commands ---
@@ -492,29 +489,34 @@ pub struct BackupRepoCommand {
     #[arg(short, long, default_value_t = false)]
     pub all: bool,
     /// The directory to store the backups in. If not specified, the current directory will be used
-    #[arg(short, long, value_parser = dir_exists)]
+    #[arg(short, long, value_parser = dir_exists, requires = "destination", requires_if("destination", "local"))]
     pub path: Option<PathBuf>,
     /// The destination for the backup
     #[arg(short, long, default_value_t = BackupDestination::Local)]
     pub destination: BackupDestination,
-
-    /// Update an existing backup instead of making a new mirror clone.
+    /// Update an existing backup instead of making a new mirror clone. Does not do anything
+    /// currently.
     #[arg(short, long, default_value_t = false)]
     pub update: bool,
     /// Bucket name for where you want to store your backup if using `S3`
     #[cfg(feature = "aws")]
+    #[arg(
+        short,
+        long,
+        requires = "destination",
+        requires_if("destination", "s3")
+    )]
     pub bucket: Option<String>,
 }
 
+/// Check that the directory passed is a valid and existing directory
 fn dir_exists(s: &str) -> Result<PathBuf, String> {
     let p = PathBuf::from(s);
-    Ok(p)
-    /*if p.is_dir() {
+    if p.is_dir() {
         Ok(p)
     } else {
         Err(format!("{s} is not a valid directory"))
     }
-    */
 }
 
 #[derive(Args, Clone, Debug)]
@@ -630,7 +632,7 @@ pub enum Command {
         #[command(subcommand)]
         cmd: PRCommand,
     },
-    /// Generate completions or a manpage.
+    /// Generate shell completions or manpages.
     #[command(hide = true)]
     Generate {
         /// What to generate. Can be shell completion for bash, zsh, fish, or manpages.

@@ -22,7 +22,7 @@ use crate::cli::{
     RepoCommand, RepositoryType, TagCommand, cli,
 };
 use crate::config::Config;
-use crate::github::client::{GithubClient, OutputMode};
+use crate::github::client::GithubClient;
 use crate::init::generate_config;
 use crate::utils::pr::{CreatePrOptions, MergePrOptions};
 use crate::utils::repo::Checks;

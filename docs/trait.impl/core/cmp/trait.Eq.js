@@ -1,0 +1,9 @@
+(function() {
+    var implementors = Object.fromEntries([["git_sync",[["impl <a class=\"trait\" href=\"https://doc.rust-lang.org/1.88.0/core/cmp/trait.Eq.html\" title=\"trait core::cmp::Eq\">Eq</a> for <a class=\"enum\" href=\"git_sync/cli/enum.BackupDestination.html\" title=\"enum git_sync::cli::BackupDestination\">BackupDestination</a>"],["impl <a class=\"trait\" href=\"https://doc.rust-lang.org/1.88.0/core/cmp/trait.Eq.html\" title=\"trait core::cmp::Eq\">Eq</a> for <a class=\"enum\" href=\"git_sync/cli/enum.MakeLatest.html\" title=\"enum git_sync::cli::MakeLatest\">MakeLatest</a>"],["impl <a class=\"trait\" href=\"https://doc.rust-lang.org/1.88.0/core/cmp/trait.Eq.html\" title=\"trait core::cmp::Eq\">Eq</a> for <a class=\"enum\" href=\"git_sync/cli/enum.RepositoryType.html\" title=\"enum git_sync::cli::RepositoryType\">RepositoryType</a>"],["impl <a class=\"trait\" href=\"https://doc.rust-lang.org/1.88.0/core/cmp/trait.Eq.html\" title=\"trait core::cmp::Eq\">Eq</a> for <a class=\"enum\" href=\"git_sync/github/client/enum.OutputMode.html\" title=\"enum git_sync::github::client::OutputMode\">OutputMode</a>"],["impl <a class=\"trait\" href=\"https://doc.rust-lang.org/1.88.0/core/cmp/trait.Eq.html\" title=\"trait core::cmp::Eq\">Eq</a> for <a class=\"enum\" href=\"git_sync/utils/repo/enum.TagType.html\" title=\"enum git_sync::utils::repo::TagType\">TagType</a>"],["impl <a class=\"trait\" href=\"https://doc.rust-lang.org/1.88.0/core/cmp/trait.Eq.html\" title=\"trait core::cmp::Eq\">Eq</a> for <a class=\"struct\" href=\"git_sync/utils/repo/struct.TagInfo.html\" title=\"struct git_sync::utils::repo::TagInfo\">TagInfo</a>"]]]]);
+    if (window.register_implementors) {
+        window.register_implementors(implementors);
+    } else {
+        window.pending_implementors = implementors;
+    }
+})()
+//{"start":57,"fragment_lengths":[1592]}

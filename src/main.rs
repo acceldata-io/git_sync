@@ -16,7 +16,52 @@ KIND, either express or implied.  See the License for the
 specific language governing permissions and limitations
 under the License.
 */
-#![warn(clippy::pedantic)]
+
+#![warn(clippy::all, clippy::pedantic, missing_docs)]
+
+//! Manage Github repositories from the command line.
+//! You can perform an action on one repository, or on all repositories that are configured in the
+//! configuration file.
+//!
+//! This tool is still in development so some features may not work as expected
+//!
+//! You can do the following:
+//! 1. Sync a forked repository with its upstream parent repository.
+//! 2. Sync tags from its parent repository
+//! 3. Manage branches (create, delete)
+//! 4. Manage tags (create, delete)
+//! 5. Create releases with automatically generated release notes
+//! 6. Create and merge pull requests
+//! 7. Run various sanity checks on repositories
+//! 8. Create a PR and automatically merge it, if possible
+//! 9. Backup a repository, including to S3 if enabled (In progress)
+//! 10. Collect metadata about your repositories (TODO)
+//! 11. Send notifications to slack if the slack feature is enabled
+//! 11. Do all of the above for one, or all configured repositories
+//!
+//! Some examples of how to use this tool:
+//! ```shell
+//! git_sync tag create --tag v1.0.2 --branch my_dev_branch --repo https://github.com/org/my_repository
+//! git_sync tag create --tag v1.0.0 --branch my_common_dev_branch --all --slack # will use all repos in your config file
+//! ```
+//! You can generate manpages and shell completions using the generate command:
+//! ```shell
+//! git_sync generate --kind man
+//! git_sync generate --kind bash # or fish, or zsh
+//! ```
+//!
+//! When building this tool, you should use
+//! ```shell
+//! cargo auditable build --release
+//! ```
+//!
+//! This can be installed by running
+//! ```shell
+//! cargo install cargo-auditable
+//! ```
+//!
+//! This way the binary will be built with information about the build dependencies embedded into
+//! the binary so that it can be scanned with tools like cargo-audit or Trivy.
 mod cli;
 mod config;
 mod error;
