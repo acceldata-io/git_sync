@@ -35,7 +35,7 @@ pub struct AppArgs {
     pub file: Option<PathBuf>,
 
     /// The types of repositories to use for any command that targets configured repositories
-    #[arg(short, long, default_value = "fork")]
+    #[arg(long, default_value = "fork")]
     pub repository_type: RepositoryType,
 
     /// The command that will get run
@@ -205,9 +205,10 @@ pub struct SyncTagCommand {
     /// Sync tags for all configured repositories. Not valid if '--repository' is set
     #[arg(short, long, default_value_t = false)]
     pub all: bool,
-    /// Disable syncing annotated tags.
+    /// Sync annotated tags. Enabling this requires that git is set up in your environment, with
+    /// read/write permissions for the repositories you are syncing.
     #[arg(short, long, default_value_t = false)]
-    pub without_annotated: bool,
+    pub with_annotated: bool,
 }
 
 // --- Repo Commands ---

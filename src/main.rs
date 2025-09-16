@@ -42,8 +42,12 @@ under the License.
 //! Some examples of how to use this tool:
 //! ```shell
 //! git_sync tag create --tag v1.0.2 --branch my_dev_branch --repo https://github.com/org/my_repository
-//! git_sync tag create --tag v1.0.0 --branch my_common_dev_branch --all --slack # will use all repos in your config file
+//! git_sync tag create --tag v1.0.0 --branch my_common_dev_branch --all --slack # will use all repos in your config file and enable slack notifications
 //! ```
+//! When running a command with --all, you can specify which category of repositories to run the
+//! command on by specifying the `--repository` argument (valid options are 'fork', 'private',
+//! 'public', or 'all').
+//!
 //! You can generate manpages and shell completions using the generate command:
 //! ```shell
 //! git_sync generate --kind man

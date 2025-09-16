@@ -40,6 +40,8 @@ shallow_by_default = true
 # Needed if you want slack integration
 # webhook_url should be an https address
 [slack]
+# Eventually, the enabled option will be added to always enable slack for each run
+#enable=true
 webhook_url = ""
 
 # This can be used to change who is commiting changes and creating

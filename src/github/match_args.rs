@@ -172,7 +172,7 @@ async fn match_tag_cmds(
             TagCommand::Sync(sync_cmd) => {
                 let repository = sync_cmd.repository.as_ref();
                 // By default, this is false
-                let process_annotated_tags = sync_cmd.without_annotated;
+                let process_annotated_tags = sync_cmd.with_annotated;
                 if sync_cmd.all {
                     client.sync_all_tags(process_annotated_tags, repos).await?;
                 } else if let Some(repository) = repository {
