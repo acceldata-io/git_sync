@@ -4,3 +4,4 @@ git-manage.toml
 .license_report.md
 flamegraph.*
 THIRDPARTY.toml
+*.tar.gz

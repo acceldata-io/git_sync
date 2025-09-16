@@ -28,7 +28,7 @@ mod utils;
 use cli::parse_args;
 use config::Config;
 use error::GitError;
-use github::parse;
+use github::match_args;
 use rustls::crypto::aws_lc_rs;
 #[tokio::main]
 async fn main() -> Result<(), GitError> {
@@ -45,7 +45,7 @@ async fn main() -> Result<(), GitError> {
 
     let result: Result<(), GitError> = {
         let config = Config::new(args.file.as_ref())?;
-        parse::match_arguments(&args, config).await
+        match_args::match_arguments(&args, config).await
     };
     // Get nice error messages, with simple suggestions instead of huge structs
     if let Err(e) = result {

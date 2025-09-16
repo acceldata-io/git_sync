@@ -49,7 +49,7 @@ pub struct GithubClient {
     pub webhook_url: String,
     /// Defines whether or not we're running in interactive mode
     pub is_tty: bool,
-    /// Where output should go
+    /// Where output should go. This can only be written to Once
     pub output: Arc<OnceCell<OutputMode>>,
     /// A message that gets sent to slack at the end of all processing, if it has any contents
     slack_messages: Arc<Mutex<Vec<String>>>,
@@ -74,11 +74,7 @@ impl GithubClient {
         // Shadow max_jobs. This value makes no sense if it's less than 1
         let max_jobs: usize = cmp::max(1, max_jobs);
         let webhook_url: String = config.slack.webhook_url.clone().unwrap_or_default();
-        let output = if std::io::stdout().is_terminal() {
-            OutputMode::Print
-        } else {
-            OutputMode::None
-        };
+
         Ok(Self {
             octocrab,
             semaphore: Arc::new(Semaphore::new(max_jobs)),
