@@ -144,7 +144,8 @@ impl GithubClient {
         Ok(pr_map)
     }
 
-    /// Merge a pr
+    /// Merge a pull request. This will only work if there are no merge conflicts in the pull
+    /// request.
     pub async fn merge_pr(&self, opts: &MergePrOptions) -> Result<(), GitError> {
         let info = get_repo_info_from_url(&opts.url)?;
         let (owner, repo) = (info.owner, info.repo_name);

@@ -490,7 +490,7 @@ pub struct BackupRepoCommand {
     #[arg(short, long, default_value_t = false)]
     pub all: bool,
     /// The directory to store the backups in. If not specified, the current directory will be used
-    #[arg(short, long, value_parser = dir_exists, requires = "destination", requires_if("destination", "local"))]
+    #[arg(short, long, value_parser = dir_exists)]
     pub path: Option<PathBuf>,
     /// The destination for the backup
     #[arg(short, long, default_value_t = BackupDestination::Local)]
@@ -499,6 +499,7 @@ pub struct BackupRepoCommand {
     /// currently.
     #[arg(short, long, default_value_t = false)]
     pub update: bool,
+    /*
     /// Bucket name for where you want to store your backup if using `S3`
     #[cfg(feature = "aws")]
     #[arg(
@@ -508,6 +509,7 @@ pub struct BackupRepoCommand {
         requires_if("destination", "s3")
     )]
     pub bucket: Option<String>,
+    */
 }
 
 /// Check that the directory passed is a valid and existing directory
@@ -594,7 +596,7 @@ pub enum Command {
         cmd: BranchCommand,
     },
     /// Generate a default config
-    #[command(arg_required_else_help = true)]
+    #[command()]
     Config {
         /// Path to save the config file. If not specified, it will default to
         /// $XDG_CONFIG_HOME/git-manage.toml or $HOME/.config/git-manage.toml

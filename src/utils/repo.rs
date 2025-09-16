@@ -46,9 +46,15 @@ pub struct RepoInfo {
 /// This is for both annotated and lightweight tags.
 #[derive(Debug, Deserialize, Clone)]
 pub struct TagInfo {
+    /// Name of the tag
     pub name: String,
+    /// The type of tag (Annotated or lightweight)
     pub tag_type: TagType,
+    /// SHA of the tag
     pub sha: String,
+    /// Git URL from where the tag was fetched
+    pub url: String,
+    /// Git URL of the parent repository
     pub parent_url: Option<String>,
 }
 

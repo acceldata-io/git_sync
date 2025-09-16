@@ -39,9 +39,11 @@ use aws_sdk_s3::{
 };
 
 #[cfg(feature = "aws")]
+/// The size of each part of a multipart file upload to s3.
 const PART_SIZE: usize = 64 * 1024 * 1024;
 
 impl GithubClient {
+    /// Backup a single repository into the specified folder
     pub async fn backup_repo(&self, url: String, path: &Path) -> Result<(), GitError> {
         let semaphore_lock = Arc::clone(&self.semaphore).acquire_owned().await?;
         let canonical_path = if let Ok(p) = path.canonicalize() {
@@ -157,6 +159,8 @@ impl GithubClient {
 
         Ok(())
     }
+    /// Backup all configured repositories into the specified folder. This can take a long time,
+    /// dependiing on the number of repositories and their sizes
     pub async fn backup_all_repos(
         &self,
         repositories: Vec<String>,
@@ -228,6 +232,8 @@ impl GithubClient {
         }
         Ok(())
     }
+    /// This is a way to clean up stale references in a configured backed up repository. This is
+    /// still under development, so don't rely on it too much yet.
     pub async fn prune_backup(&self, path: &Path, since: Option<String>) -> Result<(), GitError> {
         let ext = match path.extension() {
             Some(ext) => ext.to_str().unwrap_or(""),
@@ -312,7 +318,8 @@ impl GithubClient {
     }
     #[cfg(feature = "aws")]
     /// Upload a backup to s3. This requires your aws credentials to be configured in the
-    /// environment
+    /// environment. For small enough files, it will do a single part file upload but if the file
+    /// is bigger than `PART_SIZE`, it will instead do a parallel multipart upload.
     pub async fn backup_to_s3(
         &self,
         file_path: &Path,

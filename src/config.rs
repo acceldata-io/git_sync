@@ -28,7 +28,8 @@ use std::path::{Path, PathBuf};
 /// This may change in the future.
 pub const CONFIG_NAME: &str = "git-manage.toml";
 
-/// This is the root level of the configuration file
+/// This is the root level of the configuration file. These are all used for deserialization and
+/// serde to convert the TOML configuration file into a struct
 #[derive(Default, Deserialize, Debug)]
 pub struct Config {
     #[serde(default)]
@@ -54,17 +55,22 @@ pub struct Config {
 
 #[derive(Debug, Deserialize, Default)]
 pub struct MiscSettings {
+    /// A blacklist for branches when searching for stale ones.
+    /// This allows you to ignore long living branches that should always exist
     pub branch_blacklist: Option<HashSet<String>>,
 }
 
 #[derive(Debug, Deserialize, Default)]
 pub struct SlackConfig {
+    /// The webhook url for slack integration. If this is not defined, you cannot send
+    /// notifications over slack
     pub webhook_url: Option<String>,
 }
 
 /// Github configuration struct
 #[derive(Debug, Deserialize, Default)]
 pub struct GithubConfig {
+    /// Your github API token
     pub token: Option<String>,
 }
 
@@ -86,8 +92,11 @@ pub struct InfoConfig {
 /// The configuration for the different types of repositories
 #[derive(Debug, Deserialize, Default)]
 pub struct RepoConfig {
+    /// A list of forked repositories
     pub fork: Option<Vec<String>>,
+    /// A list of private repositories
     pub private: Option<Vec<String>>,
+    /// A list of public repositories
     pub public: Option<Vec<String>>,
 }
 
@@ -187,9 +196,11 @@ impl Config {
     pub fn get_private_repositories(&self) -> Vec<String> {
         self.repos.private.clone().unwrap_or_default()
     }
+    /// Get a vector of public repositories defined in the config file
     pub fn get_public_repositories(&self) -> Vec<String> {
         self.repos.public.clone().unwrap_or_default()
     }
+    /// Get all repositories defined in the config file
     pub fn get_all_repositories(&self) -> Vec<String> {
         self.repos
             .public

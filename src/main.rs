@@ -59,13 +59,13 @@ under the License.
 //! cargo auditable build --release
 //! ```
 //!
-//! This can be installed by running
+//! [cargo-auditable](https://github.com/rust-secure-code/cargo-auditable) and [cargo-audit](https://github.com/RustSec/rustsec/tree/main/cargo-audit) can be installed by running
 //! ```shell
-//! cargo install cargo-auditable
+//! cargo install cargo-audit cargo-auditable
 //! ```
 //!
 //! This way the binary will be built with information about the build dependencies embedded into
-//! the binary so that it can be scanned with tools like cargo-audit or Trivy.
+//! the binary so that it can be scanned with tools like `cargo-audit` or Trivy.
 mod cli;
 mod config;
 mod error;
