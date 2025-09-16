@@ -26,7 +26,7 @@ use futures::{FutureExt, StreamExt, future::try_join};
 use octocrab::models::repos::Ref;
 use octocrab::params::repos::Reference;
 use serde::Deserialize;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::error::Error;
 use std::process::Command;
 use temp_dir::TempDir;
@@ -96,7 +96,10 @@ impl GithubClient {
     /// we can skip the fairly slow git clone and push process
     ///
     /// `IndexSet` is an implementation of an orderered Set.
-    pub async fn get_tags(&self, url: &str) -> Result<IndexSet<TagInfo>, GitError> {
+    pub async fn get_tags(
+        &self,
+        url: &str,
+    ) -> Result<(IndexSet<TagInfo>, HashSet<String>), GitError> {
         let info = get_repo_info_from_url(url)?;
         let (owner, repo) = (info.owner, info.repo_name);
 
@@ -104,6 +107,8 @@ impl GithubClient {
         let mut has_next_page = true;
         let mut after: Option<String> = None;
         let per_page = 100;
+
+        let mut parent_urls: HashSet<String> = HashSet::new();
 
         let octocrab = self.octocrab.clone();
         let query = r#"
@@ -154,7 +159,8 @@ impl GithubClient {
             drop(permit);
 
             let mut repo = res.data.repository;
-            let mut parent_url = repo.parent.as_ref().map(|p| p.url.clone());
+
+            let parent_url = repo.parent.as_ref().map(|p| p.url.clone());
 
             for tag in &mut repo.refs.nodes {
                 let tag_type = match tag.target.typename.as_str() {
@@ -163,21 +169,28 @@ impl GithubClient {
                     other => return Err(GitError::Other(format!("Unknown tag type '{other}'"))),
                 };
 
+                if let Some(url) = parent_url.as_ref() {
+                    if !parent_urls.contains(url) {
+                        parent_urls.insert(url.to_owned());
+                    }
+                }
+
                 all_tags.insert(TagInfo {
-                    name: std::mem::take(&mut tag.name),
+                    name: tag.name.clone(),
                     tag_type,
-                    sha: std::mem::take(&mut tag.target.oid),
-                    parent_url: std::mem::take(&mut parent_url),
+                    sha: tag.target.oid.clone(),
+                    url: url.to_string(),
+                    parent_url: parent_url.clone(),
                 });
             }
             has_next_page = repo.refs.page_info.has_next_page;
             after = repo.refs.page_info.end_cursor;
         }
 
-        Ok(all_tags)
+        Ok((all_tags, parent_urls))
     }
     pub async fn compare_tags(&self, url: &str, parent: &RepoInfo) -> Result<Comparison, GitError> {
-        let (fork_tags, parent_tags) =
+        let ((fork_tags, mut fork_parents), (parent_tags, upstream_parents)) =
             try_join(self.get_tags(url), self.get_tags(&parent.url)).await?;
         if self.is_tty {
             println!(
@@ -227,17 +240,15 @@ impl GithubClient {
             for tag in &missing_annotated[0..max_tags_display] {
                 let _ = writeln!(slack_message, ">• `{}`", tag.name);
             }
-
-            self.append_slack_message(slack_message).await;
-        } else {
-            if self.is_tty {
-                println!("Tags are up to date for {url}");
-            }
-            self.append_slack_message(format!(":white_check_mark: Tags are up to date for {url}"))
-                .await;
+        } else if self.is_tty {
+            println!("Tags are up to date for {url}");
         }
+        fork_parents.extend(upstream_parents);
 
-        let compare = Comparison { missing_in_fork };
+        let compare = Comparison {
+            missing_in_fork,
+            parent_urls: fork_parents,
+        };
         Ok(compare)
     }
     /// Get a diff of tags between a single forked repository and its parent repository.
@@ -299,7 +310,13 @@ impl GithubClient {
         let info = get_repo_info_from_url(url)?;
         let parent = self.get_parent_repo(url).await?;
         let (owner, repo) = (info.owner, info.repo_name);
-        let missing = self.compare_tags(url, &parent).await?.missing_in_fork;
+        let all_tags = self.compare_tags(url, &parent).await?;
+
+        let parent_urls = all_tags.parent_urls;
+
+        let missing = all_tags.missing_in_fork;
+        let num_tags_missing = missing.len();
+
         if missing.is_empty() {
             if self.is_tty {
                 println!("No missing tags in {url}");
@@ -307,20 +324,21 @@ impl GithubClient {
             return Ok(());
         }
 
+        let mut errors: Vec<(String, GitError)> = Vec::with_capacity(missing.len());
+
         // Split `missing` into two different `IndexSet`, based on their type of tag
         let (lightweight, annotated): (IndexSet<TagInfo>, IndexSet<TagInfo>) = missing
             .into_iter()
             .partition(|t| t.tag_type == TagType::Lightweight);
-
         let lightweight_fut = async {
             handle_futures_unordered!(
-                lightweight.into_iter().map(|tag| {
+                lightweight.iter().map(|tag| {
                     let owner = owner.clone();
                     let repo = repo.clone();
                     let name = tag.name.clone();
                     (repo, name, owner, tag)
                 }),
-                |repo, name, owner, tag| self.sync_lightweight_tag(&owner, &repo.clone(), &tag).map(|result|(repo, name, result)),
+                |repo, name, owner, tag| self.sync_lightweight_tag(&owner, &repo.clone(), tag).map(|result|(repo, name, result)),
                 (repo, name, result) {
                     match result {
                         Ok(()) => {
@@ -328,7 +346,10 @@ impl GithubClient {
                                 println!("Successfully synced tag '{name}' in '{repo}'");
                             }
                         },
-                        Err(e) => eprintln!("Failed to sync '{name}' for '{repo}': {e}")
+                        Err(e) => {
+                            eprintln!("Failed to sync '{name}' for '{repo}': {e}");
+                            errors.push((name, e));
+                        }
                     }
                 }
             );
@@ -339,7 +360,7 @@ impl GithubClient {
         if process_annotated {
             let ssh_url = http_to_ssh_repo(url)?;
             let (annotated, lightweight) = tokio::join!(
-                self.sync_annotated_tags(&annotated, &ssh_url),
+                self.sync_annotated_tags(&annotated, &ssh_url, parent_urls),
                 lightweight_fut,
             );
             let tag_results = [("annotated", annotated), ("lightweight", lightweight)];
@@ -347,19 +368,54 @@ impl GithubClient {
             for (tag_type, result) in tag_results {
                 if let Err(e) = result {
                     eprintln!("Failed to sync {tag_type} tags for {owner}/{repo}: {e}");
-                    self.append_slack_error(format!(
-                        "❌ Failed to sync {tag_type} tags for {owner}/{repo}: {e}",
-                    ))
-                    .await;
+                    errors.push((tag_type.to_string(), e));
                 }
             }
         // If we're only processing lightweight tags, skip all of the above
         } else {
-            lightweight_fut.await?;
+            let result = lightweight_fut.await;
+            if let Err(e) = result {
+                self.append_slack_error(format!(
+                    "Failed to sync lightweight tags for {owner}/{repo}: {e}"
+                ))
+                .await;
+                return Err(GitError::Other("Failed to sync tag".to_string()));
+            }
+        }
+        if !errors.is_empty() {
+            self.append_slack_error(format!(
+                "Encountered {} errors while trying to sync tags for {owner}/{repo}. Some tags may have already synced.",
+                errors.len()
+            ))
+            .await;
+            return Err(GitError::MultipleErrors(errors));
+        }
+        let mut message =
+            format!(":white_check_mark: Synced {num_tags_missing} tags for {owner}/{repo}\n");
+        if process_annotated && !annotated.is_empty() && errors.is_empty() {
+            let num_annotated = annotated.len();
+            let _ = writeln!(message, "Of which {num_annotated} are annotated tags:",);
+            for (i, tag) in annotated.iter().enumerate() {
+                if i >= 10 {
+                    let _ = writeln!(message, "\t and {} others", num_annotated - i);
+                    break;
+                }
+                let _ = write!(message, "\t• `{}`", tag.name);
+            }
+        }
+        if !lightweight.is_empty() && errors.is_empty() {
+            let num_lightweight = lightweight.len();
+            let _ = writeln!(message, "Of which {num_lightweight} are lightweight tags:");
+            for (i, tag) in lightweight.iter().enumerate() {
+                if i >= 10 {
+                    let _ = writeln!(message, "\t and {} others", num_lightweight - i);
+                    break;
+                }
+                let _ = write!(message, "\t• `{}`", tag.name);
+            }
         }
 
-        self.append_slack_message(format!("✅ Successfully synced tags for {owner}/{repo}"))
-            .await;
+        self.append_slack_message(message).await;
         Ok(())
     }
     /// Sync tags for all configured repositories
@@ -379,15 +435,18 @@ impl GithubClient {
         while let Some((repo, result)) = futures.next().await {
             match result {
                 Ok(()) => {
-                    self.append_slack_message(format!("✅ Successfully synced tags for {repo}"))
+                    /*self.append_slack_message(format!("✅ Successfully synced tags for {repo}"))
                         .await;
+                    */
                     if self.is_tty {
                         println!("✅ Successfully synced tags for {repo}");
                     }
                 }
                 Err(e) => {
+                    /*
                     self.append_slack_error(format!("❌ Failed to sync tags for {repo}: {e}"))
                         .await;
+                    */
                     eprintln!("❌ Failed to sync tags for {repo}");
                     errors.push((repo, e));
                 }
@@ -456,6 +515,7 @@ impl GithubClient {
         &self,
         tags: &IndexSet<TagInfo>,
         ssh_url: &str,
+        parent_urls: HashSet<String>,
     ) -> Result<(), GitError> {
         if tags.is_empty() {
             return Ok(());
@@ -464,11 +524,7 @@ impl GithubClient {
         let tags = tags.clone();
         let ssh_url = ssh_url.to_string();
         tokio::task::spawn_blocking(move || {
-            let first_tag = tags.first().unwrap();
-
-            let Some(parent_url) = &first_tag.parent_url else {
-                return Err(GitError::NoUpstreamRepo);
-            };
+            let parent_urls: Vec<String> = parent_urls.into_iter().collect();
 
             // Use a temp directory for the git repository so it's cleaned up automatically
             let tmp_dir = TempDir::new()
@@ -490,21 +546,70 @@ impl GithubClient {
                 ])
                 .status()?;
 
-            let output = Command::new("git")
-                .args(["-C", tmp_str, "remote", "get-url", "upstream"])
-                .output()?;
-            if output.status.success() {
+            for (i, upstream_url) in parent_urls.iter().enumerate() {
+                // Add any other parent urls as remotes, in case the fork has multiple parents
                 Command::new("git")
-                    .args(["-C", tmp_str, "remote", "set-url", "upstream", parent_url])
-                    .status()?;
-            } else {
-                Command::new("git")
-                    .args(["-C", tmp_str, "remote", "add", "upstream", parent_url])
+                    .args([
+                        "-C",
+                        tmp_str,
+                        "remote",
+                        "add",
+                        &format!("upstream{i}"),
+                        upstream_url,
+                    ])
                     .status()?;
             }
-
+            for (i, upstream_url) in parent_urls.iter().enumerate() {
+                let url = format!("upstream{i}");
+                let output = Command::new("git")
+                    .args(["-C", tmp_str, "remote", "get-url", &url])
+                    .output()?;
+                if output.status.success() {
+                    Command::new("git")
+                        .args(["-C", tmp_str, "remote", "set-url", &url, upstream_url])
+                        .status()?;
+                } else {
+                    Command::new("git")
+                        .args(["-C", tmp_str, "remote", "add", &url, upstream_url])
+                        .status()?;
+                }
+            }
+            let mut all_fetch_args: Vec<Vec<String>> = Vec::new();
             // Only fetch the annotated tags that we're interested in adding to our fork.
             // Lightweight tags can be synced automatically with github
+            for (i, parent_url) in parent_urls.iter().enumerate() {
+                let tags = tags
+                    .iter()
+                    .filter(|t| t.url == *parent_url)
+                    .collect::<Vec<&TagInfo>>();
+                let mut fetch_args: Vec<String> = vec![
+                    "-C".to_string(),
+                    tmp_str.to_string(),
+                    "fetch".to_string(),
+                    "--filter=blob:none".to_string(),
+                    "--depth=1".to_string(),
+                    format!("upstream{i}"),
+                ];
+                for tag in &tags {
+                    println!("Parent url: {parent_url}, tag parent url: {}", tag.name);
+                    println!("Tag: {tag:#?}");
+                    fetch_args.push("tag".to_string());
+                    fetch_args.push(tag.name.to_string());
+                }
+                all_fetch_args.push(fetch_args);
+            }
+            /*
+            for tag in &tags {
+                if let Some(parent) = &tag.parent_url {
+                    if parent == parent_url {
+                        fetch_args.push("tag");
+                        fetch_args.push(tag.name.as_str());
+
+                    }
+                }
+            }
+
+            }
             let mut fetch_args = vec![
                 "-C",
                 tmp_str,
@@ -517,14 +622,27 @@ impl GithubClient {
                 fetch_args.push("tag");
                 fetch_args.push(tag.name.as_str());
             }
+            */
 
-            Command::new("git").args(&fetch_args).status()?;
+            for fetch in all_fetch_args {
+                let status = Command::new("git").args(&fetch).status()?;
+                if !status.success() {
+                    return Err(GitError::Other(
+                        "Failed to fetch annotated tags from upstream remote".to_string(),
+                    ));
+                }
+            }
 
             // Only push the newly added annotated tags
             let mut push_args = vec!["-C", tmp_str, "push", "origin"];
             push_args.extend(tags.iter().map(|tag| tag.name.as_str()));
 
-            Command::new("git").args(&push_args).status()?;
+            let status = Command::new("git").args(&push_args).status()?;
+            if !status.success() {
+                return Err(GitError::Other(format!(
+                    "Failed to push annotated tags to {ssh_url}"
+                )));
+            }
             Ok(())
         })
         .await?

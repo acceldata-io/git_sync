@@ -28,6 +28,7 @@ use indexmap::IndexSet;
 use tokio::sync::Semaphore;
 
 use std::cmp;
+use std::collections::HashSet;
 use std::fmt::Write as _;
 use std::io::IsTerminal;
 use std::sync::Arc;
@@ -37,6 +38,7 @@ use tokio::sync::OnceCell;
 #[derive(Debug)]
 pub struct Comparison {
     pub missing_in_fork: IndexSet<TagInfo>,
+    pub parent_urls: HashSet<String>,
 }
 
 /// Github api entry point
@@ -51,10 +53,11 @@ pub struct GithubClient {
     pub is_tty: bool,
     /// Where output should go. This can only be written to Once
     pub output: Arc<OnceCell<OutputMode>>,
-    /// A message that gets sent to slack at the end of all processing, if it has any contents
+    /// A message that gets sent to slack at the end of all processing, if it has any contents.
+    /// This is thread safe.
     slack_messages: Arc<Mutex<Vec<String>>>,
     /// An error message that will get sent to slack at the end of all processing,
-    /// if it has any contents
+    /// if it has any contents. This field is also thread safe.
     slack_errors: Arc<Mutex<Vec<String>>>,
 }
 #[derive(Default, PartialEq, Eq)]
@@ -189,6 +192,8 @@ impl GithubClient {
             Err(e) => Err(GitError::GithubApiError(e)),
         }
     }
+    /// Appends success messages to be sent to slack at the end. The message will only be sent if
+    /// slack integration is enabled and the webhook url is set.
     pub async fn append_slack_message(&self, msg: String) {
         #[cfg(feature = "slack")]
         {
@@ -197,7 +202,7 @@ impl GithubClient {
         }
     }
     /// Append an error message to be sent to slack at the end. The message will only be sent if
-    /// slack integartion is enabled and the webhho url is set.
+    /// slack integartion is enabled and the webhhook url is set.
     pub async fn append_slack_error(&self, msg: String) {
         #[cfg(feature = "slack")]
         {
@@ -205,6 +210,8 @@ impl GithubClient {
             message.push(msg);
         }
     }
+    /// This can be used to send the contents of `slack_messages` and `slack_errors` to slack in
+    /// one batch.
     pub async fn slack_message(&self) {
         // If slack support is enabled, post the message
         #[cfg(feature = "slack")]
@@ -218,7 +225,7 @@ impl GithubClient {
             let error_len = slack_errors.len();
 
             // There's no point in continuing if there are no messages or errors
-            if message_len > 0 && error_len > 0 {
+            if message_len == 0 && error_len == 0 {
                 return;
             }
 
