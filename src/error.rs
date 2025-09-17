@@ -68,6 +68,9 @@ pub enum GitError {
     #[error("TOML parsing error: {0}")]
     TomlError(#[from] toml::de::Error),
 
+    #[error("File does not exist: {0}")]
+    FileDoesNotExist(String),
+
     #[error(
         "Missing GitHub token. Please provide a token via --token, GITHUB_TOKEN environment variable, or in your config file."
     )]
@@ -165,6 +168,11 @@ impl GitError {
                 code: None,
                 message: format!("No such tag: {tag}"),
                 suggestion: Some("Check the tag name or create it first.".into()),
+            },
+            GitError::FileDoesNotExist(file) => UserError {
+                code: None,
+                message: format!("'{file}' does not exist"),
+                suggestion: Some("Check that you passed the right path.".into()),
             },
             GitError::TomlError(e) => UserError {
                 code: None,
