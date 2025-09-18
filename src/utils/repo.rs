@@ -56,6 +56,8 @@ pub struct TagInfo {
     pub url: String,
     /// Git URL of the parent repository
     pub parent_url: Option<String>,
+    /// SHA of annotated tag commit
+    pub commit_sha: Option<String>,
 }
 
 /// Implements checking for equality based on the tag name only. This is needed for
@@ -84,12 +86,17 @@ pub enum TagType {
 /// A holder for the results of various checks on a repository
 pub struct Checks {
     pub branches: Vec<(String, String)>,
+    /// Certain types of branch protection rules can be queried. This holds those if they are
+    /// available
     pub rules: Vec<BranchProtectionRule>,
+    /// The license of the repository, if known
     pub license: Option<LicenseInfo>,
+    /// Then name of the repository we're checking
     pub repo: String,
 }
 
-/// Struct to hold branch protection rule information
+/// Struct to hold branch protection rule information. Exists in order to deserialize JSON into
+/// this struct
 #[derive(Debug, Deserialize)]
 pub struct BranchProtectionRule {
     pub pattern: Option<String>,

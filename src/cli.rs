@@ -94,6 +94,7 @@ pub enum MakeLatest {
     Legacy,
 }
 
+/// Choose where to store backups
 #[derive(Copy, Clone, PartialEq, Eq, Debug, ValueEnum)]
 pub enum BackupDestination {
     Local,
@@ -162,7 +163,7 @@ pub struct CompareTagCommand {
     pub all: bool,
 }
 
-impl CompareTagCommand {
+/*impl CompareTagCommand {
     /// Validate that both --repository and --parent are specified, or that --all is.
     pub fn validate(&self) -> Result<(), String> {
         match (&self.repository, &self.parent, self.all) {
@@ -171,6 +172,7 @@ impl CompareTagCommand {
         }
     }
 }
+*/
 
 /// Defines the arguments for the 'delete' tag subcommand
 #[derive(Args, Clone, Debug)]
@@ -217,15 +219,34 @@ pub struct SyncTagCommand {
 #[derive(Args, Clone, Debug)]
 #[command(group(
     ArgGroup::new("sync")
-    .required(true)
-    .args(&["all", "repository"])
+        .required(true)
+        .args(&["all", "repository"]),
+    ),
+    group(
+        ArgGroup::new("target")
+        .args(&["branch", "recursive"])
+    ),
+    group(
+        ArgGroup::new("branch_conflict")
+        .args(&["branch", "all"])
 ))]
 pub struct SyncRepoCommand {
     /// The repository to sync
     #[arg(short, long)]
     pub repository: Option<String>,
+    /// Sync all configured repositories
     #[arg(short, long, default_value_t = false)]
     pub all: bool,
+    /// Sync all common branches between the fork and its parent
+    #[arg(long, default_value_t = false)]
+    pub recursive: bool,
+    /// Force the sync. This is required when using --all and --recursive since this operation can
+    /// be very long
+    #[arg(long, default_value_t = false)]
+    pub force: bool,
+    /// Sync a specific branch. Not a valid option when using --all or --recursive
+    #[arg(short, long)]
+    pub branch: Option<String>,
 }
 
 /// Check repositories for various conditions
@@ -253,8 +274,7 @@ EXAMPLES:
 
 NOTES:
     - At least one of --license, --protected, or --old-branches must be specified.
-    - Use --all to apply checks to all configured repositories, or --repository option to target one repository. You cannot use both at the same time.
-        "
+    - Use --all to apply checks to all configured repositories, or --repository option to target one repository. You cannot use both at the same time."
 
 )]
 #[allow(clippy::struct_excessive_bools)]
@@ -294,7 +314,21 @@ pub struct CheckRepoCommand {
         ArgGroup::new("target")
         .required(true)
         .args(&["all", "repository"])
-    )
+    ),
+    long_about = "Create a Pull Request and optionally try to merge it automatically. You can target a single repository, or all configured repositories",
+    after_help="\
+EXAMPLES:
+    # Open a pull request for a single repository   
+    git_sync pr open --repository https://github.com/my-org/my-repo --head my_feature_branch --base my_base_branch
+    # Attempt to merge automatically
+    git_sync pr open -r https://github.com/my-org/my-repo --head my_feature_branch --base my_base_branch --merge
+    # For all repositories
+    git_sync pr open --all --head my_feature_branch --base my_base_branch --merge
+
+NOTES:
+    Not all Pull Requests can be merged automatically. If there are merge conflicts,\
+    the PR will still be created, but you will need to fix the conflicts.
+"
 )]
 pub struct CreatePRCommand {
     /// Repository for which you are creating a PR
@@ -335,7 +369,8 @@ pub struct CreatePRCommand {
     pub reviewers: Option<Vec<String>>,
 }
 
-/// Close a PR for a repository.
+/// Close a PR for a repository. Currently doesn't do anything, since it's kind of pointless
+/// to close PRs specified by number from the cli. May be updated later to be useful
 #[derive(Args, Clone, Debug)]
 #[command(
     group(
@@ -359,7 +394,8 @@ pub struct ClosePRCommand {
     pub base_branch: String,
 }
 
-/// Merge a PR.
+/// Merge a PR. Not used since if you already know the PR number, then you're probably in the web
+/// ui anyway. Might later be used for something useful
 #[derive(Args, Clone, Debug)]
 #[command(
     group(
@@ -499,17 +535,10 @@ pub struct BackupRepoCommand {
     /// currently.
     #[arg(short, long, default_value_t = false)]
     pub update: bool,
-    /*
     /// Bucket name for where you want to store your backup if using `S3`
     #[cfg(feature = "aws")]
-    #[arg(
-        short,
-        long,
-        requires = "destination",
-        requires_if("destination", "s3")
-    )]
+    #[arg(short, long, required_if_eq("destination", "s3"))]
     pub bucket: Option<String>,
-    */
 }
 
 /// Check that the directory passed is a valid and existing directory
@@ -653,23 +682,26 @@ pub enum Command {
 /// Parse the command line arguments and validate them.
 pub fn parse_args() -> AppArgs {
     let app = AppArgs::try_parse();
-    let app = match app {
-        Ok(app) => app,
+    match app {
+        Ok(app) => {
+            if let Command::Repo {
+                cmd: RepoCommand::Sync(sync_cmd),
+            } = &app.command
+            {
+                if sync_cmd.recursive && sync_cmd.all && !sync_cmd.force {
+                    eprintln!(
+                        "Error: when syncing repositories, --force is required when --all and --recursive are set."
+                    );
+                    std::process::exit(1);
+                }
+            }
+            app
+        }
         Err(err) => {
             err.print().unwrap();
             std::process::exit(1);
         }
-    };
-    if let Command::Tag {
-        cmd: TagCommand::Compare(compare),
-    } = &app.command
-    {
-        if let Err(e) = compare.validate() {
-            eprintln!("Error validating compare command: {e}");
-            std::process::exit(1);
-        }
     }
-    app
 }
 
 pub fn cli() -> clap::Command {

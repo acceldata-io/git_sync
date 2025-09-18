@@ -28,6 +28,7 @@ use octocrab::params::repos::Reference;
 use serde::Deserialize;
 use std::collections::{HashMap, HashSet};
 use std::error::Error;
+use std::path::Path;
 use std::process::Command;
 use temp_dir::TempDir;
 
@@ -74,17 +75,18 @@ pub struct PageInfo {
     pub end_cursor: Option<String>,
 }
 /// The actual tag node
-#[derive(Deserialize)]
+#[derive(Deserialize, Debug)]
 pub struct TagNode {
     pub name: String,
     pub target: TagTarget,
 }
 /// Information about the tag, particularly it's type (annotated or lightweight)
-#[derive(Deserialize)]
+#[derive(Deserialize, Debug)]
 pub struct TagTarget {
     #[serde(rename = "__typename")]
     pub typename: String,
     pub oid: String,
+    pub target: Option<Box<TagTarget>>,
 }
 
 impl GithubClient {
@@ -123,6 +125,12 @@ impl GithubClient {
                         target {
                             __typename
                             oid
+                            ... on Tag {
+                                target {
+                                    __typename
+                                    oid
+                                }
+                            }
                         }
                     }
                     pageInfo {
@@ -168,6 +176,7 @@ impl GithubClient {
                     "Commit" => TagType::Lightweight,
                     other => return Err(GitError::Other(format!("Unknown tag type '{other}'"))),
                 };
+                let commit_sha = tag.target.target.as_ref().map(|t| t.oid.to_string());
 
                 if let Some(url) = parent_url.as_ref() {
                     if !parent_urls.contains(url) {
@@ -181,6 +190,7 @@ impl GithubClient {
                     sha: tag.target.oid.clone(),
                     url: url.to_string(),
                     parent_url: parent_url.clone(),
+                    commit_sha,
                 });
             }
             has_next_page = repo.refs.page_info.has_next_page;
@@ -510,7 +520,7 @@ impl GithubClient {
     /// possible.
     ///
     /// We use `tokio::task::spawn_blocking` to make sure we don't make any other async functions
-    /// hang. `Command::new` does block.
+    /// hang. `Command::new` can end up blocking other threads.
     pub async fn sync_annotated_tags(
         &self,
         tags: &IndexSet<TagInfo>,
@@ -522,8 +532,10 @@ impl GithubClient {
         }
         let _semaphore_lock = self.semaphore.clone().acquire_owned().await?;
         let tags = tags.clone();
+        let tag_len = tags.len();
         let ssh_url = ssh_url.to_string();
-        tokio::task::spawn_blocking(move || {
+        let output_url = ssh_url.to_string();
+        let result = tokio::task::spawn_blocking(move || {
             let parent_urls: Vec<String> = parent_urls.into_iter().collect();
 
             // Use a temp directory for the git repository so it's cleaned up automatically
@@ -574,63 +586,52 @@ impl GithubClient {
                         .status()?;
                 }
             }
-            let mut all_fetch_args: Vec<Vec<String>> = Vec::new();
-            // Only fetch the annotated tags that we're interested in adding to our fork.
-            // Lightweight tags can be synced automatically with github
-            for (i, parent_url) in parent_urls.iter().enumerate() {
-                let tags = tags
-                    .iter()
-                    .filter(|t| t.url == *parent_url)
-                    .collect::<Vec<&TagInfo>>();
-                let mut fetch_args: Vec<String> = vec![
-                    "-C".to_string(),
-                    tmp_str.to_string(),
-                    "fetch".to_string(),
-                    "--filter=blob:none".to_string(),
-                    "--depth=1".to_string(),
-                    format!("upstream{i}"),
-                ];
-                for tag in &tags {
-                    println!("Parent url: {parent_url}, tag parent url: {}", tag.name);
-                    println!("Tag: {tag:#?}");
-                    fetch_args.push("tag".to_string());
-                    fetch_args.push(tag.name.to_string());
-                }
-                all_fetch_args.push(fetch_args);
-            }
-            /*
+            let mut branches_to_add_update:Vec<String> = Vec::new();
             for tag in &tags {
-                if let Some(parent) = &tag.parent_url {
-                    if parent == parent_url {
-                        fetch_args.push("tag");
-                        fetch_args.push(tag.name.as_str());
-
+                let fetch_status = Command::new("git")
+                    .args([
+                        "-C",
+                        tmp_str,
+                        "fetch",
+                        &tag.url,
+                        &format!("refs/tags/{}:refs/tags/{}", tag.name, tag.name),
+                    ])
+                    .status()?;
+                if !fetch_status.success() {
+                    return Err(GitError::Other(format!(
+                        "Failed to fetch annotated tag {} from ",
+                        tag.name,
+                    )));
+                }
+                if let Some(sha) = tag.commit_sha.as_ref() {
+                    let output = Command::new("git")
+                        .args([
+                            "-C",
+                            tmp_str,
+                            "-r",
+                            "contains",
+                            sha,
+                        ])
+                        .output()?;
+                    if !output.status.success() {
+                        eprintln!("Commit {sha} does not exist in any configured remote.");
+                    }
+                    let branch_output = String::from_utf8_lossy(&output.stdout);
+                    if !branch_output.contains("origin") {
+                        for line in branch_output.lines() {
+                            branches_to_add_update.push(line.trim().to_string());
+                        }
                     }
                 }
             }
-
-            }
-            let mut fetch_args = vec![
-                "-C",
-                tmp_str,
-                "fetch",
-                "--filter=blob:none",
-                "--depth=1",
-                "upstream",
-            ];
-            for tag in &tags {
-                fetch_args.push("tag");
-                fetch_args.push(tag.name.as_str());
-            }
-            */
-
-            for fetch in all_fetch_args {
-                let status = Command::new("git").args(&fetch).status()?;
-                if !status.success() {
-                    return Err(GitError::Other(
-                        "Failed to fetch annotated tags from upstream remote".to_string(),
-                    ));
+            let mut slack_error = String::new();
+            if !branches_to_add_update.is_empty() {
+                slack_error = String::from("You are likely missing some commits for the new annotated tags.\nThe following branches may need to be added or updated:\n");
+                for branch in branches_to_add_update {
+                    // using write/writeln prevents allocating a new string every time we add to it, as compared to format!() 
+                    let _ = writeln!(slack_error, "\t• {branch}");
                 }
+                eprint!("{slack_error}");
             }
 
             // Only push the newly added annotated tags
@@ -639,13 +640,37 @@ impl GithubClient {
 
             let status = Command::new("git").args(&push_args).status()?;
             if !status.success() {
-                return Err(GitError::Other(format!(
+                              return Err(GitError::Other(format!(
                     "Failed to push annotated tags to {ssh_url}"
                 )));
             }
-            Ok(())
+            if slack_error.is_empty() {
+                Ok(None)
+            } else {
+                Ok(Some(slack_error))
+            }
         })
-        .await?
+        .await?;
+        match result {
+            Ok(Some(err)) => {
+                self.append_slack_error(err).await;
+            }
+            Ok(None) => {
+                if self.is_tty {
+                    println!("Successfully synced {tag_len} annotated tags in {output_url}");
+                }
+            }
+            Err(e) => {
+                self.append_slack_error(format!(
+                    ":x: Failed to sync annotated tags in {output_url}: {e}"
+                ))
+                .await;
+                return Err(GitError::Other(format!(
+                    "Failed to sync annotated tags in {output_url}: {e}"
+                )));
+            }
+        }
+        Ok(())
     }
 
     /// Create a tag for a specific repository
@@ -794,4 +819,114 @@ impl GithubClient {
         }
         Ok(())
     }
+}
+fn get_local_branches(path: &Path) -> Result<HashMap<String, String>, GitError> {
+    let mut branches = HashMap::new();
+
+    let output = if path.exists() {
+        let path = path.to_string_lossy();
+        Command::new("git")
+            .args([
+                "-C",
+                &path,
+                "for-each-ref",
+                "--format=%(refname:short) %(objectname)",
+                "refs/heads/",
+            ])
+            .output()?
+    } else {
+        return Err(GitError::Other("Invalid path".to_string()));
+    };
+    if !output.status.success() {
+        return Err(GitError::Other("Failed to get local branches".to_string()));
+    }
+
+    let branch_output = String::from_utf8_lossy(&output.stdout);
+    for line in branch_output.lines() {
+        let mut parts = line.split_whitespace();
+        let name = parts.next().unwrap_or("").to_string();
+        let sha = parts.next().unwrap_or("").to_string();
+        branches.insert(name, sha);
+    }
+
+    Ok(branches)
+}
+
+fn get_remote_branches(url: &str) -> Result<HashMap<String, String>, GitError> {
+    let mut branches = HashMap::new();
+
+    let output = Command::new("git")
+        .args(["ls-remote", "--heads", url])
+        .output()?;
+
+    if !output.status.success() {
+        return Err(GitError::Other("Failed to get remote branches".to_string()));
+    }
+
+    let branch_output = String::from_utf8_lossy(&output.stdout);
+
+    for line in branch_output.lines() {
+        let mut parts = line.split_whitespace();
+        let sha = parts.next().unwrap_or("").to_string();
+        let ref_name = parts.next().unwrap_or("");
+        if let Some(name) = ref_name.strip_prefix("refs/heads/") {
+            branches.insert(name.to_string(), sha);
+        }
+    }
+
+    Ok(branches)
+}
+
+fn get_local_commit_branch(commit: &str, path: &Path) -> Result<HashSet<String>, GitError> {
+    let mut branches = HashSet::new();
+    let output = if path.exists() {
+        let path = path.to_string_lossy();
+        Command::new("git")
+            .args(["-C", &path, "branch", "--contains", commit])
+            .output()?
+    } else {
+        return Err(GitError::Other("Invalid path".to_string()));
+    };
+    if !output.status.success() {
+        return Err(GitError::Other(
+            "Failed to get containing branch".to_string(),
+        ));
+    }
+    let branches_output = String::from_utf8_lossy(&output.stdout);
+    for line in branches_output.lines() {
+        let branch = line.trim().trim_start_matches('*').trim();
+        if !branch.is_empty() {
+            branches.insert(branch.to_string());
+        }
+    }
+    Ok(branches)
+}
+fn get_remote_commit_branch(commit: &str, path: &Path) -> Result<HashSet<String>, GitError> {
+    let mut branches: HashSet<String> = HashSet::new();
+    let output = if path.exists() {
+        let path = path.to_string_lossy();
+        Command::new("git")
+            .args(["-C", &path, "branch", "-r", "--contains", commit])
+            .output()?
+    } else {
+        return Err(GitError::Other("Invalid path".to_string()));
+    };
+
+    if !output.status.success() {
+        return Err(GitError::Other(
+            "Failed to get containing branch".to_string(),
+        ));
+    }
+
+    let branches_output = String::from_utf8_lossy(&output.stdout);
+    for line in branches_output.lines() {
+        if line.contains("->") {
+            let name = line.split("->").last().unwrap_or("").trim();
+            if !name.is_empty() {
+                branches.insert(name.to_string());
+            }
+        }
+    }
+
+    Ok(branches)
 }

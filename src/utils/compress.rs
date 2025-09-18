@@ -56,9 +56,9 @@ pub fn compress_directory(path: &Path) -> Result<PathBuf, GitError> {
     )))
 }
 
-/// Extract a tar.gz. Mostly needed for the test below
+/// Extract a tar.gz. This is only needed to test that the compression functions as expected
 #[allow(unused)]
-pub fn decode_tar_gz(path: &Path, dest: &Path) -> Result<PathBuf, GitError> {
+fn decode_tar_gz(path: &Path, dest: &Path) -> Result<PathBuf, GitError> {
     if !path.exists() {
         return Err(GitError::FileDoesNotExist(
             path.to_string_lossy().to_string(),
@@ -100,11 +100,11 @@ pub fn decode_tar_gz(path: &Path, dest: &Path) -> Result<PathBuf, GitError> {
 
 #[cfg(test)]
 mod tests {
+    use crate::utils::compress::{compress_directory, decode_tar_gz};
     use std::path::PathBuf;
     use std::{fs::File, io::Write};
-
-    use crate::utils::compress::{compress_directory, decode_tar_gz};
     use temp_dir::TempDir;
+
     #[test]
     fn test_compress_directory() {
         let tmp_dir = TempDir::new().unwrap();

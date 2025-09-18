@@ -131,7 +131,7 @@ async fn match_tag_cmds(
     let result = async {
         match cmd {
             TagCommand::Compare(compare_cmd) => {
-                compare_cmd.validate().map_err(GitError::Other)?;
+                //compare_cmd.validate().map_err(GitError::Other)?;
                 let repository = compare_cmd.repository.as_ref();
                 if compare_cmd.all && !repos.is_empty() {
                     client.diff_all_tags(repos).await?;
@@ -235,10 +235,16 @@ async fn match_repo_cmds(
     match cmd {
         RepoCommand::Sync(sync_cmd) => {
             let repository = sync_cmd.repository.as_ref();
+            let recursive = sync_cmd.recursive;
+            let branch = sync_cmd.branch.as_ref();
             if sync_cmd.all {
-                client.sync_all_forks(repos).await?;
+                client.sync_all_forks(repos, recursive).await?;
             } else if let Some(repository) = repository {
-                client.sync_fork(repository).await?;
+                if recursive {
+                    client.sync_fork_recursive(repository).await?;
+                } else {
+                    client.sync_fork(repository, branch).await?;
+                }
             } else {
                 return Err(GitError::MissingRepositoryName);
             }

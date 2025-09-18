@@ -16,20 +16,24 @@ KIND, either express or implied.  See the License for the
 specific language governing permissions and limitations
 under the License.
 */
-/// Backup repositories
+/// Backup repositories. Contains the Github Client implementation for Backups
 pub mod backup;
-/// Managa branches for repositories
+/// Manage branches for repositories. Contains the Github Client implementation for Branch management
 pub mod branch;
-/// Run various checks and sanity checks for a repository
+/// Run various checks and sanity checks for a repository. Contains the Github Client
+/// implementation for the various repository checks.
 pub mod check;
 /// The top level definition for the Github client
 pub mod client;
-/// Manages forked repositories, particularly updating the fork to match the upstream repository
+/// Manages forked repositories, particularly updating the fork to match the upstream repository.
+/// Contains the Github Client implementation for fork management.
 pub mod fork;
+/// Handle passed arguments
 pub mod match_args;
-/// Used to manage pull requests for libraries
+/// Used to manage pull requests for libraries. Contains the Github Client implementation for
+/// managing PRs
 pub mod pr;
-/// Manage releases
+/// Manage releases. Contains the Github Client implementation for managing releases
 pub mod release;
-/// Manage tags
+/// Manage tags. Contains the Github Client implementation for managing tags
 pub mod tag;

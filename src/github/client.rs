@@ -33,8 +33,8 @@ use std::fmt::Write as _;
 use std::io::IsTerminal;
 use std::sync::Arc;
 use tokio::sync::OnceCell;
-/// Contains information about tags that are missing for a forked repo.
 
+/// Contains information about tags that are missing for a forked repo.
 #[derive(Debug)]
 pub struct Comparison {
     /// An ordered set of tags that are missing in the fork repository
@@ -78,6 +78,7 @@ pub enum OutputMode {
 }
 
 impl GithubClient {
+    /// Initialize a new Github client
     pub fn new(github_token: &str, config: &Config, max_jobs: usize) -> Result<Self, GitError> {
         let octocrab = Octocrab::builder()
             .personal_token(github_token)
