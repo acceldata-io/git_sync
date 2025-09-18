@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"mod":["macros","pr","repo","tables","user"]};
+window.SIDEBAR_ITEMS = {"mod":["compress","macros","pr","repo","tables","user"]};

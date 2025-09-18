@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"struct":["PageInfo","ParentRepo","Refs","RepoData","RepoResponse","Repository","TagNode","TagTarget"]};
+window.SIDEBAR_ITEMS = {"fn":["get_local_branches","get_local_commit_branch","get_remote_branches","get_remote_commit_branch"],"struct":["PageInfo","ParentRepo","Refs","RepoData","RepoResponse","Repository","TagNode","TagTarget"]};
