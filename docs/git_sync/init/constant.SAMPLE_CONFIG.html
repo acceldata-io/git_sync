@@ -2,15 +2,6 @@
 [github]
 #token = &quot;Add your github api token here&quot;
 
-# The &#39;git&#39; section here doesn&#39;t currently do anything
-[git]
-#default_directory = &quot;/path/to/repos&quot;
-#Use shallow clones by default to use less disk space,
-#bandwidth, and decrease processing time
-shallow_by_default = true
-#owner = &quot;set owner organization/user here&quot;
-#email = &quot;email here&quot;
-
 # Needed if you want slack integration
 # webhook_url should be an https address
 [slack]
@@ -41,7 +32,16 @@ webhook_url = &quot;&quot;
 # a search of stale branches, AKA branches that should never be
 # reported as being old, no matter when they were last updated.
 branch_blacklist = [&quot;main&quot;, &quot;master&quot;]
-
+# A list of licenses that you will be warned about. 
+# You must use their spdx id
+# A list of many of these can be found at https://spdx.org/licenses/
+license_blacklist = [
+    &quot;CC-BY-NC-4.0&quot;, 
+    &quot;GPL-3.0-or-later&quot;, 
+    &quot;GPL-3.0-only&quot;, 
+    &quot;GPL-2.0-or-later&quot;
+    &quot;GPL-2.0-only&quot;,
+]
 &quot;#;</code></pre><details class="toggle top-doc" open><summary class="hideme"><span>Expand description</span></summary><div class="docblock"><p>A basic sample configuration that can be initialized
 by using the <code>config</code> command</p>
 </div></details></section></div></main></body></html>
