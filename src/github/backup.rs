@@ -172,7 +172,7 @@ impl GithubClient {
     /// dependiing on the number of repositories and their sizes
     pub async fn backup_all_repos(
         &self,
-        repositories: Vec<String>,
+        repositories: &[impl std::fmt::Display + AsRef<str> + ToString],
         path: &Path,
     ) -> Result<Vec<PathBuf>, GitError> {
         let mut futures = FuturesUnordered::new();
@@ -204,7 +204,7 @@ impl GithubClient {
         for repo in repositories {
             //let progress = progress.clone();
             futures.push(async move {
-                let result = self.backup_repo(repo.clone(), path).await;
+                let result = self.backup_repo(repo, path).await;
                 (result, repo)
             });
         }
@@ -237,7 +237,7 @@ impl GithubClient {
                     if let Some(ref progress) = progress {
                         progress.println(format!("Failed to back up repository: {repo}"));
                     }
-                    errors.push((repo, e));
+                    errors.push((repo.to_string(), e));
                 }
             }
         }

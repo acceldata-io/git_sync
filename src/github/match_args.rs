@@ -449,7 +449,7 @@ async fn match_backup_cmds(
             let bucket = create_cmd.bucket.as_ref();
 
             if create_cmd.all {
-                let successful = client.backup_all_repos(repos, path).await?;
+                let successful = client.backup_all_repos(&repos[..], path).await?;
                 if dest == BackupDestination::S3 {
                     if let Some(bucket) = bucket {
                         client.backup_all_to_s3(successful, bucket).await?;
