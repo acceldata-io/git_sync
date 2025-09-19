@@ -33,7 +33,7 @@ use temp_dir::TempDir;
 
 use indexmap::IndexSet;
 use serde_json::json;
-use std::fmt::Write as _;
+use std::fmt::{Display, Write as _};
 
 use crate::github::client::GithubClient;
 
@@ -97,9 +97,9 @@ impl GithubClient {
     /// we can skip the fairly slow git clone and push process
     ///
     /// `IndexSet` is an implementation of an orderered Set.
-    pub async fn get_tags(
+    pub async fn get_tags<T: AsRef<str> + ToString + Copy>(
         &self,
-        url: &str,
+        url: T,
     ) -> Result<(IndexSet<TagInfo>, HashSet<String>), GitError> {
         let info = get_repo_info_from_url(url)?;
         let (owner, repo) = (info.owner, info.repo_name);
@@ -197,7 +197,11 @@ impl GithubClient {
 
         Ok((all_tags, parent_urls))
     }
-    pub async fn compare_tags(&self, url: &str, parent: &RepoInfo) -> Result<Comparison, GitError> {
+    pub async fn compare_tags<T: AsRef<str> + Display + Copy>(
+        &self,
+        url: T,
+        parent: &RepoInfo,
+    ) -> Result<Comparison, GitError> {
         let ((fork_tags, mut fork_parents), (parent_tags, upstream_parents)) =
             try_join(self.get_tags(url), self.get_tags(&parent.url)).await?;
         if self.is_tty {
@@ -269,10 +273,8 @@ impl GithubClient {
     /// Get a diff of all configured repositories tags, compared against their parent.
     pub async fn diff_all_tags(&self, repositories: Vec<String>) -> Result<(), GitError> {
         //let mut futures = FuturesUnordered::new();
-        let repositories: Vec<Result<RepoInfo, _>> = repositories
-            .iter()
-            .map(|url| get_repo_info_from_url(url))
-            .collect();
+        let repositories: Vec<Result<RepoInfo, _>> =
+            repositories.iter().map(get_repo_info_from_url).collect();
 
         let mut diffs: HashMap<String, Comparison> = HashMap::new();
 
@@ -314,7 +316,11 @@ impl GithubClient {
 
     /// Sync many tags asynchronously. We can use the github api to sync lightweight tags, but to
     /// sync annotated tags we need to use git. Unfortunately there's no way around that.
-    pub async fn sync_tags(&self, url: &str, process_annotated: bool) -> Result<(), GitError> {
+    pub async fn sync_tags<T: AsRef<str> + Display + Copy>(
+        &self,
+        url: T,
+        process_annotated: bool,
+    ) -> Result<(), GitError> {
         let info = get_repo_info_from_url(url)?;
         let parent = self.get_parent_repo(url).await?;
         let (owner, repo) = (info.owner, info.repo_name);
@@ -427,15 +433,15 @@ impl GithubClient {
         Ok(())
     }
     /// Sync tags for all configured repositories
-    pub async fn sync_all_tags(
+    pub async fn sync_all_tags<T: AsRef<str> + ToString + Display>(
         &self,
         process_annotated: bool,
-        repositories: Vec<String>,
+        repositories: &[T],
     ) -> Result<(), GitError> {
         let mut futures = FuturesUnordered::new();
         for url in repositories {
             futures.push(async move {
-                let result = self.sync_tags(&url, process_annotated).await;
+                let result = self.sync_tags(url, process_annotated).await;
                 (url, result)
             });
         }
@@ -451,12 +457,10 @@ impl GithubClient {
                     }
                 }
                 Err(e) => {
-                    /*
                     self.append_slack_error(format!("❌ Failed to sync tags for {repo}: {e}"))
                         .await;
-                    */
                     eprintln!("❌ Failed to sync tags for {repo}");
-                    errors.push((repo, e));
+                    errors.push((repo.to_string(), e));
                 }
             }
         }
@@ -470,8 +474,8 @@ impl GithubClient {
     /// using the github api, so we don't need to call out to
     pub async fn sync_lightweight_tag(
         &self,
-        owner: &str,
-        repo: &str,
+        owner: impl AsRef<str> + Display,
+        repo: impl AsRef<str> + Display,
         tag: &TagInfo,
     ) -> Result<(), GitError> {
         let body = json!({
@@ -522,7 +526,7 @@ impl GithubClient {
     pub async fn sync_annotated_tags(
         &self,
         tags: &IndexSet<TagInfo>,
-        ssh_url: &str,
+        ssh_url: impl AsRef<str> + ToString,
         parent_urls: HashSet<String>,
     ) -> Result<(), GitError> {
         if tags.is_empty() {
@@ -672,7 +676,12 @@ impl GithubClient {
     }
 
     /// Create a tag for a specific repository
-    pub async fn create_tag(&self, url: &str, tag: &str, branch: &str) -> Result<(), GitError> {
+    pub async fn create_tag(
+        &self,
+        url: impl AsRef<str> + Copy,
+        tag: impl AsRef<str> + ToString + Display,
+        branch: impl AsRef<str> + Display,
+    ) -> Result<(), GitError> {
         let info = get_repo_info_from_url(url)?;
         let sha = self.get_branch_sha(url, branch).await?;
         let (owner, repo) = (info.owner, info.repo_name);
@@ -716,11 +725,15 @@ impl GithubClient {
     }
 
     /// Create the tag for all configured repositories
-    pub async fn create_all_tags(
+    pub async fn create_all_tags<
+        T: AsRef<str> + ToString + Display + Copy,
+        U: AsRef<str> + ToString + Display + Copy,
+        V: AsRef<str> + ToString + Display,
+    >(
         &self,
-        tag: &str,
-        branch: &str,
-        repositories: Vec<String>,
+        tag: T,
+        branch: U,
+        repositories: &[V],
     ) -> Result<(), GitError> {
         let mut futures = FuturesUnordered::new();
         for repo in repositories {
@@ -745,7 +758,14 @@ impl GithubClient {
 
     /// Delete the specified tag for a repository. Deleting a tag does not necessarily return a
     /// json response, so we handle this one differently
-    pub async fn delete_tag(&self, url: &str, tag: &str) -> Result<(), GitError> {
+    pub async fn delete_tag<
+        T: AsRef<str> + ToString + Display,
+        U: AsRef<str> + ToString + Display,
+    >(
+        &self,
+        url: T,
+        tag: U,
+    ) -> Result<(), GitError> {
         let info = get_repo_info_from_url(url)?;
         let (owner, repo) = (info.owner, info.repo_name);
 
@@ -792,10 +812,13 @@ impl GithubClient {
     }
 
     /// Delete the specified tag for all configured repositories
-    pub async fn delete_all_tags(
+    pub async fn delete_all_tags<
+        T: AsRef<str> + ToString + Display + Copy,
+        U: AsRef<str> + ToString + Display,
+    >(
         &self,
-        tag: &str,
-        repositories: &Vec<String>,
+        tag: T,
+        repositories: &[U],
     ) -> Result<(), GitError> {
         let mut futures = FuturesUnordered::new();
         for repo in repositories {

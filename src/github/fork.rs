@@ -24,9 +24,9 @@ use crate::{async_retry, handle_api_response};
 use chrono::DateTime;
 use futures::{StreamExt, stream::FuturesUnordered};
 use octocrab::params::repos::Reference;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
-use std::fmt::Write;
+use std::fmt::{Display, Write};
 use std::sync::Arc;
 
 /// Graphql query to fetch branches and their commit dates
@@ -94,8 +94,12 @@ struct BranchCommits {
 impl GithubClient {
     /// Sync a single repository with its parent repository. Optionally, specify a branch to sync.
     /// You may need to do this if a new tag points to a commit in specific branch.
-    pub async fn sync_fork(&self, url: &str, branch: Option<&String>) -> Result<(), GitError> {
-        let info = get_repo_info_from_url(url)?;
+    pub async fn sync_fork<T: AsRef<str>>(
+        &self,
+        url: T,
+        branch: Option<&String>,
+    ) -> Result<(), GitError> {
+        let info = get_repo_info_from_url(&url)?;
         let (owner, repo) = (info.owner, info.repo_name);
         println!("Syncing {owner}/{repo} with its parent repository...");
 
@@ -130,10 +134,10 @@ impl GithubClient {
         Ok(())
     }
     /// Fetch all branches for a single repository
-    async fn fetch_branches(
+    async fn fetch_branches<T: AsRef<str> + Serialize, U: AsRef<str> + Serialize>(
         &self,
-        owner: &str,
-        repository: &str,
+        owner: T,
+        repository: U,
     ) -> Result<HashMap<String, String>, GitError> {
         let mut branches: HashMap<String, String> = HashMap::new();
         let mut has_next_page = true;
@@ -174,8 +178,8 @@ impl GithubClient {
     }
     /// Go through and try to sync every branch that's common between both the fork and its parent.
     /// This operation takes longer than only syncing one branch
-    pub async fn sync_fork_recursive(&self, url: &str) -> Result<(), GitError> {
-        let info = get_repo_info_from_url(url)?;
+    pub async fn sync_fork_recursive<T: AsRef<str>>(&self, url: T) -> Result<(), GitError> {
+        let info = get_repo_info_from_url(&url)?;
         let (owner, repo) = (info.owner, info.repo_name);
         println!("Syncing {owner}/{repo} with its parent repository...");
 
@@ -256,9 +260,9 @@ impl GithubClient {
 
     /// Sync all configured repositories. Only repositories that have a parent repository
     /// should be passed to this function
-    pub async fn sync_all_forks(
+    pub async fn sync_all_forks<T: AsRef<str> + Display>(
         &self,
-        repositories: Vec<String>,
+        repositories: &[T],
         recursive: bool,
     ) -> Result<(), GitError> {
         let mut futures = FuturesUnordered::new();
@@ -268,7 +272,7 @@ impl GithubClient {
                 let result = if recursive {
                     self.sync_fork_recursive(&repo).await
                 } else {
-                    self.sync_fork(&repo, None).await
+                    self.sync_fork(repo, None).await
                 };
                 drop(semaphore_permit);
                 (repo, result)
@@ -291,7 +295,7 @@ impl GithubClient {
         }
         Ok(())
     }
-
+    #[allow(dead_code)]
     pub async fn add_branch_from_upstream(
         &self,
         owner: &str,

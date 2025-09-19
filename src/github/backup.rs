@@ -48,7 +48,11 @@ const PART_SIZE: usize = 64 * 1024 * 1024;
 impl GithubClient {
     /// Backup a single repository into the specified folder. If the backup already exists, try to
     /// update it instead of cloning again.
-    pub async fn backup_repo(&self, url: String, path: &Path) -> Result<PathBuf, GitError> {
+    pub async fn backup_repo<T: AsRef<str>>(
+        &self,
+        url: T,
+        path: &Path,
+    ) -> Result<PathBuf, GitError> {
         let semaphore_lock = Arc::clone(&self.semaphore).acquire_owned().await?;
         let canonical_path = if let Ok(p) = path.canonicalize() {
             p
@@ -56,7 +60,7 @@ impl GithubClient {
             path.to_path_buf()
         };
 
-        let ssh_url = http_to_ssh_repo(&url)?;
+        let ssh_url = http_to_ssh_repo(url.as_ref())?;
 
         let Some(name) = ssh_url.split('/').next_back() else {
             return Err(GitError::Other(format!(
@@ -71,7 +75,7 @@ impl GithubClient {
 
         if let Some(t) = self.output.get() {
             if *t == OutputMode::Print && self.is_tty {
-                println!("Backing up repository {url} to path: {path}");
+                println!("Backing up repository {} to path: {path}", url.as_ref());
             }
         }
         // If the mirrored repo already exists, update it rather than clone again
@@ -333,8 +337,12 @@ impl GithubClient {
     ///
     /// The path needs to point to an uncompressed git mirror. It will be compressed before upload,
     /// and the compressed file will be removed after upload.
-    #[allow(too_many_lines)]
-    pub async fn backup_to_s3(&self, file_path: &Path, bucket: &str) -> Result<(), GitError> {
+    #[allow(clippy::too_many_lines)]
+    pub async fn backup_to_s3<T: AsRef<str>>(
+        &self,
+        file_path: &Path,
+        bucket: T,
+    ) -> Result<(), GitError> {
         let region = RegionProviderChain::default_provider().or_else("ca-central-1");
         let region_name = if let Some(name) = region.region().await {
             name.to_string()
@@ -396,7 +404,7 @@ impl GithubClient {
                 .map_err(|e| GitError::Other(e.to_string()))?;
             client
                 .put_object()
-                .bucket(bucket)
+                .bucket(bucket.as_ref())
                 .key(key_name)
                 .content_type("application/gzip")
                 .body(body)
@@ -410,7 +418,10 @@ impl GithubClient {
                 String::new()
             };
 
-            let s3_url = format!("https://{bucket}.s3.{region_name}.amazonaws.com/{name}");
+            let s3_url = format!(
+                "https://{}.s3.{region_name}.amazonaws.com/{name}",
+                bucket.as_ref()
+            );
 
             if region_name.is_empty() {
                 self.append_slack_message(format!("Uploaded backup {name} to {s3_url}",))
@@ -436,7 +447,7 @@ impl GithubClient {
         // Initiate the multipart upload
         let response = client
             .create_multipart_upload()
-            .bucket(bucket)
+            .bucket(bucket.as_ref())
             .key(&key_name)
             .content_type("application/gzip")
             .send()
@@ -462,7 +473,7 @@ impl GithubClient {
 
             buffer.truncate(n);
             let client = Arc::clone(&client);
-            let bucket = bucket.to_string();
+            let bucket = bucket.as_ref().to_string();
             let upload_id = upload_id.to_string();
             let local_part_number = part_number;
 
@@ -477,10 +488,11 @@ impl GithubClient {
             let key = key_name.to_string();
 
             futures.push(tokio::spawn(async move {
+                let bucket = bucket.to_string();
                 let _lock = lock;
                 let response = client
                     .upload_part()
-                    .bucket(&bucket)
+                    .bucket(bucket)
                     .key(key)
                     .upload_id(&upload_id)
                     .part_number(local_part_number)
@@ -527,7 +539,7 @@ impl GithubClient {
 
         let response = client
             .complete_multipart_upload()
-            .bucket(bucket)
+            .bucket(bucket.as_ref())
             .key(key_name)
             .upload_id(upload_id)
             .multipart_upload(completed_upload)
@@ -560,10 +572,10 @@ impl GithubClient {
         Ok(())
     }
     /// Backup all repositories to S3
-    pub async fn backup_all_to_s3(
+    pub async fn backup_all_to_s3<T: AsRef<str>>(
         &self,
         paths: Vec<PathBuf>,
-        bucket: &str,
+        bucket: T,
     ) -> Result<(), GitError> {
         let mut errors: Vec<(String, GitError)> = Vec::new();
         let mut futures = FuturesUnordered::new();
@@ -583,8 +595,8 @@ impl GithubClient {
         } else {
             None
         };
-
         for path in &paths {
+            let bucket = bucket.as_ref();
             let file_path = path.canonicalize()?;
             futures.push(async move {
                 let result = self.backup_to_s3(&file_path, bucket).await;
@@ -596,7 +608,7 @@ impl GithubClient {
                     Ok(()) => {
                         if let Some(ref pb) = progress {
                             pb.inc(1);
-                            pb.println(format!("Uploaded {} to {bucket}", path.to_string_lossy()));
+                            pb.println(format!("Uploaded {bucket} to {}", path.to_string_lossy()));
                         }
                     }
                     Err(e) => {

@@ -79,9 +79,13 @@ pub enum OutputMode {
 
 impl GithubClient {
     /// Initialize a new Github client
-    pub fn new(github_token: &str, config: &Config, max_jobs: usize) -> Result<Self, GitError> {
+    pub fn new<T: AsRef<str>>(
+        github_token: T,
+        config: &Config,
+        max_jobs: usize,
+    ) -> Result<Self, GitError> {
         let octocrab = Octocrab::builder()
-            .personal_token(github_token)
+            .personal_token(github_token.as_ref())
             .build()
             .map_err(GitError::GithubApiError)?;
         // Shadow max_jobs. This value makes no sense if it's less than 1
@@ -100,8 +104,8 @@ impl GithubClient {
         })
     }
     /// Get the parent repository of a github repository.
-    pub async fn get_parent_repo(&self, url: &str) -> Result<RepoInfo, GitError> {
-        let info = get_repo_info_from_url(url)?;
+    pub async fn get_parent_repo<T: AsRef<str>>(&self, url: T) -> Result<RepoInfo, GitError> {
+        let info = get_repo_info_from_url(url.as_ref())?;
         let (owner, repo) = (info.owner, info.repo_name);
         let octocrab = self.octocrab.clone();
 
@@ -124,7 +128,7 @@ impl GithubClient {
 
         let url = parent
             .html_url
-            .ok_or_else(|| GitError::InvalidRepository(url.to_string()))?
+            .ok_or_else(|| GitError::InvalidRepository(url.as_ref().to_string()))?
             .to_string();
         Ok(RepoInfo {
             owner: parent_owner,
@@ -204,20 +208,20 @@ impl GithubClient {
     }
     /// Appends success messages to be sent to slack at the end. The message will only be sent if
     /// slack integration is enabled and the webhook url is set.
-    pub async fn append_slack_message(&self, msg: String) {
+    pub async fn append_slack_message<T: Into<String>>(&self, msg: T) {
         #[cfg(feature = "slack")]
         {
             let mut message = self.slack_messages.lock().await;
-            message.push(msg);
+            message.push(msg.into());
         }
     }
     /// Append an error message to be sent to slack at the end. The message will only be sent if
     /// slack integartion is enabled and the webhhook url is set.
-    pub async fn append_slack_error(&self, msg: String) {
+    pub async fn append_slack_error<T: Into<String>>(&self, msg: T) {
         #[cfg(feature = "slack")]
         {
             let mut message = self.slack_errors.lock().await;
-            message.push(msg);
+            message.push(msg.into());
         }
     }
     /// This can be used to send the contents of `slack_messages` and `slack_errors` to slack in

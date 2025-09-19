@@ -23,10 +23,15 @@ use crate::github::client::GithubClient;
 use crate::utils::repo::get_repo_info_from_url;
 use futures::{StreamExt, stream::FuturesUnordered};
 use octocrab::params::repos::Reference;
+use std::fmt::Display;
 
 impl GithubClient {
     /// Get the most recent commit of a branch, so we can use that to create and delete it
-    pub async fn get_branch_sha(&self, url: &str, branch: &str) -> Result<String, GitError> {
+    pub async fn get_branch_sha<T: AsRef<str>, U: AsRef<str> + ToString>(
+        &self,
+        url: T,
+        branch: U,
+    ) -> Result<String, GitError> {
         let info = get_repo_info_from_url(url)?;
         let (owner, repo) = (info.owner, info.repo_name);
 
@@ -61,9 +66,9 @@ impl GithubClient {
     /// Create a branch from some base branch in a repository
     pub async fn create_branch(
         &self,
-        url: &str,
-        base_branch: &str,
-        new_branch: &str,
+        url: impl AsRef<str>,
+        base_branch: impl AsRef<str> + ToString,
+        new_branch: impl AsRef<str> + ToString,
     ) -> Result<(), GitError> {
         let info = get_repo_info_from_url(url)?;
         let (owner, repo) = (info.owner, info.repo_name);
@@ -114,19 +119,19 @@ impl GithubClient {
         }
     }
     /// Create the passed branch for each repository provided
-    pub async fn create_all_branches(
+    pub async fn create_all_branches<T: AsRef<str> + Display + Copy, U: AsRef<str> + Display>(
         &self,
-        base_branch: &str,
-        new_branch: &str,
-        repositories: &Vec<String>,
+        base_branch: T,
+        new_branch: T,
+        repositories: &[U],
     ) -> Result<(), GitError> {
         let mut futures = FuturesUnordered::new();
         for repo in repositories {
             // Limit the number of jobs
             let semaphore_permit = self.semaphore.clone().acquire_owned().await?;
-
+            let base_branch = base_branch.to_string();
             futures.push(async move {
-                let result = self.create_branch(repo, base_branch, new_branch).await;
+                let result = self.create_branch(repo, &base_branch, &new_branch).await;
                 // Drop this variable after the above function has finished.
                 // Free a slot for another job to run
                 drop(semaphore_permit);
@@ -153,7 +158,14 @@ impl GithubClient {
         Ok(())
     }
     /// Delete a branch from a repository
-    pub async fn delete_branch(&self, url: &str, branch: &str) -> Result<(), GitError> {
+    pub async fn delete_branch<
+        T: AsRef<str> + ToString + Display,
+        U: AsRef<str> + ToString + Display,
+    >(
+        &self,
+        url: T,
+        branch: U,
+    ) -> Result<(), GitError> {
         let info = get_repo_info_from_url(url)?;
         let (owner, repo) = (info.owner, info.repo_name);
         // Acquire a lock on the semaphore
@@ -184,10 +196,13 @@ impl GithubClient {
         }
     }
     /// Delete the specified branch for each configured repository
-    pub async fn delete_all_branches(
+    pub async fn delete_all_branches<
+        T: AsRef<str> + ToString + Display + Copy,
+        U: AsRef<str> + ToString + Display,
+    >(
         &self,
-        branch: &str,
-        repositories: &Vec<String>,
+        branch: T,
+        repositories: &[U],
     ) -> Result<(), GitError> {
         let mut futures = FuturesUnordered::new();
         for repo in repositories {

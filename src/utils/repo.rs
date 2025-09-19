@@ -75,7 +75,7 @@ impl Hash for TagInfo {
 }
 
 /// The different types of tags
-#[derive(Debug, Deserialize, PartialEq, Eq, Hash, Clone)]
+#[derive(Debug, Deserialize, PartialEq, Eq, Hash, Clone, Copy)]
 pub enum TagType {
     Annotated,
     Lightweight,
@@ -188,7 +188,7 @@ pub struct RepoChecks {
 }
 
 /// Parse the owner and repository name from a github repository url.
-pub fn get_repo_info_from_url(url: &str) -> Result<RepoInfo, GitError> {
+pub fn get_repo_info_from_url<T: AsRef<str>>(url: T) -> Result<RepoInfo, GitError> {
     // Named capture groups for the owner and the repo
     // Use the OnceLock to ensure we only compile the regex once, improving performance greatly
     // compared to compiling the regex each time
@@ -198,13 +198,13 @@ pub fn get_repo_info_from_url(url: &str) -> Result<RepoInfo, GitError> {
         // we don't need to capture it.
         //
         // "The repository name can only contain ASCII letters, digits, and the characters ., -, and _."
-        let msg = format!("Invalid regex for {url}");
+        let msg = format!("Invalid regex for {}", url.as_ref());
         Regex::new(
             r"^(?:https://github.com/)?(?P<owner>[A-Za-z0-9._-]+)/(?P<repo>[A-Za-z0-9._-]+)(?:\.git)?/?$",
         )
         .expect(&msg)
     });
-    let url = url.trim();
+    let url = url.as_ref().trim();
     if let Some(captures) = repo_regex.captures(url)? {
         let owner = match captures.name("owner") {
             Some(m) => m.as_str().to_string(),
@@ -232,8 +232,8 @@ pub fn get_repo_info_from_url(url: &str) -> Result<RepoInfo, GitError> {
 
 /// Convert an https github url to a clonable SSH URL, needed for cloning a repository
 /// in order to be able to push to the repository
-pub fn http_to_ssh_repo(url: &str) -> Result<String, GitError> {
-    let url = url.trim();
+pub fn http_to_ssh_repo<T: AsRef<str>>(url: T) -> Result<String, GitError> {
+    let url = url.as_ref().trim();
     if url.starts_with("git@github.com") {
         #[allow(clippy::case_sensitive_file_extension_comparisons)]
         if url.ends_with(".git") {

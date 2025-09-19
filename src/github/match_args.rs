@@ -151,7 +151,7 @@ async fn match_tag_cmds(
                 let repository = create_cmd.repository.as_ref();
 
                 if create_cmd.all {
-                    client.create_all_tags(tag, branch, repos).await?;
+                    client.create_all_tags(tag, branch, &repos[..]).await?;
                 } else if let Some(repository) = repository {
                     client
                         .create_tag(repository, &create_cmd.tag, &create_cmd.branch)
@@ -176,7 +176,9 @@ async fn match_tag_cmds(
                 // By default, this is false
                 let process_annotated_tags = sync_cmd.with_annotated;
                 if sync_cmd.all {
-                    client.sync_all_tags(process_annotated_tags, repos).await?;
+                    client
+                        .sync_all_tags(process_annotated_tags, &repos[..])
+                        .await?;
                 } else if let Some(repository) = repository {
                     client.sync_tags(repository, process_annotated_tags).await?;
                 } else {
@@ -208,7 +210,7 @@ async fn match_branch_cmds(
                 create_cmd.new_branch.clone(),
             );
             if create_cmd.all {
-                client.create_all_branches(&base, &new, &repos).await?;
+                client.create_all_branches(&base, &new, &repos[..]).await?;
             } else if let Some(repository) = repository {
                 client.create_branch(repository, &base, &new).await?;
             }
@@ -240,7 +242,7 @@ async fn match_repo_cmds(
             let recursive = sync_cmd.recursive;
             let branch = sync_cmd.branch.as_ref();
             if sync_cmd.all {
-                client.sync_all_forks(repos, recursive).await?;
+                client.sync_all_forks(&repos[..], recursive).await?;
             } else if let Some(repository) = repository {
                 if recursive {
                     client.sync_fork_recursive(repository).await?;
