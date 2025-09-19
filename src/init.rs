@@ -27,15 +27,6 @@ const SAMPLE_CONFIG: &str = r#"#Git repo syncing configuration
 [github]
 #token = "Add your github api token here"
 
-# The 'git' section here doesn't currently do anything
-[git]
-#default_directory = "/path/to/repos"
-#Use shallow clones by default to use less disk space,
-#bandwidth, and decrease processing time
-shallow_by_default = true
-#owner = "set owner organization/user here"
-#email = "email here"
-
 # Needed if you want slack integration
 # webhook_url should be an https address
 [slack]
@@ -66,7 +57,16 @@ webhook_url = ""
 # a search of stale branches, AKA branches that should never be
 # reported as being old, no matter when they were last updated.
 branch_blacklist = ["main", "master"]
-
+# A list of licenses that you will be warned about. 
+# You must use their spdx id
+# A list of many of these can be found at https://spdx.org/licenses/
+license_blacklist = [
+    "CC-BY-NC-4.0", 
+    "GPL-3.0-or-later", 
+    "GPL-3.0-only", 
+    "GPL-2.0-or-later"
+    "GPL-2.0-only",
+]
 "#;
 
 /// Create a sample config file

@@ -76,7 +76,7 @@ This can be verified by running ldd on the binary:
 ```
 When building this statically using the above toolchain, you will find the binary at `target/x86_64-unknown-linux-musl/release/git_sync`. This binary can only be run on Linux.
 
-##### Security and CVE notes
+#### Security and CVE notes
 There are two things that can be done to ensure there are no known CVEs in the resulting binary:
 
 1. Use `cargo-audit` to check for known vulnerabilities in the rust dependencies. This can be installed by running `cargo install cargo-audit` and then run by executing `cargo audit` in the root of the git_sync repository.
@@ -137,6 +137,7 @@ The important things to add to this configuration file are as follows:
 - Your Github api token
 - Your repositories in their correct category (public, private, or fork). Forks should be anything that has a parent repository
 - Your slack webhook url, if you have enabled Slack integration
+- Optionally, a list of licenses in their spdx id format that you wish to blacklist.
 
 Certain commands require that you have git installed and available in your PATH.
 That includes the following:
@@ -152,7 +153,13 @@ TODO
 
 There are a few tests for some of the helper functions, and they can be executed by running `cargo test`
 
+### Making changes
+
+Before trying to commit any changes, ensure that you run `cargo fmt` to make sure that there are no formatting inconsistencies. There is API reference [hosted on Github](https://jeffreysmith.github.io/git_sync/git_sync/).
+
 ## Usage examples
+
+By default, git_sync uses the `fork` group from the git-manage.toml file. You can also specify `private` or `public`. **TODO** Support arbitrary groups.
 
 ### Syncing a fork with its parent
 ```shell
@@ -165,7 +172,7 @@ $ git_sync repo sync -r https://github.com/my-org/my-forked-repo --branch my_bra
 
 If you want to sync all tags for a given repository, you can use the `--recursive` option. Note that this will take a lot longer because it needs to fetch all branches from the upstream parent as well as the fork branch to get the branches in both; any branches that are present in both where the parent has newer commits will be synced. When used with `--all`, this also requires the `--force` flag to ensure that you really mean to do that.
 
-The `--recursive` option is important when tags in your repositories don't only point to the main branch. In that case, you'll either want to use `--recursive` to sync all out of date branches, or use `--branch` to target a specific branch to sync.
+The `--recursive` option is important when tags in your repositories don't only point to the main branch. In that case, you'll either want to use `--recursive` to sync all out of date branches, or use `--branch` to target a specific branch to sync. This option isn't actually recursively going over anything, but I wanted to keep the nomenclature similar to the `rm` command since that's what many people will be familiar with.
 
 ### Syncing tags
 Before syncing tags, you should sync your fork with its parent repository to ensure that all references that a new tag may point to exist in your fork. At the very least, sync with the repository's main branch, which is the default for `repo sync`. Some repositories' tags point to a specific commit branch, and if you add a tag that does that without having the commits already, the tag may not sync correctly.
@@ -197,7 +204,16 @@ $ git_sync backup create --all -p /path/to/backup/folder --slack
 
 
 #### S3 backup
-**TODO**
+Back ups can also be automatically uploaded to S3. This requires that you have the `aws` feature enabled at build time, and that you have configured your AWS credentials correctly. The bucket you are uploading to must already exist, and you must have write access to it.
+
+You will still need to have enough hard drive space to store your backups. They will be compressed before uploading directly into your specified bucket. This will make the entire backup process take longer.
+
+To do so, you need to use both the `--destination s3` and `--bucket <bucket_name>` flags when uploading to S3. If you only set one of the two, you will get an error before the process starts.
+
+```shell
+$ git_sync backup create -r https://github.com/my-org/my-repo --path /path/to/backup/folder --destination s3 --bucket my-bucket-name
+$ git_sync backup create --all -p /path/to/backup/folder --destination s3 --bucket my-bucket-name --slack
+```
 
 ### Managing branches
 You can create and delete branches for a single repository or for all configured repositories. This is useful when you have a set of common branches across all of your repositories.

@@ -28,7 +28,6 @@ use octocrab::params::repos::Reference;
 use serde::Deserialize;
 use std::collections::{HashMap, HashSet};
 use std::error::Error;
-use std::path::Path;
 use std::process::Command;
 use temp_dir::TempDir;
 
@@ -189,7 +188,6 @@ impl GithubClient {
                     tag_type,
                     sha: tag.target.oid.clone(),
                     url: url.to_string(),
-                    parent_url: parent_url.clone(),
                     commit_sha,
                 });
             }
@@ -819,114 +817,4 @@ impl GithubClient {
         }
         Ok(())
     }
-}
-fn get_local_branches(path: &Path) -> Result<HashMap<String, String>, GitError> {
-    let mut branches = HashMap::new();
-
-    let output = if path.exists() {
-        let path = path.to_string_lossy();
-        Command::new("git")
-            .args([
-                "-C",
-                &path,
-                "for-each-ref",
-                "--format=%(refname:short) %(objectname)",
-                "refs/heads/",
-            ])
-            .output()?
-    } else {
-        return Err(GitError::Other("Invalid path".to_string()));
-    };
-    if !output.status.success() {
-        return Err(GitError::Other("Failed to get local branches".to_string()));
-    }
-
-    let branch_output = String::from_utf8_lossy(&output.stdout);
-    for line in branch_output.lines() {
-        let mut parts = line.split_whitespace();
-        let name = parts.next().unwrap_or("").to_string();
-        let sha = parts.next().unwrap_or("").to_string();
-        branches.insert(name, sha);
-    }
-
-    Ok(branches)
-}
-
-fn get_remote_branches(url: &str) -> Result<HashMap<String, String>, GitError> {
-    let mut branches = HashMap::new();
-
-    let output = Command::new("git")
-        .args(["ls-remote", "--heads", url])
-        .output()?;
-
-    if !output.status.success() {
-        return Err(GitError::Other("Failed to get remote branches".to_string()));
-    }
-
-    let branch_output = String::from_utf8_lossy(&output.stdout);
-
-    for line in branch_output.lines() {
-        let mut parts = line.split_whitespace();
-        let sha = parts.next().unwrap_or("").to_string();
-        let ref_name = parts.next().unwrap_or("");
-        if let Some(name) = ref_name.strip_prefix("refs/heads/") {
-            branches.insert(name.to_string(), sha);
-        }
-    }
-
-    Ok(branches)
-}
-
-fn get_local_commit_branch(commit: &str, path: &Path) -> Result<HashSet<String>, GitError> {
-    let mut branches = HashSet::new();
-    let output = if path.exists() {
-        let path = path.to_string_lossy();
-        Command::new("git")
-            .args(["-C", &path, "branch", "--contains", commit])
-            .output()?
-    } else {
-        return Err(GitError::Other("Invalid path".to_string()));
-    };
-    if !output.status.success() {
-        return Err(GitError::Other(
-            "Failed to get containing branch".to_string(),
-        ));
-    }
-    let branches_output = String::from_utf8_lossy(&output.stdout);
-    for line in branches_output.lines() {
-        let branch = line.trim().trim_start_matches('*').trim();
-        if !branch.is_empty() {
-            branches.insert(branch.to_string());
-        }
-    }
-    Ok(branches)
-}
-fn get_remote_commit_branch(commit: &str, path: &Path) -> Result<HashSet<String>, GitError> {
-    let mut branches: HashSet<String> = HashSet::new();
-    let output = if path.exists() {
-        let path = path.to_string_lossy();
-        Command::new("git")
-            .args(["-C", &path, "branch", "-r", "--contains", commit])
-            .output()?
-    } else {
-        return Err(GitError::Other("Invalid path".to_string()));
-    };
-
-    if !output.status.success() {
-        return Err(GitError::Other(
-            "Failed to get containing branch".to_string(),
-        ));
-    }
-
-    let branches_output = String::from_utf8_lossy(&output.stdout);
-    for line in branches_output.lines() {
-        if line.contains("->") {
-            let name = line.split("->").last().unwrap_or("").trim();
-            if !name.is_empty() {
-                branches.insert(name.to_string());
-            }
-        }
-    }
-
-    Ok(branches)
 }

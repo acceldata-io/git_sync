@@ -19,12 +19,15 @@ under the License.
 
 use crate::error::GitError;
 use crate::github::client::{GithubClient, OutputMode};
+use crate::utils::compress::compress_directory;
 use crate::utils::repo::http_to_ssh_repo;
 use futures::stream::{FuturesUnordered, StreamExt};
 use indicatif::{ProgressBar, ProgressStyle};
+use std::path::PathBuf;
 use std::process::Command;
 use std::sync::Arc;
 use std::{path::Path, process::Stdio};
+use tokio::sync::OnceCell;
 
 use tokio::fs::File;
 use tokio::io::{AsyncReadExt, BufReader};
@@ -43,8 +46,9 @@ use aws_sdk_s3::{
 const PART_SIZE: usize = 64 * 1024 * 1024;
 
 impl GithubClient {
-    /// Backup a single repository into the specified folder
-    pub async fn backup_repo(&self, url: String, path: &Path) -> Result<(), GitError> {
+    /// Backup a single repository into the specified folder. If the backup already exists, try to
+    /// update it instead of cloning again.
+    pub async fn backup_repo(&self, url: String, path: &Path) -> Result<PathBuf, GitError> {
         let semaphore_lock = Arc::clone(&self.semaphore).acquire_owned().await?;
         let canonical_path = if let Ok(p) = path.canonicalize() {
             p
@@ -63,6 +67,7 @@ impl GithubClient {
         let mut path = canonical_path.to_string_lossy().to_string();
         path.push('/');
         path.push_str(name);
+        let output_path = path.clone();
 
         if let Some(t) = self.output.get() {
             if *t == OutputMode::Print && self.is_tty {
@@ -157,7 +162,7 @@ impl GithubClient {
             }
         }
 
-        Ok(())
+        Ok(output_path.into())
     }
     /// Backup all configured repositories into the specified folder. This can take a long time,
     /// dependiing on the number of repositories and their sizes
@@ -165,7 +170,7 @@ impl GithubClient {
         &self,
         repositories: Vec<String>,
         path: &Path,
-    ) -> Result<(), GitError> {
+    ) -> Result<Vec<PathBuf>, GitError> {
         let mut futures = FuturesUnordered::new();
         let number_of_repos = repositories.len();
 
@@ -199,16 +204,21 @@ impl GithubClient {
                 (result, repo)
             });
         }
-
+        let mut successful_backup_paths: Vec<PathBuf> = Vec::new();
         let mut errors: Vec<(String, GitError)> = Vec::new();
         while let Some((result, repo)) = futures.next().await {
             if let Some(ref progress) = progress {
                 progress.inc(1);
             }
             match result {
-                Ok(()) => {
-                    self.append_slack_message(format!("Backed up repository: {repo}"))
-                        .await;
+                Ok(path) => {
+                    self.append_slack_message(format!(
+                        "Backed up repository: {repo} to {}",
+                        path.display()
+                    ))
+                    .await;
+
+                    successful_backup_paths.push(path);
 
                     if let Some(ref progress) = progress {
                         progress.println(format!("Backed up repository: {repo}"));
@@ -228,9 +238,9 @@ impl GithubClient {
             }
         }
         if let Some(progress) = progress {
-            progress.finish();
+            progress.finish_with_message("Finished cloning backups");
         }
-        Ok(())
+        Ok(successful_backup_paths)
     }
     /// This is a way to clean up stale references in a configured backed up repository. This is
     /// still under development, so don't rely on it too much yet.
@@ -320,13 +330,17 @@ impl GithubClient {
     /// Upload a backup to s3. This requires your aws credentials to be configured in the
     /// environment. For small enough files, it will do a single part file upload but if the file
     /// is bigger than `PART_SIZE`, it will instead do a parallel multipart upload.
-    pub async fn backup_to_s3(
-        &self,
-        file_path: &Path,
-        bucket: &str,
-        key: &str,
-    ) -> Result<(), GitError> {
+    ///
+    /// The path needs to point to an uncompressed git mirror. It will be compressed before upload,
+    /// and the compressed file will be removed after upload.
+    #[allow(too_many_lines)]
+    pub async fn backup_to_s3(&self, file_path: &Path, bucket: &str) -> Result<(), GitError> {
         let region = RegionProviderChain::default_provider().or_else("ca-central-1");
+        let region_name = if let Some(name) = region.region().await {
+            name.to_string()
+        } else {
+            String::new()
+        };
 
         // Use the behavour version from when this was developped
         let config = aws_config::defaults(BehaviorVersion::v2025_08_07())
@@ -336,7 +350,35 @@ impl GithubClient {
 
         let client = Arc::new(Client::new(&config));
 
-        let mut file = File::open(file_path).await?;
+        if !file_path.exists() {
+            return Err(GitError::FileDoesNotExist(
+                file_path.to_string_lossy().to_string(),
+            ));
+        }
+
+        if !file_path.is_dir() {
+            return Err(GitError::Other(format!(
+                "File {} is not a directory",
+                file_path.display()
+            )));
+        }
+        if let Some(ext) = file_path.extension() {
+            if ext != "git" {
+                return Err(GitError::Other(format!(
+                    "File {} is not a git mirror",
+                    file_path.display()
+                )));
+            }
+        }
+        let compressed_dir = compress_directory(file_path)?;
+        // We know that this directory exists, so we can unwrap it safely
+        let key_name = compressed_dir
+            .file_name()
+            .unwrap()
+            .to_string_lossy()
+            .to_string();
+
+        let mut file = File::open(&compressed_dir).await?;
         file.set_max_buf_size(PART_SIZE);
         let mut file_buffer = BufReader::new(file);
         let mut part_number = 1;
@@ -349,18 +391,45 @@ impl GithubClient {
         }
 
         if size < PART_SIZE as u64 {
-            let body = aws_sdk_s3::primitives::ByteStream::from_path(file_path)
+            let body = aws_sdk_s3::primitives::ByteStream::from_path(&compressed_dir)
                 .await
                 .map_err(|e| GitError::Other(e.to_string()))?;
             client
                 .put_object()
                 .bucket(bucket)
-                .key(key)
+                .key(key_name)
                 .content_type("application/gzip")
                 .body(body)
                 .send()
                 .await
                 .map_err(|e| GitError::AWSError(e.to_string()))?;
+
+            let name: String = if let Some(file) = compressed_dir.file_name() {
+                file.to_string_lossy().to_string()
+            } else {
+                String::new()
+            };
+
+            let s3_url = format!("https://{bucket}.s3.{region_name}.amazonaws.com/{name}");
+
+            if region_name.is_empty() {
+                self.append_slack_message(format!("Uploaded backup {name} to {s3_url}",))
+                    .await;
+            }
+            self.append_slack_message(format!("Uploaded backup {name} to {s3_url}",))
+                .await;
+
+            if self.is_tty {
+                println!("Uploaded backup {name} to {s3_url}",);
+            }
+            let removal = std::fs::remove_file(&compressed_dir);
+            if removal.is_err() {
+                eprintln!(
+                    "Failed to remove tarball backup file {}",
+                    compressed_dir.display(),
+                );
+            }
+
             return Ok(());
         }
 
@@ -368,7 +437,7 @@ impl GithubClient {
         let response = client
             .create_multipart_upload()
             .bucket(bucket)
-            .key(key)
+            .key(&key_name)
             .content_type("application/gzip")
             .send()
             .await
@@ -394,18 +463,25 @@ impl GithubClient {
             buffer.truncate(n);
             let client = Arc::clone(&client);
             let bucket = bucket.to_string();
-            let key = key.to_string();
             let upload_id = upload_id.to_string();
             let local_part_number = part_number;
 
             let lock = Arc::clone(&self.semaphore).acquire_owned().await?;
-            println!("Starting upload of part {local_part_number}");
+            if self.is_tty
+                && self.output.get() != Some(&crate::github::client::OutputMode::Progress)
+            {
+                println!("Starting upload of part {local_part_number}");
+            }
+            let is_tty = self.is_tty;
+            let output_type: Arc<OnceCell<OutputMode>> = Arc::clone(&self.output);
+            let key = key_name.to_string();
+
             futures.push(tokio::spawn(async move {
                 let _lock = lock;
                 let response = client
                     .upload_part()
                     .bucket(&bucket)
-                    .key(&key)
+                    .key(key)
                     .upload_id(&upload_id)
                     .part_number(local_part_number)
                     .body(buffer.into())
@@ -413,7 +489,11 @@ impl GithubClient {
                     .await
                     .map_err(|e| GitError::AWSError(e.to_string()))?;
                 let etag = response.e_tag().unwrap().to_string();
-                println!("Uploaded part {local_part_number}");
+
+                if is_tty && output_type.get() != Some(&crate::github::client::OutputMode::Progress)
+                {
+                    println!("Uploaded part {local_part_number}");
+                }
 
                 Ok::<(i32, String), GitError>((local_part_number, etag))
             }));
@@ -448,19 +528,89 @@ impl GithubClient {
         let response = client
             .complete_multipart_upload()
             .bucket(bucket)
-            .key(key)
+            .key(key_name)
             .upload_id(upload_id)
             .multipart_upload(completed_upload)
             .send()
             .await
             .map_err(|e| GitError::AWSError(e.to_string()))?;
 
-        println!("Uploaded to {:?}", response.location().unwrap_or_default());
+        self.append_slack_message(format!(
+            "Uploaded backup {} to {}",
+            file_path.display(),
+            response.location().unwrap_or_default()
+        ))
+        .await;
 
+        if self.is_tty {
+            println!(
+                "Uploaded backup {} to {}",
+                compressed_dir.display(),
+                response.location().unwrap_or_default()
+            );
+        }
+
+        let removal = std::fs::remove_file(&compressed_dir);
+        if removal.is_err() {
+            eprintln!(
+                "Failed to remove tarball backup file {}",
+                compressed_dir.display(),
+            );
+        }
         Ok(())
     }
-    /// Backuup all repositories to S3
-    pub async fn backup_all_to_s3(&self, path: &Path, bucket: &str) -> Result<(), GitError> {
+    /// Backup all repositories to S3
+    pub async fn backup_all_to_s3(
+        &self,
+        paths: Vec<PathBuf>,
+        bucket: &str,
+    ) -> Result<(), GitError> {
+        let mut errors: Vec<(String, GitError)> = Vec::new();
+        let mut futures = FuturesUnordered::new();
+
+        let progress = if self.is_tty {
+            self.output.set(OutputMode::Progress).ok();
+            let pb = ProgressBar::new(paths.len() as u64);
+            pb.set_style(
+                ProgressStyle::with_template(
+                    "[{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len} {msg}",
+                )
+                .unwrap()
+                .progress_chars("#>-"),
+            );
+            pb.enable_steady_tick(std::time::Duration::from_millis(100));
+            Some(Arc::new(pb))
+        } else {
+            None
+        };
+
+        for path in &paths {
+            let file_path = path.canonicalize()?;
+            futures.push(async move {
+                let result = self.backup_to_s3(&file_path, bucket).await;
+                (file_path, result)
+            });
+
+            while let Some((path, result)) = futures.next().await {
+                match result {
+                    Ok(()) => {
+                        if let Some(ref pb) = progress {
+                            pb.inc(1);
+                            pb.println(format!("Uploaded {} to {bucket}", path.to_string_lossy()));
+                        }
+                    }
+                    Err(e) => {
+                        errors.push((path.to_string_lossy().to_string(), e));
+                    }
+                }
+            }
+        }
+        if let Some(ref pb) = progress {
+            pb.finish_with_message("Finished backing up to S3");
+        }
+        if !errors.is_empty() {
+            return Err(GitError::MultipleErrors(errors));
+        }
         Ok(())
     }
 }

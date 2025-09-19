@@ -34,10 +34,9 @@ under the License.
 //! 6. Create and merge pull requests
 //! 7. Run various sanity checks on repositories
 //! 8. Create a PR and automatically merge it, if possible
-//! 9. Backup a repository, including to S3 if enabled (In progress)
-//! 10. Collect metadata about your repositories (TODO)
-//! 11. Send notifications to slack if the slack feature is enabled
-//! 11. Do all of the above for one, or all configured repositories
+//! 9. Backup a repository, including to S3 if enabled at build time
+//! 10. Send notifications to slack if the slack feature is enabled
+//! 11. Do all of the above for a single repository, or for all configured repositories
 //!
 //! Some examples of how to use this tool:
 //! ```shell

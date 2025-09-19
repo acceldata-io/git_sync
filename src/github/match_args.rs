@@ -115,6 +115,8 @@ pub async fn match_arguments(app: &AppArgs, config: Config) -> Result<(), GitErr
             }
         }
     }
+    // despite collecting the messages and errors always, we only actually send them to slack if
+    // it's enabled.
     #[cfg(feature = "slack")]
     if app.slack {
         client.slack_message().await;
@@ -254,6 +256,7 @@ async fn match_repo_cmds(
             let (protected, license) = (check_cmd.protected, check_cmd.license);
             let old_branches = (check_cmd.old_branches, check_cmd.days_ago);
             let blacklist = config.misc.branch_blacklist.unwrap_or_default();
+            let license_blacklist = config.misc.license_blacklist.unwrap_or_default();
             let filter = check_cmd.branch_filter.clone();
             let branch_filter = if let Some(filter) = filter {
                 Some(Regex::new(&filter).map_err(|err| GitError::RegexError(Box::new(err)))?)
@@ -278,12 +281,47 @@ async fn match_repo_cmds(
                         rules,
                         license,
                         repo,
-                    } = res;
+                    } = res.clone();
+                    let check = res.clone();
 
                     let branches = branches
                         .iter()
                         .map(|(b, d)| vec![b.to_string(), d.to_string()])
                         .collect();
+                    if client.output.get() == Some(&crate::github::client::OutputMode::Print) {
+                        GithubClient::display_check_results(
+                            vec!["Branch".to_string(), "Date".to_string()],
+                            branches,
+                            &rules,
+                            license.as_ref(),
+                            &repo,
+                        );
+                    } else {
+                        client
+                            .validate_check_results(
+                                &repo,
+                                check,
+                                blacklist.clone(),
+                                license_blacklist.clone(),
+                            )
+                            .await?;
+                    }
+                }
+            } else if let Some(repository) = repository {
+                let result = client
+                    .check_repository(repository, blacklist.clone(), checks)
+                    .await?;
+                let Checks {
+                    branches,
+                    rules,
+                    license,
+                    repo,
+                } = &result.clone();
+                let branches = branches
+                    .iter()
+                    .map(|(b, d)| vec![b.to_string(), d.to_string()])
+                    .collect();
+                if client.output.get() == Some(&crate::github::client::OutputMode::Print) {
                     GithubClient::display_check_results(
                         vec!["Branch".to_string(), "Date".to_string()],
                         branches,
@@ -291,28 +329,11 @@ async fn match_repo_cmds(
                         license.as_ref(),
                         repo,
                     );
+                } else {
+                    client
+                        .validate_check_results(repo, result, blacklist, license_blacklist)
+                        .await?;
                 }
-            } else if let Some(repository) = repository {
-                let result = client
-                    .check_repository(repository, blacklist, checks)
-                    .await?;
-                let Checks {
-                    branches,
-                    rules,
-                    license,
-                    repo,
-                } = &result;
-                let branches = branches
-                    .iter()
-                    .map(|(b, d)| vec![b.to_string(), d.to_string()])
-                    .collect();
-                GithubClient::display_check_results(
-                    vec!["Branch".to_string(), "Date".to_string()],
-                    branches,
-                    rules,
-                    license.as_ref(),
-                    repo,
-                );
             } else {
                 return Err(GitError::MissingRepositoryName);
             }
@@ -326,7 +347,7 @@ async fn match_repo_cmds(
 async fn match_pr_cmds(
     client: &GithubClient,
     repos: Vec<String>,
-    config: Config,
+    _config: Config,
     cmd: &PRCommand,
 ) -> Result<(), GitError> {
     match cmd {
@@ -370,11 +391,11 @@ async fn match_pr_cmds(
     }
     Ok(())
 }
-
+/// Process all Release commands
 async fn match_release_cmds(
     client: &GithubClient,
     repos: Vec<String>,
-    config: Config,
+    _config: Config,
     cmd: &ReleaseCommand,
 ) -> Result<(), GitError> {
     match cmd {
@@ -404,11 +425,11 @@ async fn match_release_cmds(
 
     Ok(())
 }
-
+/// Process all backup commands
 async fn match_backup_cmds(
     client: &GithubClient,
     repos: Vec<String>,
-    config: Config,
+    _config: Config,
     cmd: &BackupCommand,
 ) -> Result<(), GitError> {
     match cmd {
@@ -423,18 +444,32 @@ async fn match_backup_cmds(
                 current_dir = env::current_dir()?;
                 current_dir.as_path()
             };
-
-            if dest == BackupDestination::S3 {
-                client
-                    .backup_to_s3(path, "git-backup-test-bucket-can", "Clickhouse.git.tar.gz")
-                    .await?;
-                return Ok(());
-            }
+            let bucket = create_cmd.bucket.as_ref();
 
             if create_cmd.all {
-                client.backup_all_repos(repos, path).await?;
+                let successful = client.backup_all_repos(repos, path).await?;
+                if dest == BackupDestination::S3 {
+                    if let Some(bucket) = bucket {
+                        client.backup_all_to_s3(successful, bucket).await?;
+                    } else {
+                        return Err(GitError::Other(
+                            "No bucket provided for aws backup".to_string(),
+                        ));
+                    }
+                    return Ok(());
+                }
             } else if let Some(repository) = repository {
-                client.backup_repo(repository.to_string(), path).await?;
+                let repo_dist = client.backup_repo(repository.to_string(), path).await?;
+                if dest == BackupDestination::S3 {
+                    if let Some(bucket) = bucket {
+                        client.backup_to_s3(&repo_dist, bucket).await?;
+                    } else {
+                        return Err(GitError::Other(
+                            "No bucket provided for aws backup".to_string(),
+                        ));
+                    }
+                    return Ok(());
+                }
             }
         }
         BackupCommand::Clean(clean_cmd) => {

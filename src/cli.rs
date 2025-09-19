@@ -163,17 +163,6 @@ pub struct CompareTagCommand {
     pub all: bool,
 }
 
-/*impl CompareTagCommand {
-    /// Validate that both --repository and --parent are specified, or that --all is.
-    pub fn validate(&self) -> Result<(), String> {
-        match (&self.repository, &self.parent, self.all) {
-            (Some(_), Some(_), _) | (None, None, true) => Ok(()),
-            _ => Err("Must specify --repository and --parent, or use --all".to_string()),
-        }
-    }
-}
-*/
-
 /// Defines the arguments for the 'delete' tag subcommand
 #[derive(Args, Clone, Debug)]
 #[command(group(
@@ -340,7 +329,7 @@ pub struct CreatePRCommand {
     /// The name of the branch where your changes are implemented
     #[arg(long, required = true)]
     pub head: String,
-    /// The name of the branch you want the changes pulled into
+    /// The name of the branch you want the changes merged into
     #[arg(short, long, required = true)]
     pub base: String,
     /// The title for the PR
@@ -358,7 +347,7 @@ pub struct CreatePRCommand {
     /// Extra detail to append to automatic commit message
     #[arg(long)]
     pub merge_body: Option<String>,
-    /// The method to use when merging the PR
+    /// The method to use when merging the PR. The default, per Github, is "merge"
     #[arg(long, value_enum, default_value = "merge")]
     pub merge_method: MergeMethod,
     /// SHA that the pull request head must match to permit merging

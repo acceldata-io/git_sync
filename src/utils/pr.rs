@@ -53,8 +53,10 @@ pub struct MergePrOptions {
     pub sha: Option<String>,
 }
 
-#[derive(ValueEnum, Copy, Clone, Debug)]
+#[derive(ValueEnum, Copy, Clone, Debug, Default)]
+/// Github sets the default merge method to 'merge'
 pub enum MergeMethod {
+    #[default]
     Merge,
     Squash,
     Rebase,

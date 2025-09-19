@@ -54,8 +54,6 @@ pub struct TagInfo {
     pub sha: String,
     /// Git URL from where the tag was fetched
     pub url: String,
-    /// Git URL of the parent repository
-    pub parent_url: Option<String>,
     /// SHA of annotated tag commit
     pub commit_sha: Option<String>,
 }
@@ -84,6 +82,7 @@ pub enum TagType {
 }
 
 /// A holder for the results of various checks on a repository
+#[derive(Debug, Clone)]
 pub struct Checks {
     pub branches: Vec<(String, String)>,
     /// Certain types of branch protection rules can be queried. This holds those if they are
@@ -97,7 +96,7 @@ pub struct Checks {
 
 /// Struct to hold branch protection rule information. Exists in order to deserialize JSON into
 /// this struct
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone)]
 pub struct BranchProtectionRule {
     pub pattern: Option<String>,
     #[serde(rename = "isAdminEnforced")]
@@ -170,10 +169,12 @@ impl fmt::Display for BranchProtectionRule {
 #[derive(Debug, Deserialize, Clone)]
 pub struct LicenseInfo {
     pub name: Option<String>,
+    #[serde(rename = "spdxId")]
+    pub spdx_id: Option<String>,
 }
 
 /// A holder for things that can be checked for a repository
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct RepoChecks {
     /// Check if the main branch is protected
     pub protected: bool,

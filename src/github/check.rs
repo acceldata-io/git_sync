@@ -231,23 +231,42 @@ impl GithubClient {
             }
         }
     }
-    /// TODO: This function is currently not used, but could be useful in the future
-    pub fn display_all_check_results(
-        header: Vec<String>,
-        rows: Vec<Vec<String>>,
-        rules: &[BranchProtectionRule],
-        license: Option<&LicenseInfo>,
-        title: &str,
-        repo: &str,
-    ) {
-        let table = Table::builder(tabled::settings::style::Style::ascii())
-            .title(title)
-            .header(header)
-            .rows(rows)
-            .centre(false)
-            .align(tabled::settings::Alignment::center())
-            .build();
-        println!("{table}");
+    /// Check the results and send any errors to slack. None of our repositories currently have any
+    /// rules
+    pub async fn validate_check_results(
+        &self,
+        repository: &str,
+        check: Checks,
+        branch_blacklist: HashSet<String>,
+        license_blacklist: HashSet<String>,
+    ) -> Result<(), GitError> {
+        if let Some(l) = &check.license {
+            if let Some(spdx) = &l.spdx_id {
+                if license_blacklist.contains(spdx) {
+                    self.append_slack_error(format!(
+                        "Blacklisted license {spdx} used in {repository}"
+                    ))
+                    .await;
+                }
+            }
+        }
+
+        if !check.branches.is_empty() {
+            let branches: Vec<(String, String)> = check
+                .branches
+                .into_iter()
+                .filter(|(branch, _)| !branch_blacklist.contains(branch))
+                .collect();
+            let num_branches = branches.len();
+            if num_branches > 0 {
+                self.append_slack_error(format!(
+                    "Repository {repository} has {num_branches} stale branches"
+                ))
+                .await;
+            }
+        }
+
+        Ok(())
     }
     /// Run the selected checks against all configured repositories
     pub async fn check_all_repositories(

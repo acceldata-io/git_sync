@@ -58,6 +58,9 @@ pub struct MiscSettings {
     /// A blacklist for branches when searching for stale ones.
     /// This allows you to ignore long living branches that should always exist
     pub branch_blacklist: Option<HashSet<String>>,
+    /// A blacklist for licenses. If one of your repositories has one of these licenses, you will
+    /// get a warning about it
+    pub license_blacklist: Option<HashSet<String>>,
 }
 
 #[derive(Debug, Deserialize, Default)]
