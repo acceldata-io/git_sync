@@ -221,13 +221,16 @@ $ git_sync backup create --all -p /path/to/backup/folder --slack
 
 
 #### S3 backup
-Back ups can also be automatically uploaded to S3. This requires that you have the `aws` feature enabled at build time, and that you have configured your AWS credentials correctly. The bucket you are uploading to must already exist, and you must have write access to it.
+Back ups can also be automatically uploaded to S3. This requires that you have the `aws` feature enabled at build time, and that you have configured your AWS credentials correctly. The bucket you are uploading to must already exist, and you must have write access to it. You may also need to set the name of your AWS profile in the terminal before starting the process.
 
 You will still need to have enough hard drive space to store your backups. They will be compressed before uploading directly into your specified bucket. Uploading everything to AWS will make the entire backup process take longer.
 
 To do so, you need to use both the `--destination s3` and `--bucket <bucket_name>` flags when uploading to S3. If you only set one of the two, you will get an error before the process starts.
 
 ```shell
+$ aws sso login --profile my_aws_profile_name
+$ export AWS_PROFILE=my_aws_profile_name
+
 $ git_sync backup create -r https://github.com/my-org/my-repo --path /path/to/backup/folder --destination s3 --bucket my-bucket-name
 $ git_sync backup create --repository-type all -p /path/to/backup/folder --destination s3 --bucket my-bucket-name --slack --all
 ```

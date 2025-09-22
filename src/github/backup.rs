@@ -74,13 +74,14 @@ impl GithubClient {
         let output_path = path.clone();
 
         if let Some(t) = self.output.get() {
-            if *t == OutputMode::Print && self.is_tty {
+            if *t == OutputMode::Print {
                 println!("Backing up repository {} to path: {path}", url.as_ref());
             }
         }
         // If the mirrored repo already exists, update it rather than clone again
-        let result = if Path::new(&path).exists() {
-            tokio::task::spawn_blocking(move || {
+        let result =
+            if Path::new(&path).exists() {
+                tokio::task::spawn_blocking(move || {
                 let _lock = semaphore_lock;
                 // If the path exists, we assume it's a git repository and we fetch the latest changes
                 let output = Command::new("git")
@@ -89,17 +90,18 @@ impl GithubClient {
                     .args(["remote", "update"])
                     .current_dir(&path)
                     .output();
+                let name = ssh_url.clone().split('/').next_back().unwrap_or("").to_string();
                 match output {
                     // This branch happens only if the output of the command was successful
                     Ok(s) if s.status.success() => Ok::<_, GitError>(format!(
-                        "Successfully backed up repository: {ssh_url} to path: {path}"
+                        "\tSuccessfully backed up repository: {name} to path: {path}"
                     )),
                     Ok(s) => {
                         let stderr = String::from_utf8_lossy(&s.stderr);
                         eprintln!("Error while backing up.");
                         eprintln!("STDERR:\n{stderr}");
                         Err(GitError::Other(format!(
-                            "Failed to back up repository: {ssh_url}, git exited with status: {}",
+                            "\tFailed to back up repository: {name}, git exited with status: {}",
                             s.status
                         )))
                     }
@@ -109,41 +111,48 @@ impl GithubClient {
                 }
             })
             .await?
-        // Mirror the repo
-        } else {
-            tokio::task::spawn_blocking(move || {
-                let _lock = semaphore_lock;
-                // Clone the reposittory as a mirror
-                let output = Command::new("git")
-                    .stdout(Stdio::piped())
-                    .stderr(Stdio::piped())
-                    .args(["clone", "--mirror", &ssh_url, &path])
-                    .output();
-                match output {
-                    // This branch happens only if the output of the command was successful
-                    Ok(s) if s.status.success() => Ok::<_, GitError>(format!(
-                        "Successfully backed up repository: {ssh_url} to path: {path}"
-                    )),
-                    Ok(s) => {
-                        if Path::new(&path).exists() {
-                            // If the clone failed, remove the directory to avoid leaving a broken repo
-                            std::fs::remove_dir_all(&path)?;
+            // Mirror the repo
+            } else {
+                tokio::task::spawn_blocking(move || {
+                    let _lock = semaphore_lock;
+                    // Clone the reposittory as a mirror
+                    let output = Command::new("git")
+                        .stdout(Stdio::piped())
+                        .stderr(Stdio::piped())
+                        .args(["clone", "--mirror", &ssh_url, &path])
+                        .output();
+                    let name = ssh_url
+                        .clone()
+                        .split('/')
+                        .next_back()
+                        .unwrap_or("")
+                        .to_string();
+
+                    match output {
+                        // This branch happens only if the output of the command was successful
+                        Ok(s) if s.status.success() => Ok::<_, GitError>(format!(
+                            "\tSuccessfully backed up repository: {name} to path: {path}"
+                        )),
+                        Ok(s) => {
+                            if Path::new(&path).exists() {
+                                // If the clone failed, remove the directory to avoid leaving a broken repo
+                                std::fs::remove_dir_all(&path)?;
+                            }
+                            let stderr = String::from_utf8_lossy(&s.stderr);
+                            eprintln!("Error while backing up.");
+                            eprintln!("STDERR:\n{stderr}");
+                            Err(GitError::Other(format!(
+                                "Failed to back up repository: {name}, git exited with status: {}",
+                                s.status
+                            )))
                         }
-                        let stderr = String::from_utf8_lossy(&s.stderr);
-                        eprintln!("Error while backing up.");
-                        eprintln!("STDERR:\n{stderr}");
-                        Err(GitError::Other(format!(
-                            "Failed to back up repository: {ssh_url}, git exited with status: {}",
-                            s.status
-                        )))
+                        Err(e) => Err(GitError::Other(format!(
+                            "Failed to back up repository: {ssh_url}, error: {e}"
+                        ))),
                     }
-                    Err(e) => Err(GitError::Other(format!(
-                        "Failed to back up repository: {ssh_url}, error: {e}"
-                    ))),
-                }
-            })
-            .await?
-        };
+                })
+                .await?
+            };
 
         // Match outside of the spawn_blocking to avoid ownership issues
         match result {
@@ -198,7 +207,7 @@ impl GithubClient {
         };
 
         if let Some(ref progress) = progress {
-            progress.println("Backing up all configured repositories...");
+            progress.println("Backing up all selected repositories...");
         }
 
         for repo in repositories {
@@ -391,8 +400,8 @@ impl GithubClient {
         let mut file_buffer = BufReader::new(file);
         let mut part_number = 1;
 
-        // If the file is smaller than the minimum size allowed for multipart uploads, just upload
-        // the whole thing
+        // If the file is smaller than the minimum size allowed for multipart uploads, or it's
+        // smaller than the minimum part size, just upload the whole thing
         let size = file_buffer.get_ref().metadata().await?.len();
         if size == 0 {
             return Err(GitError::Other("Backup file is empty".to_string()));
@@ -412,6 +421,7 @@ impl GithubClient {
                 .await
                 .map_err(|e| GitError::AWSError(e.to_string()))?;
 
+            // The else branch should never happen, but just in case...
             let name: String = if let Some(file) = compressed_dir.file_name() {
                 file.to_string_lossy().to_string()
             } else {
@@ -423,15 +433,14 @@ impl GithubClient {
                 bucket.as_ref()
             );
 
-            if region_name.is_empty() {
-                self.append_slack_message(format!("Uploaded backup {name} to {s3_url}",))
-                    .await;
-            }
-            self.append_slack_message(format!("Uploaded backup {name} to {s3_url}",))
-                .await;
+            let string_name = name.to_string();
+            let base_name = string_name.split('/').next_back().unwrap_or("");
+            let message = format!("\t• Uploaded backup {base_name} to {s3_url}");
+
+            self.append_slack_message(&message).await;
 
             if self.is_tty {
-                println!("Uploaded backup {name} to {s3_url}",);
+                println!("{message}",);
             }
             let removal = std::fs::remove_file(&compressed_dir);
             if removal.is_err() {
@@ -608,7 +617,7 @@ impl GithubClient {
                     Ok(()) => {
                         if let Some(ref pb) = progress {
                             pb.inc(1);
-                            pb.println(format!("Uploaded {bucket} to {}", path.to_string_lossy()));
+                            pb.println(format!("Uploaded {} to {bucket}", path.to_string_lossy()));
                         }
                     }
                     Err(e) => {
