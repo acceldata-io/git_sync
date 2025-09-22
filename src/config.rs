@@ -20,7 +20,7 @@ use crate::error::GitError;
 use crate::utils::user::UserDetails;
 use microxdg::Xdg;
 use serde::Deserialize;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -101,6 +101,11 @@ pub struct RepoConfig {
     pub private: Option<Vec<String>>,
     /// A list of public repositories
     pub public: Option<Vec<String>>,
+    /// Forks that need to point to a different upstream repository. Unimplemented as of yet
+    pub fork_workaround: HashMap<String, String>,
+    /// Arbitary user defined categories of repositories
+    #[serde(flatten)]
+    pub custom: HashMap<String, Vec<String>>,
 }
 
 impl Config {
@@ -203,6 +208,14 @@ impl Config {
     pub fn get_public_repositories(&self) -> Vec<String> {
         self.repos.public.clone().unwrap_or_default()
     }
+    /// Get all custom repository sections, if defined
+    pub fn get_all_custom_group_repositories(&self) -> Vec<String> {
+        let mut results = Vec::new();
+        self.repos.custom.clone().iter().for_each(|(_, repos)| {
+            results.extend(repos.clone());
+        });
+        results
+    }
     /// Get all repositories defined in the config file
     pub fn get_all_repositories(&self) -> Vec<String> {
         self.repos
@@ -212,6 +225,7 @@ impl Config {
             .into_iter()
             .chain(self.get_fork_repositories())
             .chain(self.get_private_repositories())
+            .chain(self.get_all_custom_group_repositories())
             .collect()
     }
 }

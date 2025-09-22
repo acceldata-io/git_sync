@@ -52,11 +52,14 @@ webhook_url = ""
 #private = ["repo1", "repo2"]
 #public = []
 
+# You can also have any number of arbitrary groups:
+#my-group = ["repo3", "repo10"]
+
 [misc]
 # A list of branches that should be ignored when performing
 # a search of stale branches, AKA branches that should never be
 # reported as being old, no matter when they were last updated.
-branch_blacklist = ["main", "master"]
+branch_blacklist = ["main", "master", "my_longliving_old_branch"]
 # A list of licenses that you will be warned about. 
 # You must use their spdx id
 # A list of many of these can be found at https://spdx.org/licenses/
@@ -126,39 +129,4 @@ pub fn generate_config(path: Option<&PathBuf>, force: bool) -> Result<PathBuf, G
             );
         }
     }
-    /*
-    let home_dir = dirs::home_dir();
-    if let Some(home) = home_dir {
-        let config_path = home.join(".config").join(CONFIG_NAME);
-        if config_path.exists() && !force {
-            eprintln!(
-                "Config file already exists at {}. Use --force to overwrite",
-                config_path.display()
-            );
-            return Ok(config_path);
-        }
-    }
-    let config_path = path.unwrap_or(PathBuf::from(CONFIG_NAME));
-    if config_path.exists() && !force {
-        eprintln!(
-            "Config file already exists at {}. Use --force to overwrite",
-            config_path.display()
-        );
-        return Ok(config_path);
-    }
-
-    if let Some(parent) = config_path.parent() {
-        if !parent.exists() {
-            fs::create_dir_all(parent)?;
-        }
-    }
-    if config_path.exists() {
-        let mut backup = config_path.clone().into_os_string();
-        backup.push(".bak");
-        fs::copy(&config_path, backup)?;
-    }
-    fs::write(&config_path, SAMPLE_CONFIG)?;
-    println!("Config file created at {}", config_path.display());
-    Ok(config_path)
-    */
 }

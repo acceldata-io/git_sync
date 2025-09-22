@@ -46,9 +46,7 @@ There are a few optional features that can be enabled or disabled at build time.
 
 You can disable default features by adding `--no-default-features` to the cargo build command; you can enable specific features by adding `--features feature1,feature2` etc to the build command. If you want all optional features enabled, you can also add `--all-features` to the cargo build command. Adding all features will increase the number of libraries that are pulled in and also increase build time slightly.
 
-If you don't enable an optional features at build time, it will not be available at runtime.
-
-At the moment, SQL support is not available despite the feature being in Cargo.toml, so there's no reason to enable it. This feature will be added in the future.
+If optional features  are disabled at build time, they will not be available at runtime.
 
 #### Setting up the build environment with [Nix](https://github.com/NixOS/nix) (Optional)
 In this repository there is a file, `flake.nix`, which can be used to automatically set up an environment with all of the prerequisites installed. You must already have nix [installed](https://nix.dev/install-nix) on your machine, and then enable an 'experimental' feature to enable flake usage. This can be done by running:
@@ -123,7 +121,7 @@ The above example was taken from Trivy [release notes for v0.31.0](https://githu
 
 You can also check the Github repo for CVEs by running `trivy repo --branch main https://github.com/JeffreySmith/git_sync`.
 
-To use `cargo-audit`, simply run `cargo audit` in the root of the source code tree. If instead you want to check the binary if it's been compiled with `cargo-auditable`, you can instead run: 
+To use `cargo-audit`, simply run `cargo audit` in the root of the source code tree. If instead you want to check the binary if it's been compiled with `cargo-auditable`, you can run: 
 ```shell
 cargo-audit bin target/release/git_sync
 ```
@@ -135,36 +133,55 @@ Run `git_sync config` to create an initial configuration in `$XDG_CONFIG_HOME`, 
 The important things to add to this configuration file are as follows:
 
 - Your Github api token
-- Your repositories in their correct category (public, private, or fork). Forks should be anything that has a parent repository
+- Your repositories in their correct category (public, private, fork, or a custom group). Forks should be anything that has a parent repository
 - Your slack webhook url, if you have enabled Slack integration
 - Optionally, a list of licenses in their spdx id format that you wish to blacklist.
+
+Example of a valid repo section in the configuration file:
+```toml
+[repo]
+# These should be repositories that have a defined upstream project
+fork = ["https://github.com/my-org/repo", "https://github.com/my-org/some-other-repo"]
+# This can be any public repository you have read/write access to
+public = []
+# These are repositories that are private to you or your organization
+private = ["https://github.com/my-org/my-secret-repo"]
+# Now an arbitrary group called "my-group" that contains two repositories
+my-group = ["https://github.com/my-org/repo1", "https://github.com/my-org/repo2"]
+```
+
+Using these groupings, you can create groups of similar repositories that you can manage together. This can be for a specific repository or several repositories that have a similar structure.
+
 
 Certain commands require that you have git installed and available in your PATH.
 That includes the following:
 1. `git_sync backup`
 2. `git_sync tag sync --with-annotated`
 
-You can set the number of parallel jobs to run at a time by specifying the --jobs flag. By default, this is set to the total number of CPU threads the machine has, but it can be manually set to any number between 1 and 64. 
+You can set the number of parallel jobs to run at a time by specifying the --jobs flag. By default, this is set to the total number of CPU threads the machine has, but it can be manually set to any positive integer between 1 and 64. If this is unspecified, and it can't be determined automatically, it will default to 4.
 
 TODO
 ~~If you have a forked repository on Github that does not have a configured parent, you can put it into the fork_with_workaround map, where "forked repo" = "actual upstream repo". Ex: `fork_with_workaround = {"https://github.com/my-org/livy" = "https://github.com/apache/incubator-livy"}`. This will require that you have write access to your forked repository, and git set up correctly on your machine.~~
 
 ### Tests
 
-There are a few tests for some of the helper functions, and they can be executed by running `cargo test`
+There are a few tests for some of the helper functions, and they can be executed by running `cargo test` in the source tree.
 
 ### Making changes
 
-Before trying to commit any changes, ensure that you run `cargo fmt` to make sure that there are no formatting inconsistencies. There is API reference [hosted on Github](https://jeffreysmith.github.io/git_sync/git_sync/).
+Before trying to commit any changes, ensure that you run `cargo fmt` to make sure that there are no formatting inconsistencies. There is API reference [hosted on Github](https://jeffreysmith.github.io/git_sync/git_sync/) should you need to lookup information about any of the functions, types, or enums.
 
 ## Usage examples
 
-By default, git_sync uses the `fork` group from the git-manage.toml file. You can also specify `private` or `public`. **TODO** Support arbitrary groups.
+By default, git_sync uses the `fork` group from the git-manage.toml file for the `--repository-type` flag. You can also specify `private`, `public`, `all`, or `custom`. Using a custom group requires specifying the name of the group you add to `git-manage.toml`. These repositories are only used when you specify `--all` as a target for some command; if you specify a specific repository with --repository, that repository will be used regardless of any group it may be in.
+
+Be careful with `--repository-type all` as it will apply to every single repository within your configuration file, including custom groups. This is useful for querying information about all of your repositories, but can cause issues if you try to create a release for 
 
 ### Syncing a fork with its parent
 ```shell
 $ git_sync repo sync --repository https://github.com/my-org/my-forked-repo # Sync a specific repository
 $ git_sync repo sync --all --slack # Sync all configured repositories and send a slack notification
+$ git_sync --repository-type custom --group my-group repo sync --all --slack # Sync all repositories in the "my-group" custom group
 
 $ git_sync repo sync --all --recursive --force --slack # Go through all branches and sync those that aren't up to date.
 $ git_sync repo sync -r https://github.com/my-org/my-forked-repo --branch my_branch_to_update 
@@ -187,13 +204,13 @@ $ git_sync tag sync --all --with-annotated -j4 # With a maximum of 4 parallel jo
 
 ### Backing up a repository
 
-Creating a backup of a repository is one of the slowest operations that this tool can do, particularly for large repoositories. This is because it has to do a `git clone --mirror` for each repository, in order to preserve all data and metadata. 
+Creating a backup of a repository is one of the slowest operations that this tool can do, particularly for larger repositories. This is because it has to do a `git clone --mirror` for each repository, in order to preserve all files and metadata. 
 
 When running the backup with `--all`, if you run it from an interactive terminal, you will be presented with a progress bar to show you how many of your repositories have been backed up so far. When this is used to backup many repositories (the largest number tested so far has been 40 at once), it can easily take 10 to 20+ minutes.
 
 
 #### Local backup
-Ensure you have enough space on your local filesystem to house all of your backups since these can be surprisingly large. For example, a `git clone --mirror` of [ClickHouse](https://github.com/ClickHouse/ClickHouse) is around 1.8GB on its own. 
+Ensure you have enough space on your local filesystem to house all of your backups since these can be surprisingly large. For example, a `git clone --mirror` of [ClickHouse](https://github.com/ClickHouse/ClickHouse) is around 1.8GB on its own. You must have read-write access to this folder.
 
 
 Importantly, the path you pick here must be a folder. 
@@ -206,14 +223,16 @@ $ git_sync backup create --all -p /path/to/backup/folder --slack
 #### S3 backup
 Back ups can also be automatically uploaded to S3. This requires that you have the `aws` feature enabled at build time, and that you have configured your AWS credentials correctly. The bucket you are uploading to must already exist, and you must have write access to it.
 
-You will still need to have enough hard drive space to store your backups. They will be compressed before uploading directly into your specified bucket. This will make the entire backup process take longer.
+You will still need to have enough hard drive space to store your backups. They will be compressed before uploading directly into your specified bucket. Uploading everything to AWS will make the entire backup process take longer.
 
 To do so, you need to use both the `--destination s3` and `--bucket <bucket_name>` flags when uploading to S3. If you only set one of the two, you will get an error before the process starts.
 
 ```shell
 $ git_sync backup create -r https://github.com/my-org/my-repo --path /path/to/backup/folder --destination s3 --bucket my-bucket-name
-$ git_sync backup create --all -p /path/to/backup/folder --destination s3 --bucket my-bucket-name --slack
+$ git_sync backup create --repository-type all -p /path/to/backup/folder --destination s3 --bucket my-bucket-name --slack --all
 ```
+
+This is an example of when using `--repository-type all` along with `--all` target is useful behaviour
 
 ### Managing branches
 You can create and delete branches for a single repository or for all configured repositories. This is useful when you have a set of common branches across all of your repositories.
@@ -254,6 +273,7 @@ Automatic merging requires specifying the `--merge` option. If you leave it out,
 
 ```shell
 $ git_sync pr open -r https://github.com/my-org/my-repo --base main --head my_feature_branch --merge
+$ git_sync pr open --all --base MY_MAIN_BRANCH --head my_feature_branch --merge
 ```
 
 ### Check repositories

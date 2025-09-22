@@ -24,7 +24,11 @@ use std::path::PathBuf;
 
 /// `git_sync` is an application for managing multiple github repositories at once.
 #[derive(Parser, Debug)]
-#[command(author, version, about, long_about = None)]
+#[command(author, version, about, long_about = None,
+    after_help="\
+NOTES:
+    - When using --repository-type, make sure that whatever operation you are running can be applied across all of the repositories in the configured group.",
+)]
 pub struct AppArgs {
     /// Github Personal Access Token
     #[arg(short, long, env = "GITHUB_TOKEN")]
@@ -34,23 +38,34 @@ pub struct AppArgs {
     #[arg(short, long, global = true, env = "CONFIG_FILE")]
     pub file: Option<PathBuf>,
 
-    /// The types of repositories to use for any command that targets configured repositories
+    /// The types of repositories to use for any command that targets configured repositories.
+    /// Warning: selecting 'all' will include every repository from every category
     #[arg(long, default_value = "fork")]
     pub repository_type: RepositoryType,
+
+    /// The name of the custom repository group to use. Required if `repository_type` is set to
+    /// `custom`
+    #[arg(
+        short = 'g',
+        long = "group",
+        required_if_eq("repository_type", "custom")
+    )]
+    pub repository_group: Option<String>,
 
     /// The command that will get run
     #[command(subcommand)]
     pub command: Command,
 
     /// Make output quiet. This is useful when not running in interactive mode
-    #[arg(short, long, default_value_t = false, global = true)]
+    /// Not currently implemented
+    #[arg(short, long, default_value_t = false, global = true, hide = true)]
     pub quiet: bool,
 
-    /// Verbose output
+    /// Verbose output. Currently only checks and reports your api usage
     #[arg(long, default_value_t = false, global = true)]
     pub verbose: bool,
 
-    /// The maximum number of parallel tasks to run
+    /// The maximum number of parallel tasks to run.
     #[arg(short = 'j', long, global = true, value_parser = validate_jobs)]
     pub jobs: Option<usize>,
 
@@ -84,6 +99,7 @@ pub enum RepositoryType {
     Private,
     Fork,
     All,
+    Custom,
 }
 
 /// Valid options that can be passed to `make_latest` in the github api.
@@ -530,13 +546,28 @@ pub struct BackupRepoCommand {
     pub bucket: Option<String>,
 }
 
-/// Check that the directory passed is a valid and existing directory
+/// Check that the directory passed is a valid and existing directory. If it isn't, try to create
+/// it.
 fn dir_exists(s: &str) -> Result<PathBuf, String> {
     let p = PathBuf::from(s);
     if p.is_dir() {
-        Ok(p)
+        return Ok(p);
+    }
+    if let Ok(m) = std::fs::metadata(&p) {
+        let metadata = m.file_type();
+        let file_type = if metadata.is_file() {
+            "file"
+        } else if metadata.is_symlink() {
+            "symlink"
+        } else {
+            "unknown"
+        };
+        Err(format!("Path '{s}' exists but it is a {file_type}"))
     } else {
-        Err(format!("{s} is not a valid directory"))
+        if let Err(e) = std::fs::create_dir(&p) {
+            return Err(format!("Could not create '{s}': {e}"));
+        }
+        Ok(p)
     }
 }
 

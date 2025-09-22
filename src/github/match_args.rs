@@ -34,6 +34,7 @@ use clap_complete::{
 };
 use clap_mangen::Man;
 use fancy_regex::Regex;
+use std::collections::HashSet;
 use std::env;
 use std::fs::File;
 use std::path::{Path, PathBuf};
@@ -57,7 +58,35 @@ pub async fn match_arguments(app: &AppArgs, config: Config) -> Result<(), GitErr
         RepositoryType::Private => config.get_private_repositories(),
         RepositoryType::Fork => config.get_fork_repositories(),
         RepositoryType::All => config.get_all_repositories(),
+        RepositoryType::Custom => {
+            let name = app.repository_group.clone().unwrap_or_default();
+            let repository: Option<Vec<String>> = config
+                .repos
+                .custom
+                .get(&app.repository_group.clone().unwrap_or_default())
+                .cloned();
+            if let Some(repository) = &repository {
+                if repository.is_empty() {
+                    return Err(GitError::Other(format!(
+                        "No repositories found for custom group '{name}'"
+                    )));
+                }
+                repository.clone()
+            } else {
+                return Err(GitError::Other(format!(
+                    "No repositories found for custom group '{name}'"
+                )));
+            }
+        }
     };
+    // Remove any duplicate repositories. This shouldn't have any meaningful performance impact
+    // since there won't every be thousands of repositories configured.
+    let repos = repos
+        .into_iter()
+        .collect::<HashSet<_>>()
+        .into_iter()
+        .collect::<Vec<_>>();
+
     let default_jobs = std::thread::available_parallelism()
         .map(std::num::NonZero::get)
         .unwrap_or(4);
