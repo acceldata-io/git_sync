@@ -102,7 +102,7 @@ pub struct RepoConfig {
     /// A list of public repositories
     pub public: Option<Vec<String>>,
     /// Forks that need to point to a different upstream repository. Unimplemented as of yet
-    pub fork_workaround: HashMap<String, String>,
+    pub fork_workaround: Option<HashMap<String, String>>,
     /// Arbitary user defined categories of repositories
     #[serde(flatten)]
     pub custom: HashMap<String, Vec<String>>,
