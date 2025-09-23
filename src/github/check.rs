@@ -133,12 +133,13 @@ impl GithubClient {
 
             if let Some(nodes) = refs["nodes"].as_array() {
                 for branch in nodes {
-                    if let Some(name) = branch.get("name").and_then(|v| v.as_str()) {
-                        if let Some(re) = &branch_filter {
-                            if !re.is_match(name)? {
-                                continue;
-                            }
+                    if let Some(name) = branch.get("name").and_then(|v| v.as_str())
+                        && let Some(re) = &branch_filter
+                    {
+                        if !re.is_match(name)? {
+                            continue;
                         }
+
                         let date_str = branch
                             .pointer("/target/committedDate")
                             .and_then(|v| v.as_str())
@@ -225,10 +226,10 @@ impl GithubClient {
                 println!("{rule}");
             }
         }
-        if let Some(license) = &license {
-            if let Some(name) = &license.name {
-                println!("License: {name}");
-            }
+        if let Some(license) = &license
+            && let Some(name) = &license.name
+        {
+            println!("License: {name}");
         }
     }
     /// Check the results and send any errors to slack. None of our repositories currently have any
@@ -240,15 +241,12 @@ impl GithubClient {
         branch_blacklist: HashSet<String>,
         license_blacklist: HashSet<String>,
     ) -> Result<(), GitError> {
-        if let Some(l) = &check.license {
-            if let Some(spdx) = &l.spdx_id {
-                if license_blacklist.contains(spdx) {
-                    self.append_slack_error(format!(
-                        "Blacklisted license {spdx} used in {repository}"
-                    ))
-                    .await;
-                }
-            }
+        if let Some(l) = &check.license
+            && let Some(spdx) = &l.spdx_id
+            && license_blacklist.contains(spdx)
+        {
+            self.append_slack_error(format!("Blacklisted license {spdx} used in {repository}"))
+                .await;
         }
 
         if !check.branches.is_empty() {

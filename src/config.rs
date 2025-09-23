@@ -143,10 +143,10 @@ impl Config {
         let xdg = Xdg::new();
         match xdg {
             Ok(xdg) => {
-                if let Ok(xdg_config) = xdg.config_file(CONFIG_NAME) {
-                    if let Ok(home_config) = Config::from_file(&xdg_config) {
-                        return home_config;
-                    }
+                if let Ok(xdg_config) = xdg.config_file(CONFIG_NAME)
+                    && let Ok(home_config) = Config::from_file(&xdg_config)
+                {
+                    return home_config;
                 }
             }
             Err(e) => eprintln!("Unable to get $HOME or $XDG_CONFIG_HOME: {e}"),

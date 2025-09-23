@@ -67,8 +67,9 @@ impl GithubClient {
     pub async fn create_branch(
         &self,
         url: impl AsRef<str>,
-        base_branch: impl AsRef<str> + ToString,
-        new_branch: impl AsRef<str> + ToString,
+        base_branch: impl AsRef<str> + ToString + Display,
+        new_branch: impl AsRef<str> + ToString + Display,
+        quiet: bool,
     ) -> Result<(), GitError> {
         let info = get_repo_info_from_url(url)?;
         let (owner, repo) = (info.owner, info.repo_name);
@@ -92,11 +93,19 @@ impl GithubClient {
         let response = match res {
             Ok(r) => r,
             Err(e) => {
+                self.append_slack_error(format!(
+                    "{owner}/{repo}: Unable to fetch tag {base_branch} from Github: {e}"
+                ))
+                .await;
+
                 return Err(GitError::GithubApiError(e));
             }
         };
 
         let octocrab::models::repos::Object::Commit { sha, .. } = response.object else {
+            self.append_slack_error(format!("{owner}/{repo}: No such branch {base_branch}"))
+                .await;
+
             return Err(GitError::NoSuchBranch(base_branch.to_string()));
         };
 
@@ -114,24 +123,120 @@ impl GithubClient {
             },
         );
         match res {
-            Ok(_) => Ok(()),
-            Err(e) => Err(GitError::GithubApiError(e)),
+            Ok(_) => {
+                if !quiet {
+                    self.append_slack_message(format!("New branch {new_branch} created"))
+                        .await;
+                }
+                Ok(())
+            }
+            Err(e) => {
+                self.append_slack_error(format!(
+                    "{owner}/{repo}: Failed to create {new_branch}: {e}"
+                ))
+                .await;
+
+                Err(GitError::GithubApiError(e))
+            }
+        }
+    }
+    /// Create a branch from some base branch in a repository
+    pub async fn create_branch_from_tag(
+        &self,
+        url: impl AsRef<str>,
+        base_tag: impl AsRef<str> + ToString + Display,
+        new_branch: impl AsRef<str> + ToString + Display,
+        quiet: bool,
+    ) -> Result<(), GitError> {
+        let info = get_repo_info_from_url(url)?;
+        let (owner, repo) = (info.owner, info.repo_name);
+
+        // Acquire a lock on the semaphore
+        let _permit = self.semaphore.clone().acquire_owned().await?;
+
+        let res: Result<_, octocrab::Error> = async_retry!(
+            ms = 100,
+            timeout = 5000,
+            retries = 3,
+            error_predicate = |e: &octocrab::Error| is_retryable(e),
+            body = {
+                self.octocrab
+                    .clone()
+                    .repos(&owner, &repo)
+                    .get_ref(&Reference::Tag(base_tag.to_string()))
+                    .await
+            },
+        );
+        let response = match res {
+            Ok(r) => r,
+            Err(e) => {
+                self.append_slack_error(format!(
+                    "{owner}/{repo}: Unable to fetch tag {base_tag} from Github: {e}"
+                ))
+                .await;
+                return Err(GitError::GithubApiError(e));
+            }
+        };
+
+        let octocrab::models::repos::Object::Commit { sha, .. } = response.object else {
+            self.append_slack_error(format!("{owner}/{repo}: No such tag {base_tag}"))
+                .await;
+            return Err(GitError::NoSuchTag(base_tag.to_string()));
+        };
+
+        let res: Result<_, octocrab::Error> = async_retry!(
+            ms = 100,
+            timeout = 5000,
+            retries = 3,
+            error_predicate = |e: &octocrab::Error| is_retryable(e),
+            body = {
+                self.octocrab
+                    .clone()
+                    .repos(&owner, &repo)
+                    .create_ref(&Reference::Branch(new_branch.to_string()), sha.clone())
+                    .await
+            },
+        );
+        match res {
+            Ok(_) => {
+                if !quiet {
+                    self.append_slack_message(format!("New branch {new_branch} created"))
+                        .await;
+                }
+                Ok(())
+            }
+            Err(e) => {
+                self.append_slack_error(format!(
+                    "{owner}/{repo}: Failed to create {new_branch}: {e}"
+                ))
+                .await;
+                Err(GitError::GithubApiError(e))
+            }
         }
     }
     /// Create the passed branch for each repository provided
     pub async fn create_all_branches<T: AsRef<str> + Display + Copy, U: AsRef<str> + Display>(
         &self,
         base_branch: T,
+        base_tag: T,
         new_branch: T,
         repositories: &[U],
+        quiet: bool,
     ) -> Result<(), GitError> {
         let mut futures = FuturesUnordered::new();
         for repo in repositories {
             // Limit the number of jobs
             let semaphore_permit = self.semaphore.clone().acquire_owned().await?;
             let base_branch = base_branch.to_string();
+            let base_tag = base_tag.to_string();
             futures.push(async move {
-                let result = self.create_branch(repo, &base_branch, &new_branch).await;
+                let result = if base_tag.is_empty() {
+                    self.create_branch(repo, &base_branch, &new_branch, quiet)
+                        .await
+                } else {
+                    self.create_branch_from_tag(repo, &base_tag, &new_branch, quiet)
+                        .await
+                };
                 // Drop this variable after the above function has finished.
                 // Free a slot for another job to run
                 drop(semaphore_permit);

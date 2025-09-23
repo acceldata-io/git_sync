@@ -56,9 +56,9 @@ pub struct AppArgs {
     #[command(subcommand)]
     pub command: Command,
 
-    /// Make output quiet. This is useful when not running in interactive mode
-    /// Not currently implemented
-    #[arg(short, long, default_value_t = false, global = true, hide = true)]
+    /// Make output quiet. This is useful when not running in interactive mode. If slack is
+    /// enabled, this will silence some success messages to slack.
+    #[arg(short, long, default_value_t = false, global = true)]
     pub quiet: bool,
 
     /// Verbose output. Currently only checks and reports your api usage
@@ -463,6 +463,11 @@ pub struct DeleteBranchCommand {
         ArgGroup::new("target")
         .required(true)
         .args(&["all", "repository"])
+    ),
+    group(
+        ArgGroup::new("branch_tag")
+        .required(true)
+        .args(&["base_branch", "base_tag"])
     )
 )]
 pub struct CreateBranchCommand {
@@ -472,9 +477,12 @@ pub struct CreateBranchCommand {
     /// New branch to create
     #[arg(short, long, required = true)]
     pub new_branch: String,
-    /// The base branch for the new branch
-    #[arg(short, long, required = true)]
-    pub base_branch: String,
+    /// The base branch for the new branch. Not valid if --base-tag is passed
+    #[arg(short = 'b', long)]
+    pub base_branch: Option<String>,
+    /// The base tag for the new branch. Not valid if --base-branch is passed
+    #[arg(short = 't', long)]
+    pub base_tag: Option<String>,
     /// Create the branch for all configured repositories
     #[arg(short, long, default_value_t = false)]
     pub all: bool,
@@ -492,10 +500,10 @@ pub struct CreateBranchCommand {
     ),
 )]
 pub struct CreateReleaseCommand {
-    /// The tag or branch to base the release off of
+    /// The tag to base the release off of
     #[arg(short, long, required = true)]
     pub current_release: String,
-    /// The previous release tag or branch. This is used to generate the changelog
+    /// The previous release tag. This is used to generate the changelog
     #[arg(short, long, required = true)]
     pub previous_release: String,
     /// The repository for which to create the release
@@ -564,7 +572,7 @@ fn dir_exists(s: &str) -> Result<PathBuf, String> {
         };
         Err(format!("Path '{s}' exists but it is a {file_type}"))
     } else {
-        if let Err(e) = std::fs::create_dir(&p) {
+        if let Err(e) = std::fs::create_dir_all(&p) {
             return Err(format!("Could not create '{s}': {e}"));
         }
         Ok(p)
@@ -707,13 +715,14 @@ pub fn parse_args() -> AppArgs {
             if let Command::Repo {
                 cmd: RepoCommand::Sync(sync_cmd),
             } = &app.command
+                && sync_cmd.recursive
+                && sync_cmd.all
+                && !sync_cmd.force
             {
-                if sync_cmd.recursive && sync_cmd.all && !sync_cmd.force {
-                    eprintln!(
-                        "Error: when syncing repositories, --force is required when --all and --recursive are set."
-                    );
-                    std::process::exit(1);
-                }
+                eprintln!(
+                    "Error: when syncing repositories, --force is required when --all and --recursive are set."
+                );
+                std::process::exit(1);
             }
             app
         }

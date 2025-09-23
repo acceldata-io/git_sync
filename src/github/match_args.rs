@@ -52,6 +52,7 @@ pub async fn match_arguments(app: &AppArgs, config: Config) -> Result<(), GitErr
             .ok_or(GitError::MissingToken)?,
     };
     let verbose = app.verbose;
+    let quiet = app.quiet;
 
     let repos = match app.repository_type {
         RepositoryType::Public => config.get_public_repositories(),
@@ -106,7 +107,7 @@ pub async fn match_arguments(app: &AppArgs, config: Config) -> Result<(), GitErr
     match &app.command {
         Command::Tag { cmd } => match_tag_cmds(&client, repos, cmd).await?,
         Command::Repo { cmd } => match_repo_cmds(&client, repos, config, cmd).await?,
-        Command::Branch { cmd } => match_branch_cmds(&client, repos, cmd).await?,
+        Command::Branch { cmd } => match_branch_cmds(&client, repos, cmd, quiet).await?,
         Command::Release { cmd } => match_release_cmds(&client, repos, config, cmd).await?,
         Command::PR { cmd } => match_pr_cmds(&client, repos, config, cmd).await?,
         Command::Backup { cmd } => match_backup_cmds(&client, repos, config, cmd).await?,
@@ -230,18 +231,34 @@ async fn match_branch_cmds(
     client: &GithubClient,
     repos: Vec<String>,
     cmd: &BranchCommand,
+    quiet: bool,
 ) -> Result<(), GitError> {
     match cmd {
         BranchCommand::Create(create_cmd) => {
             let repository = create_cmd.repository.as_ref();
-            let (base, new) = (
+            let (base_branch, base_tag, new) = (
                 create_cmd.base_branch.clone(),
+                create_cmd.base_tag.clone(),
                 create_cmd.new_branch.clone(),
             );
-            if create_cmd.all {
-                client.create_all_branches(&base, &new, &repos[..]).await?;
-            } else if let Some(repository) = repository {
-                client.create_branch(repository, &base, &new).await?;
+            if let Some(base) = &base_branch {
+                if create_cmd.all {
+                    client
+                        .create_all_branches(base, &String::new(), &new, &repos[..], quiet)
+                        .await?;
+                } else if let Some(repository) = repository {
+                    client.create_branch(repository, &base, &new, quiet).await?;
+                }
+            } else if let Some(tag) = &base_tag {
+                if create_cmd.all {
+                    client
+                        .create_all_branches(&String::new(), tag, &new, &repos[..], quiet)
+                        .await?;
+                } else if let Some(repository) = repository {
+                    client
+                        .create_branch_from_tag(repository, &tag, &new, quiet)
+                        .await?;
+                }
             }
         }
         BranchCommand::Delete(delete_cmd) => {

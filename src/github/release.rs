@@ -239,16 +239,15 @@ impl GithubClient {
 
         // Acquire a lock on the semaphore
         let _permit = self.semaphore.clone().acquire_owned().await?;
-
+        let octocrab = self.octocrab.clone();
         let retries = 3;
-
         let release = async_retry!(
             ms = 100,
             timeout = 5000,
             retries = retries,
             error_predicate = |e: &octocrab::Error| is_retryable(e),
             body = {
-                self.octocrab
+                octocrab
                     .clone()
                     .repos(&owner, &repo)
                     .releases()
@@ -262,10 +261,23 @@ impl GithubClient {
 
         match release {
             Ok(_) => {
-                println!("Successfully created release '{name}' for {repo}");
+                if self.is_tty {
+                    println!("Successfully created release '{name}' for {owner}/{repo}");
+                }
+                self.append_slack_message(format!("Release '{name}' created for {owner}/{repo}"))
+                    .await;
                 Ok(())
             }
-            Err(e) => Err(GitError::GithubApiError(e)),
+            Err(e) => {
+                self.append_slack_error(format!(
+                    "Failed to create release '{name}' for {owner}/{repo}"
+                ))
+                .await;
+                eprintln!(
+                    "Verify that there isn't an existing release using {current_tag} for {owner}/{repo}"
+                );
+                Err(GitError::GithubApiError(e))
+            }
         }
     }
     /// Create a new release for each of the specified repositories.

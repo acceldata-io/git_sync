@@ -248,10 +248,10 @@ impl GitError {
     pub fn is_broken_pipe(&self) -> bool {
         let mut source = Some(self as &dyn std::error::Error);
         while let Some(err) = source {
-            if let Some(ioe) = err.downcast_ref::<std::io::Error>() {
-                if ioe.kind() == std::io::ErrorKind::BrokenPipe {
-                    return true;
-                }
+            if let Some(ioe) = err.downcast_ref::<std::io::Error>()
+                && ioe.kind() == std::io::ErrorKind::BrokenPipe
+            {
+                return true;
             }
             source = err.source();
         }
@@ -342,11 +342,11 @@ pub fn octocrab_error_info(e: &octocrab::Error) -> (Option<http::StatusCode>, St
             let mut message = source.message.to_string();
             if let Some(errors) = &source.errors {
                 for err in errors {
-                    if let Some(obj) = err.as_object() {
-                        if let Some(msg) = obj.get("message").and_then(|m| m.as_str()) {
-                            let m = format!("\n- {msg}");
-                            let _ = write!(message, "{m}");
-                        }
+                    if let Some(obj) = err.as_object()
+                        && let Some(msg) = obj.get("message").and_then(|m| m.as_str())
+                    {
+                        let m = format!("\n- {msg}");
+                        let _ = write!(message, "{m}");
                     }
                 }
             }
@@ -375,18 +375,19 @@ fn is_network_error(e: &(dyn Error + 'static)) -> bool {
     let mut current = Some(e);
 
     while let Some(err) = current {
-        if let Some(hyper_err) = err.downcast_ref::<hyper::Error>() {
-            if hyper_err.is_closed() || hyper_err.is_incomplete_message() || hyper_err.is_timeout()
-            {
-                return true;
-            }
+        if let Some(hyper_err) = err.downcast_ref::<hyper::Error>()
+            && (hyper_err.is_closed()
+                || hyper_err.is_incomplete_message()
+                || hyper_err.is_timeout())
+        {
+            return true;
         }
 
         // reqwest errors (timeout, connect, etc.)
-        if let Some(reqwest_err) = err.downcast_ref::<reqwest::Error>() {
-            if reqwest_err.is_timeout() || reqwest_err.is_connect() || reqwest_err.is_request() {
-                return true;
-            }
+        if let Some(reqwest_err) = err.downcast_ref::<reqwest::Error>()
+            && (reqwest_err.is_timeout() || reqwest_err.is_connect() || reqwest_err.is_request())
+        {
+            return true;
         }
 
         if let Some(io_err) = err.downcast_ref::<std::io::Error>() {

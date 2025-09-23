@@ -177,10 +177,10 @@ impl GithubClient {
                 };
                 let commit_sha = tag.target.target.as_ref().map(|t| t.oid.to_string());
 
-                if let Some(url) = parent_url.as_ref() {
-                    if !parent_urls.contains(url) {
-                        parent_urls.insert(url.to_owned());
-                    }
+                if let Some(url) = parent_url.as_ref()
+                    && !parent_urls.contains(url)
+                {
+                    parent_urls.insert(url.to_owned());
                 }
 
                 all_tags.insert(TagInfo {

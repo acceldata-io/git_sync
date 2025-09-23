@@ -44,7 +44,6 @@ impl GithubClient {
             error_predicate = |e: &octocrab::Error| is_retryable(e),
             body = {
                 octocrab
-                    .clone()
                     .pulls(&owner, &repo)
                     .create(&opts.title, &opts.head, &opts.base)
                     .body(opts.body.as_deref().unwrap_or_default())

@@ -73,10 +73,10 @@ impl GithubClient {
         path.push_str(name);
         let output_path = path.clone();
 
-        if let Some(t) = self.output.get() {
-            if *t == OutputMode::Print {
-                println!("Backing up repository {} to path: {path}", url.as_ref());
-            }
+        if let Some(t) = self.output.get()
+            && *t == OutputMode::Print
+        {
+            println!("Backing up repository {} to path: {path}", url.as_ref());
         }
         // If the mirrored repo already exists, update it rather than clone again
         let result =
@@ -157,18 +157,20 @@ impl GithubClient {
         // Match outside of the spawn_blocking to avoid ownership issues
         match result {
             Ok(m) => {
-                if let Some(t) = self.output.get() {
-                    if *t == OutputMode::Print && self.is_tty {
-                        println!("{m}");
-                    }
+                if let Some(t) = self.output.get()
+                    && *t == OutputMode::Print
+                    && self.is_tty
+                {
+                    println!("{m}");
                 }
                 self.append_slack_message(m).await;
             }
             Err(e) => {
-                if let Some(t) = self.output.get() {
-                    if *t == OutputMode::Print && self.is_tty {
-                        eprintln!("{e}");
-                    }
+                if let Some(t) = self.output.get()
+                    && *t == OutputMode::Print
+                    && self.is_tty
+                {
+                    eprintln!("{e}");
                 }
                 self.append_slack_error(e.to_string()).await;
                 return Err(e);
@@ -319,18 +321,20 @@ impl GithubClient {
 
         match result {
             Ok(m) => {
-                if let Some(t) = self.output.get() {
-                    if *t == OutputMode::Print && self.is_tty {
-                        println!("{m}");
-                    }
+                if let Some(t) = self.output.get()
+                    && *t == OutputMode::Print
+                    && self.is_tty
+                {
+                    println!("{m}");
                 }
                 self.append_slack_message(m).await;
             }
             Err(e) => {
-                if let Some(t) = self.output.get() {
-                    if *t == OutputMode::Print && self.is_tty {
-                        eprintln!("{e}");
-                    }
+                if let Some(t) = self.output.get()
+                    && *t == OutputMode::Print
+                    && self.is_tty
+                {
+                    eprintln!("{e}");
                 }
                 self.append_slack_error(e.to_string()).await;
                 return Err(e);
@@ -379,13 +383,13 @@ impl GithubClient {
                 file_path.display()
             )));
         }
-        if let Some(ext) = file_path.extension() {
-            if ext != "git" {
-                return Err(GitError::Other(format!(
-                    "File {} is not a git mirror",
-                    file_path.display()
-                )));
-            }
+        if let Some(ext) = file_path.extension()
+            && ext != "git"
+        {
+            return Err(GitError::Other(format!(
+                "File {} is not a git mirror",
+                file_path.display()
+            )));
         }
         let compressed_dir = compress_directory(file_path)?;
         // We know that this directory exists, so we can unwrap it safely
