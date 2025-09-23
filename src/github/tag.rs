@@ -408,7 +408,11 @@ impl GithubClient {
             format!(":white_check_mark: Synced {num_tags_missing} tags for {owner}/{repo}\n");
         if process_annotated && !annotated.is_empty() && errors.is_empty() {
             let num_annotated = annotated.len();
-            let _ = writeln!(message, "Of which {num_annotated} are annotated tags:",);
+            if num_annotated == 1 {
+                let _ = writeln!(message, "Of which {num_annotated} is an annotated tag:");
+            } else {
+                let _ = writeln!(message, "Of which {num_annotated} are annotated tags:",);
+            }
             for (i, tag) in annotated.iter().enumerate() {
                 if i >= 10 {
                     let _ = writeln!(message, "\t and {} others", num_annotated - i);
@@ -419,7 +423,13 @@ impl GithubClient {
         }
         if !lightweight.is_empty() && errors.is_empty() {
             let num_lightweight = lightweight.len();
-            let _ = writeln!(message, "Of which {num_lightweight} are lightweight tags:");
+            if annotated.is_empty() {
+                let _ = writeln!(message, "Of which {num_lightweight} are lightweight tags:");
+            } else if annotated.len() == 1 {
+                let _ = writeln!(message, "\nAnd {num_lightweight} is a lightweight tag:");
+            } else {
+                let _ = writeln!(message, "\nAnd {num_lightweight} are lightweight tags:");
+            }
             for (i, tag) in lightweight.iter().enumerate() {
                 if i >= 10 {
                     let _ = writeln!(message, "\t and {} others", num_lightweight - i);
