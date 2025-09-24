@@ -78,3 +78,4 @@ sqlite = ["sql", "sqlx/sqlite"]
 
 [profile.release]
 lto = true
+strip = true
