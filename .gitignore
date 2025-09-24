@@ -5,3 +5,4 @@ git-manage.toml
 flamegraph.*
 THIRDPARTY.toml
 *.tar.gz
+*.csv

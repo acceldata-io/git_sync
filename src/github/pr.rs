@@ -36,7 +36,7 @@ impl GithubClient {
         let _permit = self.semaphore.clone().acquire_owned().await?;
 
         let retries = 3;
-        let pr_number: u64;
+        let mut pr_number: Option<u64> = None;
         let pr_result: Result<_, octocrab::Error> = async_retry!(
             ms = 100,
             timeout = 5000,
@@ -53,14 +53,62 @@ impl GithubClient {
         );
         match pr_result {
             Ok(p) => {
-                pr_number = p.number;
-                println!("PR #{pr_number} created successfully for {owner}/{repo}");
+                pr_number = Some(p.number);
+                println!("PR #{} created successfully for {owner}/{repo}", p.number);
             }
             Err(e) => {
-                eprintln!("Failed to create PR for {owner}/{repo} after {retries} tries: {e}");
-                return Err(GitError::GithubApiError(e));
+                if let octocrab::Error::GitHub { source, .. } = &e
+                    && source.status_code == 422
+                {
+                    eprintln!(
+                        "PR may already exist for {owner}/{repo}:{} - attempting to proceed",
+                        opts.head
+                    );
+                } else {
+                    eprintln!("Failed to create PR for {owner}/{repo}: {e}");
+                    self.append_slack_error(format!("Failed to create PR for {owner}/{repo}: {e}"))
+                        .await;
+                    return Err(GitError::GithubApiError(e));
+                }
             }
         }
+
+        let pr_number = if let Some(number) = pr_number {
+            number
+        } else {
+            let pr_result: Result<_, octocrab::Error> = async_retry!(
+                ms = 100,
+                timeout = 5000,
+                retries = retries,
+                error_predicate = |e: &octocrab::Error| is_retryable(e),
+                body = {
+                    octocrab
+                        .pulls(&owner, &repo)
+                        .list()
+                        .head(format!("{owner}:{}", opts.head))
+                        .base(&opts.base)
+                        .per_page(1)
+                        .send()
+                        .await
+                },
+            );
+            match pr_result {
+                Ok(p) => p.items.first().map(|pr| pr.number).ok_or_else(|| {
+                    GitError::Other(format!(
+                        "Cannot get existing PR number for {owner}/{repo} with head {} and base {}",
+                        opts.head, opts.base
+                    ))
+                })?,
+                Err(e) => {
+                    self.append_slack_error(format!(
+                        "Failed to get existing PR number for {owner}/{repo}: {e}"
+                    ))
+                    .await;
+                    return Err(GitError::GithubApiError(e));
+                }
+            }
+        };
+
         let branch_sha = self.get_branch_sha(&opts.url, &opts.head).await?;
         let commit_sha: Result<_, octocrab::Error> = async_retry!(
             ms = 100,
@@ -205,7 +253,13 @@ impl GithubClient {
                 println!("Successfully merged PR #{pr_number} in {repo}");
                 Ok(())
             }
-            Err(_) => Err(GitError::PRNotMergeable(pr_number)),
+            Err(e) => {
+                self.append_slack_error(format!(
+                    "Failed to merge PR #{pr_number} in {owner}/{repo}: {e}"
+                ))
+                .await;
+                Err(GitError::PRNotMergeable(pr_number))
+            }
         }
     }
 

@@ -74,9 +74,7 @@ pub async fn match_arguments(app: &AppArgs, config: Config) -> Result<(), GitErr
                 }
                 repository.clone()
             } else {
-                return Err(GitError::Other(format!(
-                    "No repositories found for custom group '{name}'"
-                )));
+                return Err(GitError::Other(format!("Custom group '{name}' not found")));
             }
         }
     };
@@ -323,6 +321,9 @@ async fn match_repo_cmds(
                     .check_all_repositories(repos, checks, &blacklist)
                     .await?;
 
+                if !client.is_tty {
+                    println!("Repository,Branch,Date,License,Rules");
+                }
                 for res in &result {
                     let Checks {
                         branches,
@@ -332,33 +333,32 @@ async fn match_repo_cmds(
                     } = res.clone();
                     let check = res.clone();
 
-                    let branches = branches
+                    let branches: Vec<Vec<String>> = branches
                         .iter()
                         .map(|(b, d)| vec![b.to_string(), d.to_string()])
                         .collect();
-                    if client.output.get() == Some(&crate::github::client::OutputMode::Print) {
-                        GithubClient::display_check_results(
-                            vec!["Branch".to_string(), "Date".to_string()],
-                            branches,
-                            &rules,
-                            license.as_ref(),
+                    client.display_check_results(
+                        vec!["Branch".to_string(), "Date".to_string()],
+                        branches,
+                        &rules,
+                        license.as_ref(),
+                        &repo,
+                    );
+
+                    client
+                        .validate_check_results(
                             &repo,
-                        );
-                    } else {
-                        client
-                            .validate_check_results(
-                                &repo,
-                                check,
-                                blacklist.clone(),
-                                license_blacklist.clone(),
-                            )
-                            .await?;
-                    }
+                            check,
+                            blacklist.clone(),
+                            license_blacklist.clone(),
+                        )
+                        .await?;
                 }
             } else if let Some(repository) = repository {
                 let result = client
                     .check_repository(repository, blacklist.clone(), checks)
                     .await?;
+
                 let Checks {
                     branches,
                     rules,
@@ -369,19 +369,19 @@ async fn match_repo_cmds(
                     .iter()
                     .map(|(b, d)| vec![b.to_string(), d.to_string()])
                     .collect();
-                if client.output.get() == Some(&crate::github::client::OutputMode::Print) {
-                    GithubClient::display_check_results(
-                        vec!["Branch".to_string(), "Date".to_string()],
-                        branches,
-                        rules,
-                        license.as_ref(),
-                        repo,
-                    );
-                } else {
-                    client
-                        .validate_check_results(repo, result, blacklist, license_blacklist)
-                        .await?;
+                if !client.is_tty {
+                    println!("Repository,Branch,Date,License,Rules");
                 }
+                client.display_check_results(
+                    vec!["Branch".to_string(), "Date".to_string()],
+                    branches,
+                    rules,
+                    license.as_ref(),
+                    repo,
+                );
+                client
+                    .validate_check_results(repository, result, blacklist, license_blacklist)
+                    .await?;
             } else {
                 return Err(GitError::MissingRepositoryName);
             }

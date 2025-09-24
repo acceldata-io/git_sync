@@ -26,6 +26,7 @@ use crate::utils::tables::Table;
 use chrono::{DateTime, Utc};
 use futures::{StreamExt, stream::FuturesUnordered};
 use std::collections::{HashMap, HashSet};
+use std::fmt::Write;
 
 impl GithubClient {
     /// Get branches that are older than a certain number of days
@@ -133,10 +134,10 @@ impl GithubClient {
 
             if let Some(nodes) = refs["nodes"].as_array() {
                 for branch in nodes {
-                    if let Some(name) = branch.get("name").and_then(|v| v.as_str())
-                        && let Some(re) = &branch_filter
-                    {
-                        if !re.is_match(name)? {
+                    if let Some(name) = branch.get("name").and_then(|v| v.as_str()) {
+                        if let Some(re) = &branch_filter
+                            && !re.is_match(name)?
+                        {
                             continue;
                         }
 
@@ -180,7 +181,6 @@ impl GithubClient {
                 break;
             }
         }
-
         let now = Utc::now();
 
         let mut old_branches: Vec<_> = branches
@@ -207,29 +207,53 @@ impl GithubClient {
     }
     /// Display the results of the various checks into a nice table
     pub fn display_check_results(
+        &self,
         header: Vec<String>,
         rows: Vec<Vec<String>>,
         rules: &[BranchProtectionRule],
         license: Option<&LicenseInfo>,
         repo: &str,
     ) {
-        let table = Table::builder(tabled::settings::style::Style::ascii())
-            .title(format!("Stale Branches for {repo}"))
-            .header(header)
-            .rows(rows)
-            .centre(false)
-            .align(tabled::settings::Alignment::center())
-            .build();
-        println!("{table}");
-        if !rules.is_empty() {
-            for rule in rules {
-                println!("{rule}");
+        if self.is_tty {
+            println!("TTY?");
+            let table = Table::builder(tabled::settings::style::Style::ascii())
+                .title(format!("Stale Branches for {repo}"))
+                .header(header)
+                .rows(rows)
+                .centre(false)
+                .align(tabled::settings::Alignment::center())
+                .build();
+            println!("{table}");
+            if !rules.is_empty() {
+                for rule in rules {
+                    println!("{rule}");
+                }
             }
-        }
-        if let Some(license) = &license
-            && let Some(name) = &license.name
-        {
-            println!("License: {name}");
+            if let Some(license) = &license
+                && let Some(name) = &license.name
+            {
+                println!("License: {name}");
+            }
+        } else {
+            let mut output = repo.to_string();
+            let license_name = if let Some(license) = &license
+                && let Some(name) = &license.name
+            {
+                format!(",{name}")
+            } else {
+                String::new()
+            };
+            for v in rows {
+                let line = v.join(",");
+                let _ = write!(output, "{line}");
+                let line = format!("{repo},{line},{license_name}");
+                println!("{line}");
+            }
+            if let Some(license) = &license
+                && let Some(name) = &license.name
+            {
+                let _ = write!(output, ",{name}");
+            }
         }
     }
     /// Check the results and send any errors to slack. None of our repositories currently have any

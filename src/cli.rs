@@ -40,7 +40,7 @@ pub struct AppArgs {
 
     /// The types of repositories to use for any command that targets configured repositories.
     /// Warning: selecting 'all' will include every repository from every category
-    #[arg(long, default_value = "fork")]
+    #[arg(long, global = true, default_value = "fork")]
     pub repository_type: RepositoryType,
 
     /// The name of the custom repository group to use. Required if `repository_type` is set to
@@ -48,6 +48,7 @@ pub struct AppArgs {
     #[arg(
         short = 'g',
         long = "group",
+        global = true,
         required_if_eq("repository_type", "custom")
     )]
     pub repository_group: Option<String>,
@@ -320,6 +321,11 @@ pub struct CheckRepoCommand {
         .required(true)
         .args(&["all", "repository"])
     ),
+    group(
+        ArgGroup::new("all_sha")
+        .required(false)
+        .args(&["all", "sha"])
+    ),
     long_about = "Create a Pull Request and optionally try to merge it automatically. You can target a single repository, or all configured repositories",
     after_help="\
 EXAMPLES:
@@ -333,6 +339,9 @@ EXAMPLES:
 NOTES:
     Not all Pull Requests can be merged automatically. If there are merge conflicts,\
     the PR will still be created, but you will need to fix the conflicts.
+
+    You can specify --sha for single repositories, but cannot use this with --all.
+    If you do not specifiy it, it will be fetched automatically.
 "
 )]
 pub struct CreatePRCommand {
@@ -372,6 +381,9 @@ pub struct CreatePRCommand {
     /// A list of reviewers to request a review from
     #[arg(long)]
     pub reviewers: Option<Vec<String>>,
+    /// Optionally delete the branch after a successful merge. Only valid if --merge is specified
+    #[arg(long, requires = "merge")]
+    pub delete: Option<String>,
 }
 
 /// Close a PR for a repository. Currently doesn't do anything, since it's kind of pointless
@@ -407,6 +419,11 @@ pub struct ClosePRCommand {
         ArgGroup::new("target")
         .required(true)
         .args(&["all", "repository"])
+    ),
+    group(
+        ArgGroup::new("all_sha")
+        .required(false)
+        .args(&["all", "sha"])
     )
 )]
 pub struct MergePRCommand {
