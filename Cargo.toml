@@ -2,7 +2,7 @@
 authors = ["Jeffrey Smith <jeffrey.smith7@gmail.com>"]
 edition = "2024"
 license = "Apache-2.0"
-name = "git_sync"
+name    = "git_sync"
 version = "0.3.0"
 
 
@@ -69,13 +69,13 @@ tar = "0.4.44"
 wiremock = "0.6"
 
 [features]
-aws = ["dep:aws-sdk-s3", "dep:aws-config"]
-default = ["aws", "slack"]
+aws      = ["dep:aws-config", "dep:aws-sdk-s3"]
+default  = ["aws", "slack"]
 postgres = ["sql", "sqlx/postgres"]
-slack = []
-sql = ["dep:sqlx"]
-sqlite = ["sql", "sqlx/sqlite"]
+slack    = []
+sql      = ["dep:sqlx"]
+sqlite   = ["sql", "sqlx/sqlite"]
 
 [profile.release]
-lto = true
+lto   = true
 strip = true
