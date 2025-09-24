@@ -295,7 +295,18 @@ impl GithubClient {
                 Ok(())
             }
             Err(e) => {
+                if let octocrab::Error::GitHub { source, .. } = &e
+                    && source.message.contains("Reference does not exist")
+                {
+                    // Branch doesn't exist, so we can consider this a success
+                    eprintln!("Branch '{branch}' already exists, ignoring");
+                    return Ok(());
+                }
                 eprintln!("❌ Failed to delete branch '{branch}' for {repo}: {e}");
+                self.append_slack_error(format!(
+                    "{owner}/{repo}: Failed to delete branch {branch}: {e}"
+                ))
+                .await;
                 Err(GitError::GithubApiError(e))
             }
         }

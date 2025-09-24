@@ -755,11 +755,7 @@ impl GithubClient {
 
         while let Some((repo, result)) = futures.next().await {
             match result {
-                Ok(()) => {
-                    if self.is_tty {
-                        println!("Successfully created tag '{tag}' for '{repo}'");
-                    }
-                }
+                Ok(()) => {}
                 Err(e) => eprintln!("Failed to create tag '{tag}' for '{repo}': {e}"),
             }
         }
@@ -797,6 +793,8 @@ impl GithubClient {
                     if self.is_tty {
                         println!("Successfully deleted tag '{tag}' for {repo}");
                     }
+                    self.append_slack_message(format!("Tag '{tag}' has been deleted from {repo}"))
+                        .await;
                     Ok(())
                 } else {
                     let status_code = resp.status().as_u16();
@@ -840,11 +838,7 @@ impl GithubClient {
 
         while let Some((repo, result)) = futures.next().await {
             match result {
-                Ok(()) => {
-                    if self.is_tty {
-                        println!("Successfully deleted tag '{tag}' for {repo}");
-                    }
-                }
+                Ok(()) => {}
                 Err(e) => eprintln!("Failed to delete tag '{tag}' for {repo}: {e}"),
             }
         }
