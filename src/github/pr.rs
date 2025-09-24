@@ -27,7 +27,7 @@ use std::collections::HashMap;
 
 impl GithubClient {
     /// Create a pull request for a specific repository
-    pub async fn create_pr(&self, opts: &CreatePrOptions) -> Result<u64, GitError> {
+    pub async fn create_pr(&self, opts: &CreatePrOptions) -> Result<(u64, String), GitError> {
         let info = get_repo_info_from_url(&opts.url)?;
         let (owner, repo) = (info.owner, info.repo_name);
         let octocrab = self.octocrab.clone();
@@ -51,7 +51,6 @@ impl GithubClient {
                     .await
             },
         );
-
         match pr_result {
             Ok(p) => {
                 pr_number = p.number;
@@ -62,6 +61,34 @@ impl GithubClient {
                 return Err(GitError::GithubApiError(e));
             }
         }
+        let branch_sha = self.get_branch_sha(&opts.url, &opts.head).await?;
+        let commit_sha: Result<_, octocrab::Error> = async_retry!(
+            ms = 100,
+            timeout = 5000,
+            retries = retries,
+            error_predicate = |e: &octocrab::Error| is_retryable(e),
+            body = {
+                octocrab
+                    .repos(&owner, &repo)
+                    .list_commits()
+                    .branch(&branch_sha)
+                    .per_page(1)
+                    .send()
+                    .await
+            },
+        );
+        let sha = match commit_sha {
+            Ok(p) => {
+                if let Some(commit) = p.items.first() {
+                    commit.sha.clone()
+                } else {
+                    return Err(GitError::Other(format!(
+                        "Cannot get sha of latest commit for {owner}/{repo}"
+                    )));
+                }
+            }
+            Err(e) => return Err(GitError::GithubApiError(e)),
+        };
 
         if let Some(reviewers) = opts.reviewers.as_deref() {
             let reviewer_result = async_retry!(
@@ -87,7 +114,7 @@ impl GithubClient {
                 ),
             }
         }
-        Ok(pr_number)
+        Ok((pr_number, sha))
     }
     /// Create a pull request for all configured repositories, and optionally merge them
     /// automatically, if possible
@@ -110,10 +137,11 @@ impl GithubClient {
                 let result = self.create_pr(&pr_opts).await;
 
                 match result {
-                    Ok(pr_number) => {
+                    Ok((pr_number, sha)) => {
                         if let Some(mut opts) = merge_opts {
                             opts.url.clone_from(repo);
                             opts.pr_number = pr_number;
+                            opts.sha = Some(sha);
                             let merge_result = self.merge_pr(&opts).await;
                             (repo, merge_result.map(|()| pr_number))
                         } else {

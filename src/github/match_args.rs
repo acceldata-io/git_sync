@@ -423,13 +423,19 @@ async fn match_pr_cmds(
             } else {
                 None
             };
+
             if open_cmd.all {
                 let _pr_numbers = client.create_all_prs(&opts, merge_opts, repos).await?;
                 // Do some stuff here
             } else if !repository.len() > 0 {
-                let pr_number = client.create_pr(&opts).await?;
+                let (pr_number, sha) = client.create_pr(&opts).await?;
                 if let Some(opts) = merge_opts.as_mut() {
                     opts.pr_number = pr_number;
+                    if let Some(sha) = open_cmd.sha.clone() {
+                        opts.sha = Some(sha);
+                    } else {
+                        opts.sha = Some(sha);
+                    }
                     client.merge_pr(opts).await?;
                 }
             } else {
