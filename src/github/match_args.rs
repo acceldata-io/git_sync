@@ -428,7 +428,9 @@ async fn match_pr_cmds(
                 let _pr_numbers = client.create_all_prs(&opts, merge_opts, repos).await?;
                 // Do some stuff here
             } else if !repository.len() > 0 {
-                let (pr_number, sha) = client.create_pr(&opts).await?;
+                let Some((pr_number, sha)) = client.create_pr(&opts).await? else {
+                    return Ok(());
+                };
                 if let Some(opts) = merge_opts.as_mut() {
                     opts.pr_number = pr_number;
                     if let Some(sha) = open_cmd.sha.clone() {
