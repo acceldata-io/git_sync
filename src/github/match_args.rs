@@ -34,7 +34,7 @@ use clap_complete::{
 };
 use clap_mangen::Man;
 use fancy_regex::Regex;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::env;
 use std::fs::File;
 use std::path::{Path, PathBuf};
@@ -53,6 +53,12 @@ pub async fn match_arguments(app: &AppArgs, config: Config) -> Result<(), GitErr
     };
     let verbose = app.verbose;
     let quiet = app.quiet;
+
+    let fork_workaround_repositories = if app.with_fork_workaround {
+        config.repos.fork_workaround.clone().unwrap_or_default()
+    } else {
+        HashMap::new()
+    };
 
     let repos = match app.repository_type {
         RepositoryType::Public => config.get_public_repositories(),
@@ -108,14 +114,18 @@ pub async fn match_arguments(app: &AppArgs, config: Config) -> Result<(), GitErr
         }
     }
     match &app.command {
-        Command::Tag { cmd } => match_tag_cmds(&client, repos, cmd, app.repository_type).await?,
+        Command::Tag { cmd } => {
+            match_tag_cmds(&client, repos, cmd, fork_workaround_repositories).await?
+        }
         Command::Repo { cmd } => {
-            match_repo_cmds(&client, repos, config, cmd, app.repository_type).await?
+            match_repo_cmds(&client, repos, config, cmd, fork_workaround_repositories).await?;
         }
         Command::Branch { cmd } => match_branch_cmds(&client, repos, cmd, quiet).await?,
         Command::Release { cmd } => match_release_cmds(&client, repos, config, cmd).await?,
         Command::PR { cmd } => match_pr_cmds(&client, repos, config, cmd).await?,
-        Command::Backup { cmd } => match_backup_cmds(&client, repos, config, cmd).await?,
+        Command::Backup { cmd } => {
+            match_backup_cmds(&client, repos, config, cmd, fork_workaround_repositories).await?
+        }
         Command::Config { file, force } => {
             generate_config(file.as_ref(), *force)?;
         }
@@ -164,7 +174,7 @@ async fn match_tag_cmds(
     client: &GithubClient,
     repos: Vec<String>,
     cmd: &TagCommand,
-    reposotory_type: RepositoryType,
+    fork_workaround: HashMap<String, String>,
 ) -> Result<(), GitError> {
     let result = async {
         match cmd {
@@ -287,7 +297,7 @@ async fn match_repo_cmds(
     repos: Vec<String>,
     config: Config,
     cmd: &RepoCommand,
-    repository_type: RepositoryType,
+    fork_workaround: HashMap<String, String>,
 ) -> Result<(), GitError> {
     match cmd {
         RepoCommand::Sync(sync_cmd) => {
@@ -295,11 +305,11 @@ async fn match_repo_cmds(
             let recursive = sync_cmd.recursive;
             let branch = sync_cmd.branch.as_ref();
             let forks_with_workaround = config.repos.fork_workaround.clone().unwrap_or_default();
-            let process_forks_workaround = sync_cmd.with_fork_workaround;
+
             if sync_cmd.all {
-                if repository_type == RepositoryType::Fork && process_forks_workaround {
+                if !fork_workaround.is_empty() {
                     let (task1, task2) = tokio::join!(
-                        client.sync_all_forks_workaround(forks_with_workaround),
+                        client.sync_all_forks_workaround(fork_workaround),
                         client.sync_all_forks(&repos[..], recursive),
                     );
                     task1?;
@@ -309,9 +319,7 @@ async fn match_repo_cmds(
                 }
             } else if let Some(repository) = repository {
                 // Process repositories using git
-                if let Some(parent) = forks_with_workaround.get(repository)
-                    && process_forks_workaround
-                {
+                if let Some(parent) = fork_workaround.get(repository) {
                     client.sync_with_upstream(repository, parent).await?;
                 } else if forks_with_workaround.contains_key(repository) {
                     return Err(GitError::Other(format!(
@@ -516,6 +524,7 @@ async fn match_backup_cmds(
     repos: Vec<String>,
     _config: Config,
     cmd: &BackupCommand,
+    fork_workaround: HashMap<String, String>,
 ) -> Result<(), GitError> {
     match cmd {
         BackupCommand::Create(create_cmd) => {
@@ -532,6 +541,10 @@ async fn match_backup_cmds(
             let bucket = create_cmd.bucket.as_ref();
 
             if create_cmd.all {
+                let mut repos = repos;
+                if !fork_workaround.is_empty() {
+                    repos.extend(fork_workaround.keys().cloned());
+                }
                 let successful = client.backup_all_repos(&repos[..], path).await?;
                 if dest == BackupDestination::S3 {
                     if let Some(bucket) = bucket {

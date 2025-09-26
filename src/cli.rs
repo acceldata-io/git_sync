@@ -29,6 +29,7 @@ use std::path::PathBuf;
 NOTES:
     - When using --repository-type, make sure that whatever operation you are running can be applied across all of the repositories in the configured group.",
 )]
+#[allow(clippy::struct_excessive_bools)]
 pub struct AppArgs {
     /// Github Personal Access Token
     #[arg(short, long, env = "GITHUB_TOKEN")]
@@ -69,6 +70,11 @@ pub struct AppArgs {
     /// The maximum number of parallel tasks to run.
     #[arg(short = 'j', long, global = true, value_parser = validate_jobs)]
     pub jobs: Option<usize>,
+
+    /// Also process repositories that are forks that do not have the parent repository set in a way that
+    /// Github understands.
+    #[arg(long, default_value_t = false, global = true)]
+    pub with_fork_workaround: bool,
 
     /// Enable sending the results of the operation to a slack channel using the
     /// configured webhook in git-manage.toml
@@ -217,11 +223,6 @@ pub struct SyncTagCommand {
     /// read/write permissions for the repositories you are syncing.
     #[arg(short, long, default_value_t = false)]
     pub with_annotated: bool,
-
-    /// Sync tags in repositories that are forks, but do not have the parent repository set in a way that
-    /// Github understands.
-    #[arg(long, default_value_t = false, hide = true)]
-    pub with_fork_workaround: bool,
 }
 
 // --- Repo Commands ---
@@ -259,10 +260,6 @@ pub struct SyncRepoCommand {
     /// Sync a specific branch. Not a valid option when using --all or --recursive
     #[arg(short, long)]
     pub branch: Option<String>,
-    /// Sync branches in repositories that are forks, but do not have the parent repository set in a way that
-    /// Github understands.
-    #[arg(long, default_value_t = false)]
-    pub with_fork_workaround: bool,
 }
 
 /// Check repositories for various conditions
@@ -750,6 +747,15 @@ pub fn parse_args() -> AppArgs {
                     "Error: when syncing repositories, --force is required when --all and --recursive are set."
                 );
                 std::process::exit(1);
+            }
+            if !(app.repository_type == RepositoryType::All
+                || app.repository_type == RepositoryType::Fork)
+                && app.with_fork_workaround
+            {
+                eprintln!(
+                    "Error: --with-fork-workaround is only valid when --repository-type is 'all' or 'fork'"
+                );
+                std::process::exit(2);
             }
             app
         }

@@ -217,7 +217,7 @@ impl Config {
         results
     }
     /// Get all repository urls for the fork workaround group
-    fn get_fork_workaround_repositories(&self) -> Vec<String> {
+    pub fn get_fork_workaround_repositories(&self) -> Vec<String> {
         if let Some(fork_workarounds) = &self.repos.fork_workaround {
             fork_workarounds.keys().cloned().collect()
         } else {
@@ -234,7 +234,6 @@ impl Config {
             .chain(self.get_fork_repositories())
             .chain(self.get_private_repositories())
             .chain(self.get_all_custom_group_repositories())
-            .chain(self.get_fork_workaround_repositories())
             .collect()
     }
 }

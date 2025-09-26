@@ -200,7 +200,7 @@ $ git_sync repo sync --all --recursive --force --slack # Go through all branches
 $ git_sync repo sync -r https://github.com/my-org/my-forked-repo --branch my_branch_to_update 
 ```
 
-If you want to sync a repository that does not have a parent configured in Github, you must place it in the `fork_with_workaround` group in the configuration file. Once you have done that, you can add the `--with-fork-workaround` flag to sync all of the common branches between the two repositories. NOTE: this only support merges that can be fast forwarded. If it cannot, you will need to sync that branch manually.
+If you want to sync a repository that does not have a parent configured in Github, you must place it in the `fork_with_workaround` group in the configuration file. Once you have done that, you can add the global `--with-fork-workaround` flag to sync all of the common branches between the two repositories. NOTE: this only support merges that can be fast forwarded. If it cannot, you will need to sync that branch manually.
 
 ### Syncing tags
 Before syncing tags, you should sync your fork with its parent repository to ensure that all references that a new tag may point to exist in your fork. At the very least, sync with the repository's main branch, which is the default for `repo sync`. Some repositories' tags point to a specific commit branch, and if you add a tag that does that without having the commits already, the tag may not sync correctly.
@@ -222,6 +222,8 @@ $ git_sync tag sync --all --with-annotated -j4 # With a maximum of 4 parallel jo
 Creating a backup of a repository is one of the slowest operations that this tool can do, particularly for larger repositories. This is because it has to do a `git clone --mirror` for each repository, in order to preserve all files and metadata. 
 
 When running the backup with `--all`, if you run it from an interactive terminal, you will be presented with a progress bar to show you how many of your repositories have been backed up so far. When this is used to backup many repositories (the largest number tested so far has been 40 at once), it can easily take 10 to 20+ minutes.
+
+If you want to include your `fork_with_workaround` repositories in the backup, you must specify the `--with-fork-workaround` flag. This is not enabled by default since these repositories are handled differently than normal repositories.
 
 
 #### Local backup
