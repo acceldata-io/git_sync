@@ -42,7 +42,7 @@ jobs:
       - name: Install auditing tools
         run: cargo install cargo-auditable cargo-audit
       - name: Build with cargo auditable
-        run: cargo auditable build --release
+        run: cargo auditable build
       - name: Audit binary
         run: cargo audit bin target/release/git_sync
 
