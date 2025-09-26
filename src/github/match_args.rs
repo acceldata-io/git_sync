@@ -79,17 +79,22 @@ pub async fn match_arguments(app: &AppArgs, config: Config) -> Result<(), GitErr
         }
     };
     // Remove any duplicate repositories. This shouldn't have any meaningful performance impact
-    // since there won't every be thousands of repositories configured.
+    // since there won't ever be thousands of repositories configured.
+    // Collect it into a Vec so that we have a consistent ordered collection
     let repos = repos
         .into_iter()
         .collect::<HashSet<_>>()
         .into_iter()
         .collect::<Vec<_>>();
 
+    // If for some reason we cannot get the number of threads and the user doesn't try to define it,
+    // default to 4, which seems like a reasonable minimum expectation for most systems.
     let default_jobs = std::thread::available_parallelism()
         .map(std::num::NonZero::get)
         .unwrap_or(4);
-    let jobs: usize = app.jobs.unwrap_or(default_jobs);
+
+    // This value must be greater than 0
+    let jobs: usize = std::cmp::min(app.jobs.unwrap_or(default_jobs), 1);
     let client = GithubClient::new(&token, &config, jobs)?;
     if !token.is_empty() && verbose {
         let (rest_limit, graphql_limit) =
@@ -103,8 +108,10 @@ pub async fn match_arguments(app: &AppArgs, config: Config) -> Result<(), GitErr
         }
     }
     match &app.command {
-        Command::Tag { cmd } => match_tag_cmds(&client, repos, cmd).await?,
-        Command::Repo { cmd } => match_repo_cmds(&client, repos, config, cmd).await?,
+        Command::Tag { cmd } => match_tag_cmds(&client, repos, cmd, app.repository_type).await?,
+        Command::Repo { cmd } => {
+            match_repo_cmds(&client, repos, config, cmd, app.repository_type).await?
+        }
         Command::Branch { cmd } => match_branch_cmds(&client, repos, cmd, quiet).await?,
         Command::Release { cmd } => match_release_cmds(&client, repos, config, cmd).await?,
         Command::PR { cmd } => match_pr_cmds(&client, repos, config, cmd).await?,
@@ -157,6 +164,7 @@ async fn match_tag_cmds(
     client: &GithubClient,
     repos: Vec<String>,
     cmd: &TagCommand,
+    reposotory_type: RepositoryType,
 ) -> Result<(), GitError> {
     let result = async {
         match cmd {
@@ -279,16 +287,37 @@ async fn match_repo_cmds(
     repos: Vec<String>,
     config: Config,
     cmd: &RepoCommand,
+    repository_type: RepositoryType,
 ) -> Result<(), GitError> {
     match cmd {
         RepoCommand::Sync(sync_cmd) => {
             let repository = sync_cmd.repository.as_ref();
             let recursive = sync_cmd.recursive;
             let branch = sync_cmd.branch.as_ref();
+            let forks_with_workaround = config.repos.fork_workaround.clone().unwrap_or_default();
+            let process_forks_workaround = sync_cmd.with_fork_workaround;
             if sync_cmd.all {
-                client.sync_all_forks(&repos[..], recursive).await?;
+                if repository_type == RepositoryType::Fork && process_forks_workaround {
+                    let (task1, task2) = tokio::join!(
+                        client.sync_all_forks_workaround(forks_with_workaround),
+                        client.sync_all_forks(&repos[..], recursive),
+                    );
+                    task1?;
+                    task2?;
+                } else {
+                    client.sync_all_forks(&repos[..], recursive).await?;
+                }
             } else if let Some(repository) = repository {
-                if recursive {
+                // Process repositories using git
+                if let Some(parent) = forks_with_workaround.get(repository)
+                    && process_forks_workaround
+                {
+                    client.sync_with_upstream(repository, parent).await?;
+                } else if forks_with_workaround.contains_key(repository) {
+                    return Err(GitError::Other(format!(
+                        "Repository '{repository}' has no configured parent. Use the '--with-fork-workaround' flag to enable syncing it."
+                    )));
+                } else if recursive {
                     client.sync_fork_recursive(repository).await?;
                 } else {
                     client.sync_fork(repository, branch).await?;

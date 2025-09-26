@@ -163,8 +163,7 @@ That includes the following:
 
 You can set the number of parallel jobs to run at a time by specifying the --jobs flag. By default, this is set to the total number of CPU threads the machine has, but it can be manually set to any positive integer between 1 and 64. If this is unspecified, and it can't be determined automatically, it will default to 4.
 
-**TODO**
-~~If you have a forked repository on Github that does not have a configured parent, you can put it into the fork_with_workaround map, where "forked repo" = "actual upstream repo". Ex: `fork_with_workaround = {"https://github.com/my-org/livy" = "https://github.com/apache/incubator-livy"}`. This will require that you have write access to your forked repository, and git set up correctly on your machine.~~
+If you have a forked repository on Github that does not have a configured parent repository, you can put it into the fork_with_workaround map, where "forked repo" = "actual upstream repo". Ex: `fork_with_workaround = {"https://github.com/my-org/livy" = "https://github.com/apache/incubator-livy"}`. This will require that you have write access to your forked repository, and git set up correctly on your machine. 
 
 ### Tests
 
@@ -188,7 +187,7 @@ If you want to sync all branches for a given repository, you can use the `--recu
 
 If you do not specify the `--recursive` option, only the primary branch of the upstream repository will be synced. This is usually 'main' or 'master'.
 
-The `--recursive` option is important when tags in your repositories don't only point to the main branch. In that case, you'll either want to use `--recursive` to sync all out of date branches, or use `--branch` to target a specific branch to sync. This option isn't actually recursively going over anything, but I wanted to keep the nomenclature similar to the `rm` command since that's what many people will be familiar with.
+The `--recursive` option is important when tags in your parent repositories don't only point to the main branch. In that case, you'll either want to use `--recursive` to sync all out of date branches, or use `--branch` to target a specific branch to sync. This option isn't actually recursively going over anything, but I wanted to keep the nomenclature similar to the `rm` command since that's what many people will be familiar with.
 
 Make sure you only run this for repositories that are actually forks of another repository and that Github detects as having an upstream project. It will not work otherwise.
 
@@ -201,6 +200,7 @@ $ git_sync repo sync --all --recursive --force --slack # Go through all branches
 $ git_sync repo sync -r https://github.com/my-org/my-forked-repo --branch my_branch_to_update 
 ```
 
+If you want to sync a repository that does not have a parent configured in Github, you must place it in the `fork_with_workaround` group in the configuration file. Once you have done that, you can add the `--with-fork-workaround` flag to sync all of the common branches between the two repositories. NOTE: this only support merges that can be fast forwarded. If it cannot, you will need to sync that branch manually.
 
 ### Syncing tags
 Before syncing tags, you should sync your fork with its parent repository to ensure that all references that a new tag may point to exist in your fork. At the very least, sync with the repository's main branch, which is the default for `repo sync`. Some repositories' tags point to a specific commit branch, and if you add a tag that does that without having the commits already, the tag may not sync correctly.
@@ -213,8 +213,10 @@ $ git_sync tag sync -r https://github.com/my-org/my-forked-repo --slack
 $ git_sync tag sync --all --with-annotated -j4 # With a maximum of 4 parallel jobs
 ```
 
+**TODO** Add `--fork_with_workaround` and its functionality to syncing tags.
+
 **Note**: 
-  Syncing tags can still fail to work the way you expect if an upstream tag exists that points to a commit that is not in your fork. This situation could occur if your repository is missing some commits, or if it's missing branches that the tags point to.
+  Syncing tags can still fail to work the way you expect if an upstream tag exists that points to a commit that is not present in your fork. This situation could occur if your repository is missing some commits or if it's missing branches that the tags point to.
 ### Backing up a repository
 
 Creating a backup of a repository is one of the slowest operations that this tool can do, particularly for larger repositories. This is because it has to do a `git clone --mirror` for each repository, in order to preserve all files and metadata. 

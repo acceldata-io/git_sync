@@ -217,6 +217,11 @@ pub struct SyncTagCommand {
     /// read/write permissions for the repositories you are syncing.
     #[arg(short, long, default_value_t = false)]
     pub with_annotated: bool,
+
+    /// Sync tags in repositories that are forks, but do not have the parent repository set in a way that
+    /// Github understands.
+    #[arg(long, default_value_t = false, hide = true)]
+    pub with_fork_workaround: bool,
 }
 
 // --- Repo Commands ---
@@ -236,6 +241,7 @@ pub struct SyncTagCommand {
         ArgGroup::new("branch_conflict")
         .args(&["branch", "all"])
 ))]
+#[allow(clippy::struct_excessive_bools)]
 pub struct SyncRepoCommand {
     /// The repository to sync
     #[arg(short, long)]
@@ -253,6 +259,10 @@ pub struct SyncRepoCommand {
     /// Sync a specific branch. Not a valid option when using --all or --recursive
     #[arg(short, long)]
     pub branch: Option<String>,
+    /// Sync branches in repositories that are forks, but do not have the parent repository set in a way that
+    /// Github understands.
+    #[arg(long, default_value_t = false)]
+    pub with_fork_workaround: bool,
 }
 
 /// Check repositories for various conditions

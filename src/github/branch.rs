@@ -200,8 +200,10 @@ impl GithubClient {
         match res {
             Ok(_) => {
                 if !quiet {
-                    self.append_slack_message(format!("New branch {new_branch} created"))
-                        .await;
+                    self.append_slack_message(format!(
+                        "{owner}/{repo} - New branch {new_branch} created"
+                    ))
+                    .await;
                 }
                 Ok(())
             }

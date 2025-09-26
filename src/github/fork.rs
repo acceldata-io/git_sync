@@ -19,7 +19,7 @@ under the License.
 
 use crate::error::{GitError, is_retryable};
 use crate::github::client::GithubClient;
-use crate::utils::repo::get_repo_info_from_url;
+use crate::utils::repo::{get_repo_info_from_url, http_to_ssh_repo};
 use crate::{async_retry, handle_api_response};
 use chrono::DateTime;
 use futures::{StreamExt, stream::FuturesUnordered};
@@ -27,7 +27,9 @@ use octocrab::params::repos::Reference;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::fmt::{Display, Write};
+use std::process::Command;
 use std::sync::Arc;
+use temp_dir::TempDir;
 
 /// Graphql query to fetch branches and their commit dates
 static GRAPHQL_QUERY: &str = r#"
@@ -286,6 +288,189 @@ impl GithubClient {
                 }
                 Err(e) => {
                     println!("❌ Failed to sync {repo}: {e}");
+                    errors.push((repo.to_string(), e));
+                }
+            }
+        }
+        if !errors.is_empty() {
+            return Err(GitError::MultipleErrors(errors));
+        }
+        Ok(())
+    }
+    /// This is for syncing repositories that have upstream repositories, but do not have them
+    /// configured. We have to do it manually instead of using the Github API. This only supports
+    /// fast forward merges, and will report errors for branches that cannot be fast-forwarded.
+    pub async fn sync_with_upstream<T: AsRef<str> + ToString + Display + Copy>(
+        &self,
+        url: T,
+        upstream: T,
+    ) -> Result<(), GitError> {
+        let ssh_url = http_to_ssh_repo(url)?;
+        let info = get_repo_info_from_url(url)?;
+        let last_part = info.repo_name;
+
+        let upstream = upstream.to_string();
+        let upstream_url = upstream.clone();
+        let _lock = Arc::clone(&self.semaphore).acquire_owned().await?;
+
+        let task: Result<(usize, usize), GitError> = tokio::task::spawn_blocking(move || {
+            let tmp_dir = TempDir::new()
+                .map_err(|e| GitError::Other(format!("Failed to create temp dir: {e}")))?;
+            let tmp = tmp_dir.path();
+            let tmp_str_base = tmp
+                .to_str()
+                .ok_or_else(|| GitError::Other("Temp dir not valid UTF-8".to_string()))?;
+
+            let tmp_str = format!("{tmp_str_base}/{last_part}");
+
+            Command::new("git")
+                .args(["-C", tmp_str_base, "clone", &ssh_url])
+                .status()?;
+
+            Command::new("git")
+                .args([
+                    "-C",
+                    tmp_str.as_str(),
+                    "remote",
+                    "add",
+                    "upstream",
+                    upstream.as_str(),
+                ])
+                .status()?;
+
+            Command::new("git")
+                .args(["-C", tmp_str.as_str(), "fetch", "upstream"])
+                .status()?;
+            let output = Command::new("git")
+                .args(["-C", tmp_str.as_str(), "branch", "-r"])
+                .output()?;
+
+            let branch_outputs = String::from_utf8_lossy(&output.stdout);
+
+            let origin: HashSet<String> = branch_outputs
+                .lines()
+                .filter(|line| line.trim().starts_with("origin/"))
+                .map(|line| line.trim().replace("origin/", ""))
+                .collect();
+
+            let upstream: HashSet<String> = branch_outputs
+                .lines()
+                .filter(|line| line.trim().starts_with("upstream/"))
+                .map(|line| line.trim().replace("upstream/", ""))
+                .collect();
+
+            let common_branches: Vec<_> = origin.intersection(&upstream).cloned().collect();
+
+            println!("Common: {common_branches:#?}");
+
+            let mut errors: Vec<GitError> = Vec::with_capacity(common_branches.len());
+            let mut successful: usize = 0;
+            let mut no_update = 0;
+
+            for branch in &common_branches {
+                println!("Checking out {branch} in {tmp_str}");
+                Command::new("git")
+                    .args([
+                        "-C",
+                        tmp_str.as_str(),
+                        "checkout",
+                        "--track",
+                        &format!("origin/{branch}"),
+                    ])
+                    .status()?;
+
+                let ff_merge = Command::new("git")
+                    .args([
+                        "-C",
+                        tmp_str.as_str(),
+                        "merge",
+                        "--ff-only",
+                        &format!("upstream/{branch}"),
+                    ])
+                    .output()?;
+                let status = ff_merge.status;
+                if status.success() {
+                    successful += 1;
+                    let is_updated = String::from_utf8_lossy(&ff_merge.stdout)
+                        .lines()
+                        .filter(|line| line.trim().contains("Already up to date"))
+                        .collect::<Vec<_>>()
+                        .len();
+                    no_update += is_updated;
+                } else {
+                    eprintln!("Skipping branch {branch} due to non-fast-forward merge");
+                    errors.push(GitError::Other(format!(
+                        "Skipping branch {branch} due to non-fast-forward merge"
+                    )));
+                }
+            }
+
+            // If no branches were synced, and there are errors, then we return an error
+            if successful == 0 && !errors.is_empty() {
+                return Err(GitError::Other(
+                    "No branches were successfully synced".to_string(),
+                ));
+            }
+
+            Command::new("git")
+                .args(["-C", tmp_str.as_str(), "push", "origin", "--all"])
+                .status()?;
+
+            Ok((successful, no_update))
+        })
+        .await?;
+        match task {
+            Ok((success, up_to_date)) => {
+                // Essentially, if everything was already up to date, don't report that we've
+                // updated anything
+                if success == up_to_date {
+                    if self.is_tty {
+                        println!(
+                            "All common branches between {url} with {upstream_url} are up to date"
+                        );
+                    }
+                    self.append_slack_message(format!(
+                        "All common branches between {url} and {upstream_url} are up to date"
+                    ))
+                    .await;
+                    return Ok(());
+                }
+                if self.is_tty {
+                    println!("Successfully synced {url} with {upstream_url}");
+                }
+
+                self.append_slack_message(format!("Successfully synced {url} and {upstream_url}"))
+                    .await;
+            }
+            Err(e) => eprintln!("Failed to sync {url} with {upstream_url}: {e}"),
+        }
+        Ok(())
+    }
+    /// Sync all configured repositories. Only repositories that have a parent repository
+    /// should be passed to this function
+    pub async fn sync_all_forks_workaround<T: AsRef<str> + Display>(
+        &self,
+        repositories: HashMap<T, T>,
+    ) -> Result<(), GitError> {
+        let mut futures = FuturesUnordered::new();
+        for (repo, upstream) in repositories {
+            let semaphore_permit = self.semaphore.clone().acquire_owned().await?;
+            futures.push(async move {
+                let result = self
+                    .sync_with_upstream(repo.as_ref(), upstream.as_ref())
+                    .await;
+                drop(semaphore_permit);
+                (repo, upstream, result)
+            });
+        }
+        let mut errors: Vec<(String, GitError)> = Vec::new();
+        while let Some((repo, upstream, result)) = futures.next().await {
+            match result {
+                Ok(()) => {
+                    println!("✅ Successfully synced {repo} with {upstream}");
+                }
+                Err(e) => {
+                    println!("❌ Failed to sync {repo} with {upstream}: {e}");
                     errors.push((repo.to_string(), e));
                 }
             }
