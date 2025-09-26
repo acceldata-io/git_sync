@@ -1,0 +1,37 @@
+name: Toml lint
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+jobs:
+  taplo-format:
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: write
+
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        ref: ${{ github.head_ref }}
+
+    - name: Install Taplo CLI
+      run: |
+        curl -fsSL https://github.com/tamasfe/taplo/releases/latest/download/taplo-linux-x86_64.gz \
+          | gzip -d - | install -m 755 /dev/stdin /usr/local/bin/taplo
+
+    - name: Run Taplo format
+      run: |
+        taplo format Cargo.toml \
+          --option reorder_keys=true \
+          --option reorder_arrays=true \
+          --option align_entries=true \
+          --option array_trailing_comma=true \
+          --option align_comments=true
+
+    - uses: stefanzweifel/git-auto-commit-action@v6
+      with:
+        commit_message: Apply taplo TOML formatting
