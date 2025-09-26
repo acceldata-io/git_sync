@@ -52,6 +52,7 @@ tokio = { version = "1.47", features = ["macros", "rt-multi-thread"] }
 tokio-retry = "0.3"
 toml = "0.9.5"
 
+microxdg = "0.2.0"
 sqlx = { version = "0.8.6", optional = true, default-features = false, features = [
   "chrono",
   "derive",
@@ -62,7 +63,6 @@ sqlx = { version = "0.8.6", optional = true, default-features = false, features 
   "time",
   "tls-rustls-aws-lc-rs",
 ] }
-microxdg = "0.2.0"
 tar = "0.4.44"
 
 [dev-dependencies]
