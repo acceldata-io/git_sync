@@ -99,9 +99,16 @@ pub async fn match_arguments(app: &AppArgs, config: Config) -> Result<(), GitErr
         .map(std::num::NonZero::get)
         .unwrap_or(4);
 
+    // Prioritize the command line argument or env variable over the config file
+    let slack_webhook = app
+        .slack_webhook
+        .clone()
+        .or_else(|| config.slack.webhook_url.clone());
+
     // This value must be greater than 0
     let jobs: usize = std::cmp::min(app.jobs.unwrap_or(default_jobs), 1);
-    let client = GithubClient::new(&token, &config, jobs)?;
+
+    let client = GithubClient::new(&token, &config, jobs, slack_webhook)?;
     if !token.is_empty() && verbose {
         let (rest_limit, graphql_limit) =
             tokio::join!(client.get_rate_limit(), client.get_graphql_limit());
@@ -113,6 +120,7 @@ pub async fn match_arguments(app: &AppArgs, config: Config) -> Result<(), GitErr
             eprintln!("Warning: Could not fetch GraphQL API rate limit");
         }
     }
+
     match &app.command {
         Command::Tag { cmd } => {
             match_tag_cmds(&client, repos, cmd, fork_workaround_repositories).await?;
@@ -447,6 +455,7 @@ async fn match_pr_cmds(
                 title: open_cmd.title.clone(),
                 body: open_cmd.body.clone(),
                 reviewers: open_cmd.reviewers.clone(),
+                should_merge: merge,
             };
 
             let mut merge_opts = if merge {
@@ -463,8 +472,9 @@ async fn match_pr_cmds(
             };
 
             if open_cmd.all {
-                let _pr_numbers = client.create_all_prs(&opts, merge_opts, repos).await?;
-                // Do some stuff here
+                // Merging is handled within the create_all_prs method. It gets complicated
+                // managing the SHA for the latest commit across multiple repositories otherwise
+                let _pr_hashmap = client.create_all_prs(&opts, merge_opts, repos).await?;
             } else if !repository.len() > 0 {
                 let Some((pr_number, sha)) = client.create_pr(&opts).await? else {
                     return Ok(());

@@ -34,6 +34,9 @@ pub struct CreatePrOptions {
     pub body: Option<String>,
     /// A list of reviewers to request a review from.
     pub reviewers: Option<Vec<String>>,
+    /// Whether this should be merged. If it isn't going to be, we can skip grabbing the SHA and PR
+    /// number for this.
+    pub should_merge: bool,
 }
 
 /// Options for merging a PR.

@@ -48,15 +48,13 @@ impl GithubClient {
 
         let octocrab = self.octocrab.clone();
 
-        // Acquire a lock on the semaphore
-        let _permit = self.semaphore.clone().acquire_owned().await?;
-
         let tag_info = async_retry!(
             ms = 100,
             timeout = 5000,
             retries = 3,
             error_predicate = |e: &octocrab::Error| is_retryable(e),
             body = {
+                let _permit = self.semaphore.clone().acquire_owned().await;
                 octocrab
                     .repos(&owner, &repo)
                     .get_ref(&Reference::Tag(previous_tag.to_string()))
@@ -78,6 +76,7 @@ impl GithubClient {
             retries = 3,
             error_predicate = |e: &octocrab::Error| is_retryable(e),
             body = {
+                let _lock = self.semaphore.clone().acquire_owned().await;
                 octocrab
                     .repos(&owner, &repo)
                     .list_commits()
@@ -115,6 +114,7 @@ impl GithubClient {
                 retries = 3,
                 error_predicate = |e: &octocrab::Error| is_retryable(e),
                 body = {
+                    let _lock = self.semaphore.clone().acquire_owned().await;
                     octocrab
                         .repos(&owner, &repo)
                         .list_commits()
@@ -238,7 +238,6 @@ impl GithubClient {
         };
 
         // Acquire a lock on the semaphore
-        let _permit = self.semaphore.clone().acquire_owned().await?;
         let octocrab = self.octocrab.clone();
         let retries = 3;
         let release = async_retry!(
@@ -247,6 +246,7 @@ impl GithubClient {
             retries = retries,
             error_predicate = |e: &octocrab::Error| is_retryable(e),
             body = {
+                let _permit = self.semaphore.clone().acquire_owned().await;
                 octocrab
                     .clone()
                     .repos(&owner, &repo)

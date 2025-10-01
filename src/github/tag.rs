@@ -272,7 +272,6 @@ impl GithubClient {
     }
     /// Get a diff of all configured repositories tags, compared against their parent.
     pub async fn diff_all_tags(&self, repositories: Vec<String>) -> Result<(), GitError> {
-        //let mut futures = FuturesUnordered::new();
         let repositories: Vec<Result<RepoInfo, _>> =
             repositories.iter().map(get_repo_info_from_url).collect();
 
@@ -459,9 +458,6 @@ impl GithubClient {
         while let Some((repo, result)) = futures.next().await {
             match result {
                 Ok(()) => {
-                    /*self.append_slack_message(format!("✅ Successfully synced tags for {repo}"))
-                        .await;
-                    */
                     if self.is_tty {
                         println!("✅ Successfully synced tags for {repo}");
                     }
@@ -492,7 +488,7 @@ impl GithubClient {
             "ref": format!("refs/tags/{}", tag.name),
             "sha": tag.sha,
         });
-        let _lock = self.semaphore.clone().acquire_owned().await?;
+        let octocrab = self.octocrab.clone();
 
         let response: Result<serde_json::Value, octocrab::Error> = async_retry!(
             ms = 100,
@@ -500,8 +496,8 @@ impl GithubClient {
             retries = 3,
             error_predicate = |e: &octocrab::Error| is_retryable(e),
             body = {
-                self.octocrab
-                    .clone()
+                let _lock = self.semaphore.clone().acquire_owned().await;
+                octocrab
                     .post::<serde_json::Value, _>(
                         format!("/repos/{owner}/{repo}/git/refs"),
                         Some(&body),
@@ -542,12 +538,13 @@ impl GithubClient {
         if tags.is_empty() {
             return Ok(());
         }
-        let _semaphore_lock = self.semaphore.clone().acquire_owned().await?;
+        let lock = self.semaphore.clone().acquire_owned().await?;
         let tags = tags.clone();
         let tag_len = tags.len();
         let ssh_url = ssh_url.to_string();
         let output_url = ssh_url.to_string();
         let result = tokio::task::spawn_blocking(move || {
+            let _lock = lock;
             let parent_urls: Vec<String> = parent_urls.into_iter().collect();
 
             // Use a temp directory for the git repository so it's cleaned up automatically
@@ -695,16 +692,15 @@ impl GithubClient {
         let info = get_repo_info_from_url(url)?;
         let sha = self.get_branch_sha(url, branch).await?;
         let (owner, repo) = (info.owner, info.repo_name);
-        // Acquire a lock on the semaphore
-        let _permit = self.semaphore.clone().acquire_owned().await?;
+        let octocrab = self.octocrab.clone();
         let res: Result<Ref, octocrab::Error> = async_retry!(
             ms = 100,
             timeout = 5000,
             retries = 3,
             error_predicate = |e: &octocrab::Error| is_retryable(e),
             body = {
-                self.octocrab
-                    .clone()
+                let _permit = self.semaphore.clone().acquire_owned().await;
+                octocrab
                     .repos(&owner, &repo)
                     .create_ref(&Reference::Tag(tag.to_string()), sha.clone())
                     .await
@@ -776,8 +772,8 @@ impl GithubClient {
         let (owner, repo) = (info.owner, info.repo_name);
 
         // Acquire a lock on the semaphore
-        let _permit = self.semaphore.clone().acquire_owned().await?;
-
+        let permit = self.semaphore.clone().acquire_owned().await?;
+        // TODO: Wrap in async_retry! macro
         let response = self
             .octocrab
             .clone()
@@ -786,6 +782,7 @@ impl GithubClient {
                 None::<&()>,
             )
             .await;
+        drop(permit);
 
         match response {
             Ok(resp) => {

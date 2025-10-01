@@ -48,15 +48,13 @@ impl GithubClient {
         let info = get_repo_info_from_url(url)?;
         let (owner, repo) = (info.owner, info.repo_name);
 
-        // Acquire a lock on the semaphore
-        let _permit = self.semaphore.clone().acquire_owned().await?;
-
         let res: Result<_, octocrab::Error> = async_retry!(
             ms = 100,
             timeout = 5000,
             retries = 3,
             error_predicate = |e: &octocrab::Error| is_retryable(e),
             body = {
+                let _lock = self.semaphore.clone().acquire_owned().await;
                 self.octocrab
                     .clone()
                     .repos(&owner, &repo)
@@ -87,15 +85,13 @@ impl GithubClient {
         let info = get_repo_info_from_url(url)?;
         let (owner, repo) = (info.owner, info.repo_name);
 
-        // Acquire a lock on the semaphore
-        let _permit = self.semaphore.clone().acquire_owned().await?;
-
         let res: Result<_, octocrab::Error> = async_retry!(
             ms = 100,
             timeout = 5000,
             retries = 3,
             error_predicate = |e: &octocrab::Error| is_retryable(e),
             body = {
+                let _lock = self.semaphore.clone().acquire_owned().await;
                 self.octocrab
                     .clone()
                     .repos(&owner, &repo)
@@ -128,6 +124,7 @@ impl GithubClient {
             retries = 3,
             error_predicate = |e: &octocrab::Error| is_retryable(e),
             body = {
+                let _lock = self.semaphore.clone().acquire_owned().await;
                 self.octocrab
                     .clone()
                     .repos(&owner, &repo)
@@ -165,7 +162,6 @@ impl GithubClient {
         let (owner, repo) = (info.owner, info.repo_name);
 
         // Acquire a lock on the semaphore
-        let _permit = self.semaphore.clone().acquire_owned().await?;
         let octocrab = self.octocrab.clone();
 
         // We have to match against the SHA of the commit the tag points to, which is why we have
@@ -176,14 +172,19 @@ impl GithubClient {
             retries = 3,
             error_predicate = |e: &octocrab::Error| is_retryable(e),
             body = {
+                let permit = self.semaphore.clone().acquire_owned().await;
                 let tag_ref = octocrab
                     .repos(&owner, &repo)
                     .get_ref(&Reference::Tag(base_tag.to_string()))
                     .await;
+                drop(permit);
                 match tag_ref {
                     Ok(t) => match t.object {
                         Object::Commit { sha, .. } => Ok(Some(sha)),
+                        // TODO: See if the macro can be nested, so the below can be retried as
+                        // well
                         Object::Tag { sha, .. } => {
+                            let _permit = self.semaphore.clone().acquire_owned().await;
                             let tag_opt: Result<GitTagObject, octocrab::Error> = octocrab
                                 .get(format!("/repos/{owner}/{repo}/git/tags/{sha}"), None::<&()>)
                                 .await;
@@ -236,6 +237,7 @@ impl GithubClient {
             retries = 3,
             error_predicate = |e: &octocrab::Error| is_retryable(e),
             body = {
+                let _lock = self.semaphore.clone().acquire_owned().await;
                 self.octocrab
                     .clone()
                     .repos(&owner, &repo)
@@ -327,13 +329,13 @@ impl GithubClient {
         let info = get_repo_info_from_url(url)?;
         let (owner, repo) = (info.owner, info.repo_name);
         // Acquire a lock on the semaphore
-        let _permit = self.semaphore.clone().acquire_owned().await?;
         let result: Result<_, octocrab::Error> = async_retry!(
             ms = 100,
             timeout = 5000,
             retries = 3,
             error_predicate = |e: &octocrab::Error| is_retryable(e),
             body = {
+                let _permit = self.semaphore.clone().acquire_owned().await;
                 self.octocrab
                     .clone()
                     .repos(&owner, &repo)
@@ -364,6 +366,7 @@ impl GithubClient {
             }
         }
     }
+    //async fn replace_in_file()
     /// Delete the specified branch for each configured repository
     pub async fn delete_all_branches<
         T: AsRef<str> + ToString + Display + Copy,

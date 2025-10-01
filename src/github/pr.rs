@@ -36,9 +36,6 @@ impl GithubClient {
         let (owner, repo) = (info.owner, info.repo_name);
         let octocrab = self.octocrab.clone();
 
-        // Acquire a lock on the semaphore
-        let _permit = self.semaphore.clone().acquire_owned().await?;
-
         let retries = 3;
 
         // Verify that head and base have difference. If they don't, skip creating a PR since it's
@@ -49,6 +46,7 @@ impl GithubClient {
             retries = retries,
             error_predicate = |e: &octocrab::Error| is_retryable(e),
             body = {
+                let _permit = self.semaphore.clone().acquire_owned().await;
                 octocrab
                     .commits(&owner, &repo)
                     .compare(&opts.base, &opts.head)
@@ -78,6 +76,7 @@ impl GithubClient {
             retries = retries,
             error_predicate = |e: &octocrab::Error| is_retryable(e),
             body = {
+                let _permit = self.semaphore.clone().acquire_owned().await;
                 octocrab
                     .pulls(&owner, &repo)
                     .create(&opts.title, &opts.head, &opts.base)
@@ -117,6 +116,7 @@ impl GithubClient {
                 retries = retries,
                 error_predicate = |e: &octocrab::Error| is_retryable(e),
                 body = {
+                    let _permit = self.semaphore.clone().acquire_owned().await;
                     octocrab
                         .pulls(&owner, &repo)
                         .list()
@@ -143,7 +143,9 @@ impl GithubClient {
                 }
             }
         };
-
+        if !opts.should_merge {
+            return Ok(None);
+        }
         let branch_sha = self.get_branch_sha(&opts.url, &opts.head).await?;
         let commit_sha: Result<_, octocrab::Error> = async_retry!(
             ms = 100,
@@ -151,6 +153,7 @@ impl GithubClient {
             retries = retries,
             error_predicate = |e: &octocrab::Error| is_retryable(e),
             body = {
+                let _permit = self.semaphore.clone().acquire_owned().await;
                 octocrab
                     .repos(&owner, &repo)
                     .list_commits()
@@ -180,6 +183,7 @@ impl GithubClient {
                 retries = 3,
                 error_predicate = |e: &octocrab::Error| is_retryable(e),
                 body = {
+                    let _permit = self.semaphore.clone().acquire_owned().await;
                     octocrab
                         .clone()
                         .pulls(&owner, &repo)
@@ -261,18 +265,15 @@ impl GithubClient {
         let info = get_repo_info_from_url(&opts.url)?;
         let (owner, repo) = (info.owner, info.repo_name);
         let pr_number = opts.pr_number;
-
-        // Acquire a lock on the semaphore
-        let _permit = self.semaphore.clone().acquire_owned().await?;
-
+        let octocrab = self.octocrab.clone();
         let merge_result: Result<_, octocrab::Error> = async_retry!(
             ms = 100,
             timeout = 5000,
             retries = 3,
             error_predicate = |e: &octocrab::Error| is_retryable(e),
             body = {
-                self.octocrab
-                    .clone()
+                let _permit = self.semaphore.clone().acquire_owned().await;
+                octocrab
                     .pulls(&owner, &repo)
                     .merge(opts.pr_number)
                     .message(opts.message.as_deref().unwrap_or_default())

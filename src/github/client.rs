@@ -63,6 +63,8 @@ pub struct GithubClient {
     /// if it has any contents. This field is also thread safe.
     slack_errors: Arc<Mutex<Vec<String>>>,
 }
+/// This is sort of implemented. Some places are using this, some are ignoring it completely. This
+/// is ripe for future polish.
 #[derive(Default, PartialEq, Eq)]
 pub enum OutputMode {
     #[default]
@@ -81,8 +83,10 @@ impl GithubClient {
     /// Initialize a new Github client
     pub fn new<T: AsRef<str>>(
         github_token: T,
-        config: &Config,
+        // Not currently used
+        _config: &Config,
         max_jobs: usize,
+        slack_webhook: Option<String>,
     ) -> Result<Self, GitError> {
         let octocrab = Octocrab::builder()
             .personal_token(github_token.as_ref())
@@ -90,7 +94,7 @@ impl GithubClient {
             .map_err(GitError::GithubApiError)?;
         // Shadow max_jobs. This value makes no sense if it's less than 1
         let max_jobs: usize = cmp::max(1, max_jobs);
-        let webhook_url: String = config.slack.webhook_url.clone().unwrap_or_default();
+        let webhook_url: String = slack_webhook.unwrap_or_default().trim().to_string();
 
         Ok(Self {
             octocrab,
@@ -109,13 +113,13 @@ impl GithubClient {
         let (owner, repo) = (info.owner, info.repo_name);
         let octocrab = self.octocrab.clone();
 
-        let _permit = self.semaphore.clone().acquire_owned().await?;
         let repo_info = async_retry!(
             ms = 100,
             timeout = 5000,
             retries = 3,
             error_predicate = |e: &octocrab::Error| is_retryable(e),
             body = {
+                let _permit = self.semaphore.clone().acquire_owned().await;
                 let owner = owner.clone();
                 let repo = repo.clone();
                 octocrab.repos(owner, repo).get().await
@@ -274,10 +278,7 @@ impl GithubClient {
             }
 
             message.push_str("---");
-            if !message.is_empty()
-                && !self.webhook_url.is_empty()
-                && !self.webhook_url.trim().is_empty()
-            {
+            if !message.is_empty() && !self.webhook_url.is_empty() {
                 // Post the message to slack
                 let mut map = HashMap::new();
                 map.insert("text".to_string(), message);

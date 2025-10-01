@@ -213,7 +213,6 @@ impl GithubClient {
         }
 
         for repo in repositories {
-            //let progress = progress.clone();
             futures.push(async move {
                 let result = self.backup_repo(repo, path).await;
                 (result, repo)
@@ -277,6 +276,7 @@ impl GithubClient {
                 path.display()
             )));
         }
+        let _lock = self.semaphore.clone().acquire_owned().await?;
         let path = path.to_path_buf();
         let result = tokio::task::spawn_blocking(move || {
             let output = if let Some(since) = since {
@@ -490,6 +490,7 @@ impl GithubClient {
             let upload_id = upload_id.to_string();
             let local_part_number = part_number;
 
+            // Acquire the semaphore lock here to limit the number of concurrent uploads
             let lock = Arc::clone(&self.semaphore).acquire_owned().await?;
             if self.is_tty
                 && self.output.get() != Some(&crate::github::client::OutputMode::Progress)

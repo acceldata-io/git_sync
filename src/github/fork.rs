@@ -111,7 +111,6 @@ impl GithubClient {
         } else {
             serde_json::json!({"branch": parent.main_branch})
         };
-        println!("{body:?}");
         let octocrab = self.octocrab.clone();
         // Retry if a potentially recoverable error is detected
         let response: Result<serde_json::Value, octocrab::Error> = async_retry!(
@@ -120,6 +119,7 @@ impl GithubClient {
             retries = 3,
             error_predicate = |e: &octocrab::Error| is_retryable(e),
             body = {
+                let _lock = Arc::clone(&self.semaphore).acquire_owned().await;
                 octocrab
                     .post(format!("/repos/{owner}/{repo}/merge-upstream"), Some(&body))
                     .await
@@ -147,7 +147,6 @@ impl GithubClient {
         let octocrab = self.octocrab.clone();
 
         while has_next_page {
-            let permit = Arc::clone(&self.semaphore).acquire_owned().await?;
             let payload = serde_json::json!({
                 "query": GRAPHQL_QUERY,
                 "variables": {
@@ -162,11 +161,11 @@ impl GithubClient {
                 timeout = 5000,
                 retries = 3,
                 error_predicate = |e: &octocrab::Error| is_retryable(e),
-                body = { octocrab.graphql(&payload).await },
+                body = {
+                    let _lock = Arc::clone(&self.semaphore).acquire_owned().await;
+                    octocrab.graphql(&payload).await
+                },
             )?;
-
-            // Drop the lock on the semaphore so other network activities can potentially run
-            drop(permit);
 
             res.data.repository.refs.nodes.iter().for_each(|node| {
                 branches.insert(node.name.clone(), node.target.committed_date.clone());
@@ -187,9 +186,13 @@ impl GithubClient {
 
         let parent = self.get_parent_repo(url).await?;
         let octocrab = self.octocrab.clone();
-
-        let parent_branches = self.fetch_branches(&parent.owner, &repo).await?;
-        let fork_branches = self.fetch_branches(&owner, &repo).await?;
+        let (parent_branches, fork_branches) = tokio::join!(
+            self.fetch_branches(&parent.owner, &repo),
+            self.fetch_branches(&owner, &repo),
+        );
+        // Convert these to their contents or return early if there was an error
+        let parent_branches = parent_branches?;
+        let fork_branches = fork_branches?;
 
         let common_branches: HashSet<_> = parent_branches
             .keys()
@@ -231,6 +234,7 @@ impl GithubClient {
                 retries = 3,
                 error_predicate = |e: &octocrab::Error| is_retryable(e),
                 body = {
+                    let _lock = Arc::clone(&self.semaphore).acquire_owned().await;
                     octocrab
                         .post(format!("/repos/{owner}/{repo}/merge-upstream"), Some(&body))
                         .await
@@ -269,14 +273,12 @@ impl GithubClient {
     ) -> Result<(), GitError> {
         let mut futures = FuturesUnordered::new();
         for repo in repositories {
-            let semaphore_permit = self.semaphore.clone().acquire_owned().await?;
             futures.push(async move {
                 let result = if recursive {
                     self.sync_fork_recursive(&repo).await
                 } else {
                     self.sync_fork(repo, None).await
                 };
-                drop(semaphore_permit);
                 (repo, result)
             });
         }
@@ -454,12 +456,10 @@ impl GithubClient {
     ) -> Result<(), GitError> {
         let mut futures = FuturesUnordered::new();
         for (repo, upstream) in repositories {
-            let semaphore_permit = self.semaphore.clone().acquire_owned().await?;
             futures.push(async move {
                 let result = self
                     .sync_with_upstream(repo.as_ref(), upstream.as_ref())
                     .await;
-                drop(semaphore_permit);
                 (repo, upstream, result)
             });
         }
@@ -480,6 +480,8 @@ impl GithubClient {
         }
         Ok(())
     }
+    /// The intention is to be able to add a branch from upstream to the forked repository,
+    /// potentially automatically. Right now, this is unused.
     #[allow(dead_code)]
     pub async fn add_branch_from_upstream(
         &self,
@@ -487,8 +489,6 @@ impl GithubClient {
         repo: &str,
         branch_sha: &str,
     ) -> Result<(), GitError> {
-        let _lock = Arc::clone(&self.semaphore).acquire_owned().await?;
-
         let git_ref = Reference::Branch(format!("refs/heads/{branch_sha}"));
         let octocrab = self.octocrab.clone();
 
@@ -498,6 +498,8 @@ impl GithubClient {
             retries = 3,
             error_predicate = |e: &octocrab::Error| is_retryable(e),
             body = {
+                let _lock = Arc::clone(&self.semaphore).acquire_owned().await;
+
                 octocrab
                     .repos(owner, repo)
                     .create_ref(&git_ref, branch_sha)

@@ -81,6 +81,10 @@ pub struct AppArgs {
     #[cfg(feature = "slack")]
     #[arg(short, long, global = true, default_value_t = false)]
     pub slack: bool,
+    /// Override the slack webhook url from the config file
+    #[cfg(feature = "slack")]
+    #[arg(long, global = true, env = "SLACK_WEBHOOK")]
+    pub slack_webhook: Option<String>,
 }
 
 /// Validate that the maximum number of paralllel jobs is between 1 and 64.
