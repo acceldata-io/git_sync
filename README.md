@@ -263,14 +263,18 @@ This is an example of when using `--repository-type all` along with `--all` targ
 You can create and delete branches for a single repository or for all configured repositories. This is useful when you have a set of common branches across all of your repositories.
 
 ```bash
+# Create a new branch from an existing branch
 $ git_sync branch create --all --new-branch my_new_branch --base-branch master
+# Create a new branch from an existing tag instead
+$ git_sync branch create --all --new-branch my_new_branch --base-tag my-tag-name
+# Delete a branch
 $ git_sync branch delete --all --branch my_branch_name
 ```
 
 At the moment, running `branch delete` will immediately delete the branch without any confirmation. A future feature planned is a configurable delete queue that will create a 'cooling off' period before actually deleting the branch in order to avoid deleting branches permanently by accident. Support for this will come along with any SQL features since that will allow for persistent storage.
 
 ### Managing tags
-Managing tags is very similar to managing branches. You can create and delete tags for a single repository or for all configured repositories. 
+Managing tags is very similar to managing branches. You can create and delete lightweight tags for a single repository or for all configured repositories. If you want to create an annotated tag, you must use git directly and create it yourself.
 
 ```shell
 $ git_sync tag create --tag my_tag_name --branch the_branch_the_tag_points_to -r https://github.com/my-org/my-repo
@@ -318,14 +322,16 @@ At the moment, little attention has been paid to checking for protection rules. 
 
 The `blacklist` option in the `git-manage.toml` file is useful here. Any branch that you have specified in that list will be ignored when reporting stale branches. This is useful for long living branches that are intentionally not deleted.
 
-```shell
+```bash
 $ git_sync repo check --repository https://github.com/my-org/my-repo --license --old-branches
 $ git_sync repo check --all --license --protected --branch my_branch --old-branches --days-ago 90 --branch-filter ^HADOOP
 ```
 
 If you want to create a csv file for visually checking all of your branches stale repositories, you can run the above like this:
-```shell
-$ git_sync repo check --repository-type all --all --license --old-branches --days-ago 90 > output.csv 
+```bash
+$ git_sync repo check --repository-type all --all --license --old-branches --days-ago 90 > output.csv
+# Or turn it into a nice table with the `column` command
+$ $ git_sync repo check --repository-type all --all --license --old-branches --days-ago 90 > column -s, -t
 ```
 
 It will detect you are not running in an interactive terminal and will create a header, then output information in a comma separated format.
@@ -357,4 +363,4 @@ For fish, this is usually `~/.config/fish/completions` or `/etc/fish/completions
 
 The `generate` command will not show up during general usage, but it can always be run by specifying it directly.
 
-Additional flags can be seen by running `git_sync generate --help`
+Additional flags can be seen by running `git_sync generate --help`. This applies to the top level command as well as all subcommands.
