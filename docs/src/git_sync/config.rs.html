@@ -216,16 +216,20 @@
 <a href=#216 id=216 data-nosnippet>216</a>        });
 <a href=#217 id=217 data-nosnippet>217</a>        results
 <a href=#218 id=218 data-nosnippet>218</a>    }
-<a href=#219 id=219 data-nosnippet>219</a>    <span class="doccomment">/// Get all repositories defined in the config file
-<a href=#220 id=220 data-nosnippet>220</a>    </span><span class="kw">pub fn </span>get_all_repositories(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; Vec&lt;String&gt; {
-<a href=#221 id=221 data-nosnippet>221</a>        <span class="self">self</span>.repos
-<a href=#222 id=222 data-nosnippet>222</a>            .public
-<a href=#223 id=223 data-nosnippet>223</a>            .clone()
-<a href=#224 id=224 data-nosnippet>224</a>            .unwrap_or_default()
-<a href=#225 id=225 data-nosnippet>225</a>            .into_iter()
-<a href=#226 id=226 data-nosnippet>226</a>            .chain(<span class="self">self</span>.get_fork_repositories())
-<a href=#227 id=227 data-nosnippet>227</a>            .chain(<span class="self">self</span>.get_private_repositories())
-<a href=#228 id=228 data-nosnippet>228</a>            .chain(<span class="self">self</span>.get_all_custom_group_repositories())
-<a href=#229 id=229 data-nosnippet>229</a>            .collect()
-<a href=#230 id=230 data-nosnippet>230</a>    }
-<a href=#231 id=231 data-nosnippet>231</a>}</code></pre></div></section></main></body></html>
+<a href=#219 id=219 data-nosnippet>219</a>    <span class="doccomment">/// Get all repository urls for the fork workaround group
+<a href=#220 id=220 data-nosnippet>220</a>    </span><span class="kw">pub fn </span>get_fork_workaround_repositories(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; HashMap&lt;String, String&gt; {
+<a href=#221 id=221 data-nosnippet>221</a>        <span class="self">self</span>.repos.fork_workaround.clone().unwrap_or_default()
+<a href=#222 id=222 data-nosnippet>222</a>    }
+<a href=#223 id=223 data-nosnippet>223</a>    <span class="doccomment">/// Get all repositories defined in the config file
+<a href=#224 id=224 data-nosnippet>224</a>    </span><span class="kw">pub fn </span>get_all_repositories(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; Vec&lt;String&gt; {
+<a href=#225 id=225 data-nosnippet>225</a>        <span class="self">self</span>.repos
+<a href=#226 id=226 data-nosnippet>226</a>            .public
+<a href=#227 id=227 data-nosnippet>227</a>            .clone()
+<a href=#228 id=228 data-nosnippet>228</a>            .unwrap_or_default()
+<a href=#229 id=229 data-nosnippet>229</a>            .into_iter()
+<a href=#230 id=230 data-nosnippet>230</a>            .chain(<span class="self">self</span>.get_fork_repositories())
+<a href=#231 id=231 data-nosnippet>231</a>            .chain(<span class="self">self</span>.get_private_repositories())
+<a href=#232 id=232 data-nosnippet>232</a>            .chain(<span class="self">self</span>.get_all_custom_group_repositories())
+<a href=#233 id=233 data-nosnippet>233</a>            .collect()
+<a href=#234 id=234 data-nosnippet>234</a>    }
+<a href=#235 id=235 data-nosnippet>235</a>}</code></pre></div></section></main></body></html>
