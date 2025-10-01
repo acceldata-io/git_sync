@@ -55,7 +55,7 @@ pub async fn match_arguments(app: &AppArgs, config: Config) -> Result<(), GitErr
     let quiet = app.quiet;
 
     let fork_workaround_repositories = if app.with_fork_workaround {
-        config.repos.fork_workaround.clone().unwrap_or_default()
+        config.get_fork_workaround_repositories()
     } else {
         HashMap::new()
     };
@@ -115,7 +115,7 @@ pub async fn match_arguments(app: &AppArgs, config: Config) -> Result<(), GitErr
     }
     match &app.command {
         Command::Tag { cmd } => {
-            match_tag_cmds(&client, repos, cmd, fork_workaround_repositories).await?
+            match_tag_cmds(&client, repos, cmd, fork_workaround_repositories).await?;
         }
         Command::Repo { cmd } => {
             match_repo_cmds(&client, repos, config, cmd, fork_workaround_repositories).await?;
@@ -124,7 +124,7 @@ pub async fn match_arguments(app: &AppArgs, config: Config) -> Result<(), GitErr
         Command::Release { cmd } => match_release_cmds(&client, repos, config, cmd).await?,
         Command::PR { cmd } => match_pr_cmds(&client, repos, config, cmd).await?,
         Command::Backup { cmd } => {
-            match_backup_cmds(&client, repos, config, cmd, fork_workaround_repositories).await?
+            match_backup_cmds(&client, repos, config, cmd, fork_workaround_repositories).await?;
         }
         Command::Config { file, force } => {
             generate_config(file.as_ref(), *force)?;
@@ -174,7 +174,7 @@ async fn match_tag_cmds(
     client: &GithubClient,
     repos: Vec<String>,
     cmd: &TagCommand,
-    fork_workaround: HashMap<String, String>,
+    _fork_workaround: HashMap<String, String>,
 ) -> Result<(), GitError> {
     let result = async {
         match cmd {
@@ -249,6 +249,7 @@ async fn match_branch_cmds(
     cmd: &BranchCommand,
     quiet: bool,
 ) -> Result<(), GitError> {
+    println!("Getting to branch commands...");
     match cmd {
         BranchCommand::Create(create_cmd) => {
             let repository = create_cmd.repository.as_ref();
@@ -307,15 +308,15 @@ async fn match_repo_cmds(
             let forks_with_workaround = config.repos.fork_workaround.clone().unwrap_or_default();
 
             if sync_cmd.all {
-                if !fork_workaround.is_empty() {
+                if fork_workaround.is_empty() {
+                    client.sync_all_forks(&repos[..], recursive).await?;
+                } else {
                     let (task1, task2) = tokio::join!(
-                        client.sync_all_forks_workaround(fork_workaround),
+                        client.sync_all_forks_workaround(fork_workaround.clone()),
                         client.sync_all_forks(&repos[..], recursive),
                     );
                     task1?;
                     task2?;
-                } else {
-                    client.sync_all_forks(&repos[..], recursive).await?;
                 }
             } else if let Some(repository) = repository {
                 // Process repositories using git

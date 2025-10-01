@@ -22,8 +22,21 @@ use crate::error::{GitError, is_retryable};
 use crate::github::client::GithubClient;
 use crate::utils::repo::get_repo_info_from_url;
 use futures::{StreamExt, stream::FuturesUnordered};
+use octocrab::models::repos::Object;
 use octocrab::params::repos::Reference;
 use std::fmt::Display;
+
+/// This is used to deserialize the response from the GitHub API when fetching a tag. This is
+/// needed when we fetch an annotated tag.
+#[derive(Debug, serde::Deserialize)]
+struct GitTagObject {
+    object: GitTagTarget,
+}
+/// This is the SHA of the actual commit the annotated tag points to.
+#[derive(Debug, serde::Deserialize)]
+struct GitTagTarget {
+    sha: String,
+}
 
 impl GithubClient {
     /// Get the most recent commit of a branch, so we can use that to create and delete it
@@ -153,23 +166,53 @@ impl GithubClient {
 
         // Acquire a lock on the semaphore
         let _permit = self.semaphore.clone().acquire_owned().await?;
+        let octocrab = self.octocrab.clone();
 
-        let res: Result<_, octocrab::Error> = async_retry!(
+        // We have to match against the SHA of the commit the tag points to, which is why we have
+        // to check if we're working with a lightweight or annotated tag.
+        let res: Result<Option<String>, octocrab::Error> = async_retry!(
             ms = 100,
             timeout = 5000,
             retries = 3,
             error_predicate = |e: &octocrab::Error| is_retryable(e),
             body = {
-                self.octocrab
-                    .clone()
+                let tag_ref = octocrab
                     .repos(&owner, &repo)
                     .get_ref(&Reference::Tag(base_tag.to_string()))
-                    .await
+                    .await;
+                match tag_ref {
+                    Ok(t) => match t.object {
+                        Object::Commit { sha, .. } => Ok(Some(sha)),
+                        Object::Tag { sha, .. } => {
+                            let tag_opt: Result<GitTagObject, octocrab::Error> = octocrab
+                                .get(format!("/repos/{owner}/{repo}/git/tags/{sha}"), None::<&()>)
+                                .await;
+                            if let Ok(tag) = tag_opt {
+                                Ok(Some(tag.object.sha))
+                            } else {
+                                Ok(None)
+                            }
+                        }
+                        _ => Ok(None),
+                    },
+                    Err(e) => {
+                        return Err(e);
+                    }
+                }
             },
         );
         let response = match res {
-            Ok(r) => r,
+            Ok(Some(r)) => r,
+            Ok(None) => {
+                eprintln!("Error: Could not get SHA for {base_tag}");
+                self.append_slack_error(format!(
+                    "{owner}/{repo}: Unable to get SHA for tag '{base_tag}'"
+                ))
+                .await;
+                return Err(GitError::Other("Unable to get tag".to_string()));
+            }
             Err(e) => {
+                eprintln!("ERROR: {e}");
                 self.append_slack_error(format!(
                     "{owner}/{repo}: Unable to fetch tag {base_tag} from Github: {e}"
                 ))
@@ -178,11 +221,14 @@ impl GithubClient {
             }
         };
 
-        let octocrab::models::repos::Object::Commit { sha, .. } = response.object else {
-            self.append_slack_error(format!("{owner}/{repo}: No such tag {base_tag}"))
-                .await;
+        if response.is_empty() {
+            eprintln!("Unable to get SHA for tag {base_tag}");
+            self.append_slack_error(format!(
+                "{owner}/{repo}: Unable to get SHA for '{base_tag}'"
+            ))
+            .await;
             return Err(GitError::NoSuchTag(base_tag.to_string()));
-        };
+        }
 
         let res: Result<_, octocrab::Error> = async_retry!(
             ms = 100,
@@ -193,7 +239,7 @@ impl GithubClient {
                 self.octocrab
                     .clone()
                     .repos(&owner, &repo)
-                    .create_ref(&Reference::Branch(new_branch.to_string()), sha.clone())
+                    .create_ref(&Reference::Branch(new_branch.to_string()), response.clone())
                     .await
             },
         );
@@ -212,6 +258,13 @@ impl GithubClient {
                     "{owner}/{repo}: Failed to create {new_branch}: {e}"
                 ))
                 .await;
+                match e {
+                    octocrab::Error::GitHub { source, .. } => {
+                        eprintln!("{source:#?}");
+                        return Ok(());
+                    }
+                    _ => eprintln!("{e}"),
+                }
                 Err(GitError::GithubApiError(e))
             }
         }
@@ -225,23 +278,21 @@ impl GithubClient {
         repositories: &[U],
         quiet: bool,
     ) -> Result<(), GitError> {
+        println!("Base tag is {base_tag}");
         let mut futures = FuturesUnordered::new();
         for repo in repositories {
-            // Limit the number of jobs
-            let semaphore_permit = self.semaphore.clone().acquire_owned().await?;
             let base_branch = base_branch.to_string();
             let base_tag = base_tag.to_string();
             futures.push(async move {
                 let result = if base_tag.is_empty() {
+                    println!("Creating {new_branch} from a {base_branch}");
                     self.create_branch(repo, &base_branch, &new_branch, quiet)
                         .await
                 } else {
+                    println!("Creating {new_branch} from a {base_tag}");
                     self.create_branch_from_tag(repo, &base_tag, &new_branch, quiet)
                         .await
                 };
-                // Drop this variable after the above function has finished.
-                // Free a slot for another job to run
-                drop(semaphore_permit);
                 (repo, result)
             });
         }
@@ -324,13 +375,10 @@ impl GithubClient {
     ) -> Result<(), GitError> {
         let mut futures = FuturesUnordered::new();
         for repo in repositories {
-            // Limit the number of jobs
-            let permit = self.semaphore.clone().acquire_owned().await?;
             futures.push(async move {
                 let result = self.delete_branch(repo, branch).await;
                 // Drop this variable after the above function has finished.
                 // Free a slot for another job to run
-                drop(permit);
                 (repo, result)
             });
         }

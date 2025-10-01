@@ -217,12 +217,8 @@ impl Config {
         results
     }
     /// Get all repository urls for the fork workaround group
-    pub fn get_fork_workaround_repositories(&self) -> Vec<String> {
-        if let Some(fork_workarounds) = &self.repos.fork_workaround {
-            fork_workarounds.keys().cloned().collect()
-        } else {
-            Vec::new()
-        }
+    pub fn get_fork_workaround_repositories(&self) -> HashMap<String, String> {
+        self.repos.fork_workaround.clone().unwrap_or_default()
     }
     /// Get all repositories defined in the config file
     pub fn get_all_repositories(&self) -> Vec<String> {
