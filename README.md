@@ -9,6 +9,7 @@
 - Sync changes between a fork and its parent repository.
 - Sync tags from upstream to your forked repository.
 - Create/delete branches.
+  - Including changing the versions of software within a repository
 - Create/delete tags.
 - Create releases with automatically generated release notes.
 - Create and automatically merge pull requests, where possible.
@@ -260,13 +261,15 @@ This is an example of when using `--repository-type all` along with `--all` targ
 **TODO** Update documentation for using an IAM persistent user.
 
 ### Managing branches
-You can create and delete branches for a single repository or for all configured repositories. This is useful when you have a set of common branches across all of your repositories.
+You can create and delete branches for a single repository or for all configured repositories. This is useful when you have a set of common branches across all of your repositories. You can also change text to with a regex to change the version of software used. This is primarily useful after creating a branch based off some older tag/branch version where you want to match it to your new version.
 
 ```bash
 # Create a new branch from an existing branch
-$ git_sync branch create --all --new-branch my_new_branch --base-branch master
-# Create a new branch from an existing tag instead
-$ git_sync branch create --all --new-branch my_new_branch --base-tag my-tag-name
+$ git_sync branch create --all --new-branch rel/ODP-3.3.6.2-101 --base-branch ODP-3.3.6.2-1
+# Or, create a branch from an existing tag
+$ git_sync branch create --all --new-branch rel/ODP-3.3.6.2-101 --base-tag ODP-3.3.6.2-1-tag
+# Optionally, update the ODP version for the branch you just created
+$ git_sync branch change-version --all --branch rel/ODP-3.3.6.2-101 --old-version 3.3.6.2-1 --new-version 3.3.6.2-101
 # Delete a branch
 $ git_sync branch delete --all --branch my_branch_name
 ```
@@ -357,9 +360,11 @@ To generate new versions of the man pages, you can run `git_sync generate --kind
 
 To generate shell completion for bash, fish, or zsh, you can run `git_sync generate --kind [shell_type]` and then copy the output file them into your shell's completions directory.
 
-For zsh, this is usually `/usr/local/share/zsh/site-functions/`
+For zsh, this is usually `/usr/local/share/zsh/site-functions/`, but if you're on MacOS and using homebrew, it may be `/opt/homebrew/share/zsh/site-functions/`
 For bash, this is usually `/usr/share/bash-completion/completions/`
 For fish, this is usually `~/.config/fish/completions` or `/etc/fish/completions`
+
+For zsh, you will likely need to run `compinit -u` for your completions to be recognized.
 
 The `generate` command will not show up during general usage, but it can always be run by specifying it directly.
 
