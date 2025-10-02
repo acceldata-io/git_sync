@@ -18,13 +18,13 @@ under the License.
 */
 
 use crate::async_retry;
-use crate::error::{GitError, is_retryable};
+use crate::error::{is_retryable, GitError};
 use crate::github::client::GithubClient;
 use crate::utils::repo::{get_repo_info_from_url, http_to_ssh_repo};
-use fancy_regex::Regex;
-use futures::{StreamExt, stream::FuturesUnordered};
+use futures::{stream::FuturesUnordered, StreamExt};
 use octocrab::models::repos::Object;
 use octocrab::params::repos::Reference;
+use regex::Regex;
 use std::fmt::Display;
 use std::fs;
 use std::process::Command;
@@ -414,51 +414,49 @@ impl GithubClient {
     pub async fn change_release_version<T: AsRef<str> + ToString + Display>(
         &self,
         url: T,
-        branch: T,
+        branch: String,
         old_version: T,
         new_version: T,
     ) -> Result<(), GitError> {
         let info = get_repo_info_from_url(url)?;
         let (repo, url) = (info.repo_name, info.url);
-        // Acquire a lock on the semaphore
+
+        // Acquire a lock on the semaphore to limit concurrent operations
         let _permit = self.semaphore.clone().acquire_owned().await?;
         let mut errors: Vec<(String, GitError)> = Vec::new();
 
-        // TODO: use a tempdir crate to manage this
-        let local_path = format!("/tmp/{}/{}", branch.to_string().replace('/', "_"), repo);
+        // Use a temp directory for cloning
+        let local_path = format!("/tmp/{}/{}", branch.replace("/", "_"), repo);
 
         let url = http_to_ssh_repo(&url)?;
-        println!("Starting to clone {repo}'s branch {branch} into {local_path}",);
-
-        // TODO: Wrap all calls to git in a tokio::task::spawn_blocking block
+        println!("Starting to clone {repo}'s branch {branch} into {local_path}");
 
         // Clone the specified branch into a temporary directory
-        // We use --depth 1 to only get the latest commit
-        // We use --single-branch to only get the specified branch
-        // We use --branch to specify the branch to clone
         let git_status = Command::new("git")
             .arg("clone")
             .arg("--branch")
-            .arg(branch.as_ref())
+            .arg(&branch)
             .arg("--single-branch")
-            .arg("--depth")
-            .arg("1")
-            .arg(&url) // takes &String fine
+            .arg(&url)
             .arg(&local_path)
-            .status()?;
+            .output()?;
 
-        if git_status.success() {
+        if git_status.status.success() {
             println!("Cloned {repo}'s branch {branch} into {local_path}");
         } else {
             errors.push((
-                format!("Failed to clone {repo}'s branch {branch} into {local_path}",),
-                GitError::Other("git clone failed".to_string()),
+                format!(
+                    "Failed to clone {repo}'s branch {branch} into {local_path}\n\tError: {}",
+                    String::from_utf8_lossy(&git_status.stderr)
+                ),
+                GitError::Other("\tgit clone failed".to_string()),
             ));
         }
 
         if errors.is_empty() {
+            // Use GNU sed on macOS, regular sed on Linux
             let sed_cmd = if cfg!(target_os = "macos") {
-                "gsed" // GNU sed installed via brew on macOS
+                "gsed"
             } else if cfg!(target_os = "linux") {
                 "sed"
             } else {
@@ -466,17 +464,16 @@ impl GithubClient {
                     format!("Unsupported OS for sed command on repo {repo}"),
                     GitError::Other("unsupported operating system".to_string()),
                 ));
-                // Early return since we cannot proceed
-                if !errors.is_empty() {
-                    return Err(GitError::MultipleErrors(errors));
-                }
-                // This will never be reached, but required for type inference
-                ""
+                return Err(GitError::MultipleErrors(errors));
             };
 
-            // Run `sed` to update the version in all files found in the cloned repository
+            // Update the version in all files except those in .git
             let sed_status = Command::new("find")
                 .arg(&local_path)
+                .arg("-path")
+                .arg("*/.git/*")
+                .arg("-prune")
+                .arg("-o")
                 .arg("-type")
                 .arg("f")
                 .arg("-exec")
@@ -485,60 +482,63 @@ impl GithubClient {
                 .arg(format!("s/{old_version}/{new_version}/g"))
                 .arg("{}")
                 .arg("+")
-                .status()?;
+                .current_dir(&local_path)
+                .output()?;
 
-            if sed_status.success() {
-                println!("Sed complete {local_path}");
+            if sed_status.status.success() {
+                println!("Sed complete: {local_path}");
             } else {
                 errors.push((
-                    format!("Failed to sed {local_path}"),
-                    GitError::Other("sed command failed".to_string()),
+                    format!(
+                        "Failed to sed {local_path} \n\tError: {}",
+                        String::from_utf8_lossy(&sed_status.stderr)
+                    ),
+                    GitError::Other("\tsed/gsed failed".to_string()),
                 ));
             }
 
-            // If we're working with the odp-bigtop repo, we also need to rename package files
-            // in bigtop-packages/src/deb
-            if repo.eq("odp-bigtop") {
-                let dir = format!("{}/bigtop-packages/src/deb", &local_path);
-
-                let old_version = &old_version.to_string().replace('.', "-");
-                let new_version = &new_version.to_string().replace('.', "-");
-
+            // Special handling for odp-bigtop repo: rename package files in bigtop-packages/src/deb
+            if repo == "odp-bigtop" {
+                let dir = format!("{local_path}/bigtop-packages/src/deb");
+                let old_version_dash = old_version.to_string().replace('.', "-");
+                let new_version_dash = new_version.to_string().replace('.', "-");
                 let re = Regex::new(&format!(
-                    r"^(.*)-{}(\..*)$",
-                    fancy_regex::escape(old_version)
-                ))?;
+                    r"^(.*)-{}([.-].*)$",
+                    regex::escape(&old_version_dash)
+                ))
+                .unwrap();
 
-                // Recursively iterate through all files
-                for entry in WalkDir::new(dir)
-                    .into_iter()
-                    .filter_map(std::result::Result::ok)
-                {
+                for entry in WalkDir::new(&dir).into_iter().filter_map(|e| e.ok()) {
                     let path = entry.path();
-
-                    if !path.is_file() {
+                    if path.is_dir() {
                         continue;
                     }
-
-                    if let Some(file_name) = path.file_name().and_then(|n| n.to_str())
-                        && let Ok(Some(caps)) = re.captures(file_name)
-                    {
-                        let prefix = &caps[1];
-                        let suffix = &caps[2];
-                        let new_file_name = format!("{prefix}-{new_version}{suffix}");
-                        let new_path = path.with_file_name(new_file_name);
-                        fs::rename(path, &new_path)?;
+                    if let Some(file_name) = path.file_name().and_then(|n| n.to_str()) {
+                        if let Some(caps) = re.captures(file_name) {
+                            let prefix = &caps[1];
+                            let suffix = &caps[2];
+                            let new_file_name = format!("{prefix}-{new_version_dash}{suffix}");
+                            let new_path = path.with_file_name(new_file_name);
+                            fs::rename(&path, &new_path)?;
+                        }
                     }
                 }
             }
 
             // Commit and push the changes
             Command::new("git")
+                .arg("add")
+                .arg("-A")
+                .current_dir(&local_path)
+                .status()?;
+
+            Command::new("git")
                 .arg("commit")
                 .arg("-a")
                 .arg("-m")
                 .arg(format!(
-                    "[Automated] Changed version from {old_version} to {new_version}",
+                    "[Automated] Change version from {} to {}",
+                    old_version, new_version
                 ))
                 .current_dir(&local_path)
                 .status()?;
@@ -558,25 +558,22 @@ impl GithubClient {
     /// Change the release version for a specified branch across all configured repositories.
     /// This function clones each repository, updates the version, commits, and pushes the changes.
     /// Errors from each repository are collected and returned as a single error if any occur.
-    pub async fn change_all_release_version<
-        T: AsRef<str> + ToString + Display + Copy,
-        U: AsRef<str> + ToString + Display,
-    >(
+    pub async fn change_all_release_version<T: AsRef<str> + ToString + Display + Copy>(
         &self,
         branch: T,
         old_version: T,
         new_version: T,
-        repositories: &[U],
+        repositories: &[String],
     ) -> Result<(), GitError> {
         let mut futures = FuturesUnordered::new();
         for repo in repositories {
             futures.push(async move {
                 let result = self
                     .change_release_version(
-                        repo.as_ref(),
-                        branch.as_ref(),
-                        old_version.as_ref(),
-                        new_version.as_ref(),
+                        repo,
+                        branch.to_string(),
+                        &old_version.to_string(),
+                        &new_version.to_string(),
                     )
                     .await;
                 // Drop this variable after the above function has finished.

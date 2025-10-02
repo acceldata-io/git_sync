@@ -311,7 +311,7 @@ async fn match_branch_cmds(
                 client
                     .change_release_version(
                         repository,
-                        &change_version_cmd.branch.clone(),
+                        change_version_cmd.branch.clone(),
                         &change_version_cmd.old_version,
                         &change_version_cmd.new_version,
                     )
