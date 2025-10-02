@@ -467,7 +467,16 @@ impl GithubClient {
             } else if cfg!(target_os = "linux") {
                 "sed"
             } else {
-                panic!("Unsupported OS");
+                errors.push((
+                    format!("Unsupported OS for sed command on repo {}", repo),
+                    GitError::Other("unsupported operating system".to_string()),
+                ));
+                // Early return since we cannot proceed
+                if !errors.is_empty() {
+                    return Err(GitError::MultipleErrors(errors));
+                }
+                // This will never be reached, but required for type inference
+                ""
             };
 
             // Run `sed` to update the version in all files found in the cloned repository
