@@ -497,7 +497,7 @@ impl GithubClient {
             } else {
                 errors.push((
                     format!("Failed to sed {}", local_path),
-                    GitError::Other("git clone failed".to_string()),
+                    GitError::Other("sed command failed".to_string()),
                 ));
             }
 
