@@ -497,7 +497,7 @@ pub struct ChangeVersionCommand {
     /// Change version in a branch from a repository
     #[arg(short, long)]
     pub repository: Option<String>,
-    /// Branch to delete
+    /// Branch to change version in
     #[arg(short, long, required = true)]
     pub branch: String,
 
