@@ -508,7 +508,7 @@ pub struct ChangeVersionCommand {
     pub new_version: String,
 
 
-    /// Delete the specified branch for all configured repositories
+    /// Change version for the specified branch across all configured repositories
     #[arg(short, long, default_value_t = false)]
     pub all: bool,
 }
