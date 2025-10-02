@@ -484,7 +484,7 @@ pub struct DeleteBranchCommand {
     pub all: bool,
 }
 
-/// ChangeVersion a branch from a repository
+/// `ChangeVersion` a branch from a repository
 #[derive(Args, Clone, Debug)]
 #[command(
     group(
@@ -494,21 +494,19 @@ pub struct DeleteBranchCommand {
     )
 )]
 pub struct ChangeVersionCommand {
-    /// Change version in a branch from a repository
+    /// Change the version of a branch in a repository
     #[arg(short, long)]
     pub repository: Option<String>,
     /// Branch to change version in
     #[arg(short, long, required = true)]
     pub branch: String,
-
+    /// The old version you wish to change
     #[arg(short, long, required = true)]
     pub old_version: String,
-
+    /// The new version you want to change it to
     #[arg(short, long, required = true)]
     pub new_version: String,
-
-
-    /// Change version for the specified branch across all configured repositories
+    /// Change the version for the specified branch across all configured repositories
     #[arg(short, long, default_value_t = false)]
     pub all: bool,
 }
@@ -699,7 +697,7 @@ pub enum BranchCommand {
     /// Create a branch for repositories
     Create(CreateBranchCommand),
     /// Change version in a branch for repositories
-    ChangeVersion(ChangeVersionCommand)
+    ChangeVersion(ChangeVersionCommand),
 }
 
 /// The top-level command enum for the CLI

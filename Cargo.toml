@@ -23,7 +23,7 @@ hyper = { version = "1.7.0", default-features = false }
 iana-time-zone = "0.1"
 indexmap = { version = "2.11", features = ["serde"] }
 indicatif = { version = "0.18.0", features = ["tokio"] }
-octocrab = { version = "0.45", default-features = false, features = [
+octocrab = { version = "0.46", default-features = false, features = [
   "default-client",
   "follow-redirect",
   "retry",
@@ -64,11 +64,7 @@ sqlx = { version = "0.8.6", optional = true, default-features = false, features 
   "tls-rustls-aws-lc-rs",
 ] }
 tar = "0.4.44"
-regex = "1.11.1"
 walkdir = "2.5.0"
-
-[dev-dependencies]
-wiremock = "0.6"
 
 [features]
 aws      = ["dep:aws-config", "dep:aws-sdk-s3"]
