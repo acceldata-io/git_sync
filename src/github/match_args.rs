@@ -296,6 +296,16 @@ async fn match_branch_cmds(
                 client.delete_branch(repository, &delete_cmd.branch).await?;
             }
         }
+        BranchCommand::ChangeVersion(change_version_cmd) => {
+            let repository = change_version_cmd.repository.as_ref();
+            if change_version_cmd.all {
+                client
+                    .change_all_release_version(&change_version_cmd.branch, &change_version_cmd.old_version, &change_version_cmd.new_version, &repos[..])
+                    .await?;
+            } else if let Some(repository) = repository {
+                client.change_release_version(repository, change_version_cmd.branch.clone(), &change_version_cmd.old_version, &change_version_cmd.new_version).await?;
+            }
+        }
     }
     Ok(())
 }

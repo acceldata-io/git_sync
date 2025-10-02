@@ -64,6 +64,8 @@ sqlx = { version = "0.8.6", optional = true, default-features = false, features 
   "tls-rustls-aws-lc-rs",
 ] }
 tar = "0.4.44"
+regex = "1.11.1"
+walkdir = "2.5.0"
 
 [dev-dependencies]
 wiremock = "0.6"

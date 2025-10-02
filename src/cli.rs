@@ -340,7 +340,7 @@ pub struct CheckRepoCommand {
     long_about = "Create a Pull Request and optionally try to merge it automatically. You can target a single repository, or all configured repositories",
     after_help="\
 EXAMPLES:
-    # Open a pull request for a single repository   
+    # Open a pull request for a single repository
     git_sync pr open --repository https://github.com/my-org/my-repo --head my_feature_branch --base my_base_branch
     # Attempt to merge automatically
     git_sync pr open -r https://github.com/my-org/my-repo --head my_feature_branch --base my_base_branch --merge
@@ -479,6 +479,35 @@ pub struct DeleteBranchCommand {
     /// Branch to delete
     #[arg(short, long, required = true)]
     pub branch: String,
+    /// Delete the specified branch for all configured repositories
+    #[arg(short, long, default_value_t = false)]
+    pub all: bool,
+}
+
+/// ChangeVersion a branch from a repository
+#[derive(Args, Clone, Debug)]
+#[command(
+    group(
+        ArgGroup::new("target")
+        .required(true)
+        .args(&["all", "repository"])
+    )
+)]
+pub struct ChangeVersionCommand {
+    /// Delete a branch from a repository
+    #[arg(short, long)]
+    pub repository: Option<String>,
+    /// Branch to delete
+    #[arg(short, long, required = true)]
+    pub branch: String,
+
+    #[arg(short, long, required = true)]
+    pub old_version: String,
+
+    #[arg(short, long, required = true)]
+    pub new_version: String,
+
+
     /// Delete the specified branch for all configured repositories
     #[arg(short, long, default_value_t = false)]
     pub all: bool,
@@ -669,6 +698,8 @@ pub enum BranchCommand {
     Delete(DeleteBranchCommand),
     /// Create a branch for repositories
     Create(CreateBranchCommand),
+    /// Change version in a branch for repositories
+    ChangeVersion(ChangeVersionCommand)
 }
 
 /// The top-level command enum for the CLI
