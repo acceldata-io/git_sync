@@ -1424,7 +1424,6 @@ dependencies = [
  "indicatif",
  "microxdg",
  "octocrab",
- "regex",
  "reqwest",
  "rustls 0.23.31",
  "serde",

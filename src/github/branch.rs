@@ -18,17 +18,26 @@ under the License.
 */
 
 use crate::async_retry;
-use crate::error::{is_retryable, GitError};
+use crate::error::{GitError, is_retryable};
 use crate::github::client::GithubClient;
+use crate::utils::file_replace::replace_all_in_directory;
 use crate::utils::repo::{get_repo_info_from_url, http_to_ssh_repo};
-use futures::{stream::FuturesUnordered, StreamExt};
+use fancy_regex::Regex;
+use futures::{StreamExt, stream::FuturesUnordered};
 use octocrab::models::repos::Object;
 use octocrab::params::repos::Reference;
-use regex::Regex;
 use std::fmt::Display;
 use std::fs;
 use std::process::Command;
+use temp_dir::TempDir;
 use walkdir::WalkDir;
+
+use std::sync::OnceLock;
+
+/// Initialized once, then it becomes available
+/// from then on so we don't have to compile our regex every
+/// single time `change_release_version` is called
+static REPO_REGEX: OnceLock<Regex> = OnceLock::new();
 
 /// This is used to deserialize the response from the GitHub API when fetching a tag. This is
 /// needed when we fetch an annotated tag.
@@ -411,173 +420,201 @@ impl GithubClient {
     /// Clones the specified branch from a repository, updates the release version in all files,
     /// renames package files if necessary, commits, and pushes the changes.
     /// Returns an error if any step fails.
-    pub async fn change_release_version<T: AsRef<str> + ToString + Display>(
+    pub async fn change_release_version(
         &self,
-        url: T,
+        url: String,
         branch: String,
-        old_version: T,
-        new_version: T,
+        old_version: String,
+        new_version: String,
+        message: Option<String>,
     ) -> Result<(), GitError> {
         let info = get_repo_info_from_url(url)?;
-        let (repo, url) = (info.repo_name, info.url);
+        let (repo, owner, url) = (info.repo_name, info.owner, info.url);
+        let repo_copy = repo.clone();
+        let old_version_copy = old_version.clone();
+        let new_version_copy = new_version.clone();
+        let owner_copy = owner.clone();
+        let branch_copy = branch.clone();
 
         // Acquire a lock on the semaphore to limit concurrent operations
-        let _permit = self.semaphore.clone().acquire_owned().await?;
-        let mut errors: Vec<(String, GitError)> = Vec::new();
-
-        // Use a temp directory for cloning
-        let local_path = format!("/tmp/{}/{}", branch.replace("/", "_"), repo);
+        let permit = self.semaphore.clone().acquire_owned().await?;
 
         let url = http_to_ssh_repo(&url)?;
-        println!("Starting to clone {repo}'s branch {branch} into {local_path}");
 
-        // Clone the specified branch into a temporary directory
-        let git_status = Command::new("git")
-            .arg("clone")
-            .arg("--branch")
-            .arg(&branch)
-            .arg("--single-branch")
-            .arg(&url)
-            .arg(&local_path)
-            .output()?;
+        let result = tokio::task::spawn_blocking(move || {
+            let _lock = permit;
+            // Use a temp directory for the git repository so it's cleaned up automatically
+            let tmp_dir = TempDir::new()
+                .map_err(|e| GitError::Other(format!("Failed to create temp dir: {e}")))?;
+            let tmp = tmp_dir.path();
+            let repo_dir = tmp.join(&repo);
+            println!(
+                "Starting to clone {repo}'s branch {branch} into {}",
+                tmp.display()
+            );
+            // Clone the specified branch into a temporary directory
+            // We use --depth 1 to only get the latest commit
+            // We use --single-branch to only get the specified branch
+            // We use --branch to specify the branch to clone
+            let git_status = Command::new("git")
+                .arg("clone")
+                .arg("--branch")
+                .arg(&branch)
+                .arg("--single-branch")
+                .arg("--depth")
+                .arg("1")
+                .arg(&url) // takes &String fine
+                .current_dir(tmp)
+                .status()?;
 
-        if git_status.status.success() {
-            println!("Cloned {repo}'s branch {branch} into {local_path}");
-        } else {
-            errors.push((
-                format!(
-                    "Failed to clone {repo}'s branch {branch} into {local_path}\n\tError: {}",
-                    String::from_utf8_lossy(&git_status.stderr)
-                ),
-                GitError::Other("\tgit clone failed".to_string()),
-            ));
-        }
-
-        if errors.is_empty() {
-            // Use GNU sed on macOS, regular sed on Linux
-            let sed_cmd = if cfg!(target_os = "macos") {
-                "gsed"
-            } else if cfg!(target_os = "linux") {
-                "sed"
+            if git_status.success() {
+                println!("Cloned {repo}'s branch {branch} into {}", tmp.display());
             } else {
-                errors.push((
-                    format!("Unsupported OS for sed command on repo {repo}"),
-                    GitError::Other("unsupported operating system".to_string()),
-                ));
-                return Err(GitError::MultipleErrors(errors));
-            };
-
-            // Update the version in all files except those in .git
-            let sed_status = Command::new("find")
-                .arg(&local_path)
-                .arg("-path")
-                .arg("*/.git/*")
-                .arg("-prune")
-                .arg("-o")
-                .arg("-type")
-                .arg("f")
-                .arg("-exec")
-                .arg(sed_cmd)
-                .arg("-i")
-                .arg(format!("s/{old_version}/{new_version}/g"))
-                .arg("{}")
-                .arg("+")
-                .current_dir(&local_path)
-                .output()?;
-
-            if sed_status.status.success() {
-                println!("Sed complete: {local_path}");
-            } else {
-                errors.push((
-                    format!(
-                        "Failed to sed {local_path} \n\tError: {}",
-                        String::from_utf8_lossy(&sed_status.stderr)
-                    ),
-                    GitError::Other("\tsed/gsed failed".to_string()),
-                ));
+                return Err(GitError::Other(format!(
+                    "Failed to clone {repo}'s branch {branch} into {}",
+                    tmp.display()
+                )));
             }
 
-            // Special handling for odp-bigtop repo: rename package files in bigtop-packages/src/deb
+            let re = REPO_REGEX.get_or_init(|| {
+                let msg = format!("Invalid regex for changing version '{old_version}'");
+                Regex::new(&fancy_regex::escape(old_version.as_ref())).expect(&msg)
+            });
+            replace_all_in_directory(&repo_dir, re, new_version.as_str());
+            // If we're working with the odp-bigtop repo, we also need to rename package files
+            // in bigtop-packages/src/deb
             if repo == "odp-bigtop" {
-                let dir = format!("{local_path}/bigtop-packages/src/deb");
-                let old_version_dash = old_version.to_string().replace('.', "-");
-                let new_version_dash = new_version.to_string().replace('.', "-");
-                let re = Regex::new(&format!(
-                    r"^(.*)-{}([.-].*)$",
-                    regex::escape(&old_version_dash)
-                ))
-                .unwrap();
+                let dir = format!("{}/bigtop-packages/src/deb", repo_dir.display());
 
-                for entry in WalkDir::new(&dir).into_iter().filter_map(|e| e.ok()) {
+                let old_version_dash = &old_version.to_string().replace('.', "-");
+                let new_version_dash = &new_version.to_string().replace('.', "-");
+                println!("{old_version_dash}");
+                println!("{new_version_dash}");
+
+                let bigtop_re = Regex::new(&format!(
+                    r"^(.*)-{}([.-].*)(.*)$",
+                    fancy_regex::escape(old_version_dash)
+                ))
+                .expect("Faild to compile old version regex");
+
+                for entry in WalkDir::new(&dir)
+                    .into_iter()
+                    .filter_map(std::result::Result::ok)
+                {
                     let path = entry.path();
                     if path.is_dir() {
                         continue;
                     }
                     if let Some(file_name) = path.file_name().and_then(|n| n.to_str()) {
-                        if let Some(caps) = re.captures(file_name) {
+                        println!("File name is {file_name}");
+                        if let Some(caps) = bigtop_re.captures(file_name)?
+                        {
+                            println!("Modifying file names...");
                             let prefix = &caps[1];
                             let suffix = &caps[2];
+                            println!("Prefix: {prefix}, Suffix: {suffix}");
                             let new_file_name = format!("{prefix}-{new_version_dash}{suffix}");
+                            println!("New file name: {new_file_name}");
                             let new_path = path.with_file_name(new_file_name);
-                            fs::rename(&path, &new_path)?;
+                            println!("New path: {}", new_path.display());
+                            fs::rename(path, &new_path)?;
                         }
                     }
                 }
             }
-
+            let commit_message = if let Some(msg) = message {
+                msg.to_string()
+            } else {
+                format!("[Automated] Changed version from {old_version} to {new_version}")
+            };
             // Commit and push the changes
             Command::new("git")
                 .arg("add")
                 .arg("-A")
-                .current_dir(&local_path)
+                .current_dir(&repo_dir)
                 .status()?;
 
             Command::new("git")
                 .arg("commit")
                 .arg("-a")
                 .arg("-m")
-                .arg(format!(
-                    "[Automated] Change version from {} to {}",
-                    old_version, new_version
-                ))
-                .current_dir(&local_path)
+                .arg(commit_message)
+                .current_dir(&repo_dir)
                 .status()?;
 
-            Command::new("git")
+            let output = Command::new("git")
                 .arg("push")
-                .current_dir(&local_path)
-                .status()?;
-        }
+                .current_dir(&repo_dir)
+                .output()?;
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            let stderr = String::from_utf8_lossy(&output.stderr);
 
-        if !errors.is_empty() {
-            return Err(GitError::MultipleErrors(errors));
-        }
+            let message = format!("No changes to push in {repo}/{owner} for old version '{old_version}' on branch {branch}");
 
-        Ok(())
+            if stdout.contains("Everything up-to-date") || stderr.contains("Everything up-to-date") {
+                return Ok(message);
+            } else if !output.status.success() {
+                return Err(GitError::Other(format!(
+                    "Failed to push changes to {repo} on branch {branch}: {}",
+                    stderr.trim()
+                )));
+            }
+
+            Ok(String::new())
+        })
+        .await?;
+        match result {
+            Ok(m) => {
+                if m.is_empty() {
+                    let message = format!(
+                        "{repo_copy}/{owner_copy}: Successfully changed version from {old_version_copy} to {new_version_copy} for branch {branch_copy}"
+                    );
+                    println!("✅ {message}");
+                    self.append_slack_message(message).await;
+                } else {
+                    println!("✅ {m}");
+                    self.append_slack_message(m).await;
+                }
+                Ok(())
+            }
+            Err(e) => {
+                eprintln!(
+                    "❌ Failed to change version from {old_version_copy} to {new_version_copy} for {repo_copy}/{owner_copy}: {e}"
+                );
+                self.append_slack_error(format!(
+                    "{repo_copy}/{owner_copy}: Failed to change version from {old_version_copy} to {new_version_copy}: {e}"
+                )).await;
+                Err(e)
+            }
+        }
     }
     /// Change the release version for a specified branch across all configured repositories.
     /// This function clones each repository, updates the version, commits, and pushes the changes.
     /// Errors from each repository are collected and returned as a single error if any occur.
-    pub async fn change_all_release_version<T: AsRef<str> + ToString + Display + Copy>(
+    pub async fn change_all_release_version(
         &self,
-        branch: T,
-        old_version: T,
-        new_version: T,
+        branch: String,
+        old_version: String,
+        new_version: String,
         repositories: &[String],
+        message: Option<String>,
     ) -> Result<(), GitError> {
         let mut futures = FuturesUnordered::new();
         for repo in repositories {
+            let branch = branch.to_string();
+            let old_version = old_version.to_string();
+            let new_version = new_version.to_string();
+            let message = message.clone();
             futures.push(async move {
                 let result = self
                     .change_release_version(
-                        repo,
-                        branch.to_string(),
-                        &old_version.to_string(),
-                        &new_version.to_string(),
+                        repo.to_string(),
+                        branch,
+                        old_version,
+                        new_version,
+                        message,
                     )
                     .await;
-                // Drop this variable after the above function has finished.
-                // Free a slot for another job to run
                 (repo, result)
             });
         }

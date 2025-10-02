@@ -257,7 +257,6 @@ async fn match_branch_cmds(
     cmd: &BranchCommand,
     quiet: bool,
 ) -> Result<(), GitError> {
-    println!("Getting to branch commands...");
     match cmd {
         BranchCommand::Create(create_cmd) => {
             let repository = create_cmd.repository.as_ref();
@@ -297,23 +296,31 @@ async fn match_branch_cmds(
             }
         }
         BranchCommand::ChangeVersion(change_version_cmd) => {
-            let repository = change_version_cmd.repository.as_ref();
+            let repository = change_version_cmd.repository.clone();
+            let message = change_version_cmd.message.clone();
+            let (branch, old_version, new_version) = (
+                change_version_cmd.branch.clone(),
+                change_version_cmd.old_version.clone(),
+                change_version_cmd.new_version.clone(),
+            );
             if change_version_cmd.all {
                 client
                     .change_all_release_version(
-                        &change_version_cmd.branch,
-                        &change_version_cmd.old_version,
-                        &change_version_cmd.new_version,
+                        branch,
+                        old_version,
+                        new_version,
                         &repos[..],
+                        message,
                     )
                     .await?;
-            } else if let Some(repository) = repository {
+            } else if let Some(repository) = &repository {
                 client
                     .change_release_version(
-                        repository,
-                        change_version_cmd.branch.clone(),
-                        &change_version_cmd.old_version,
-                        &change_version_cmd.new_version,
+                        repository.to_string(),
+                        branch,
+                        old_version,
+                        new_version,
+                        message,
                     )
                     .await?;
             }

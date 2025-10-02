@@ -162,10 +162,10 @@ impl fmt::Display for MakeLatest {
 ))]
 pub struct CreateTagCommand {
     /// The new tag's name
-    #[arg(short, long, required = true)]
+    #[arg(short, long)]
     pub tag: String,
     /// The target branch
-    #[arg(short, long, required = true)]
+    #[arg(short, long)]
     pub branch: String,
     /// The url of the repository to create the tag in. If --all is specified, this is
     /// not a valid option.
@@ -202,7 +202,7 @@ pub struct DeleteTagCommand {
     #[arg(short, long)]
     pub repository: Option<String>,
     /// The tag to delete
-    #[arg(short, long, required = true)]
+    #[arg(short, long)]
     pub tag: String,
     /// Apply to all configured repositories. Not a valid if 'repository' is set
     #[arg(short, long, default_value_t = false)]
@@ -363,10 +363,10 @@ pub struct CreatePRCommand {
     #[arg(short, long, default_value_t = false)]
     pub all: bool,
     /// The name of the branch where your changes are implemented
-    #[arg(long, required = true)]
+    #[arg(long)]
     pub head: String,
     /// The name of the branch you want the changes merged into
-    #[arg(short, long, required = true)]
+    #[arg(short, long)]
     pub base: String,
     /// The title for the PR
     #[arg(short, long)]
@@ -415,10 +415,10 @@ pub struct ClosePRCommand {
     #[arg(short, long, default_value_t = false)]
     pub all: bool,
     /// The PR number
-    #[arg(short, long, required = true)]
+    #[arg(short, long)]
     pub id: u64,
     /// The base branch of the PR to close
-    #[arg(short, long, required = true)]
+    #[arg(short, long)]
     pub base_branch: String,
 }
 
@@ -442,10 +442,10 @@ pub struct MergePRCommand {
     #[arg(short, long)]
     pub repository: Option<String>,
     /// The PR number
-    #[arg(short, long, required = true, name = "pull_number")]
+    #[arg(short, long, name = "pull_number")]
     pub id: u64,
     /// The base branch of the PR to close
-    #[arg(short, long, required = true)]
+    #[arg(short, long)]
     pub base_branch: String,
     /// The method to use when merging the PR
     #[arg(short, long, value_parser = ["merge", "squash", "rebase"], default_value = "squash")]
@@ -477,38 +477,49 @@ pub struct DeleteBranchCommand {
     #[arg(short, long)]
     pub repository: Option<String>,
     /// Branch to delete
-    #[arg(short, long, required = true)]
+    #[arg(short, long)]
     pub branch: String,
     /// Delete the specified branch for all configured repositories
     #[arg(short, long, default_value_t = false)]
     pub all: bool,
 }
 
-/// `ChangeVersion` a branch from a repository
+/// Change the version of the contents of a branch
 #[derive(Args, Clone, Debug)]
 #[command(
     group(
         ArgGroup::new("target")
         .required(true)
         .args(&["all", "repository"])
-    )
+    ),
+    long_about = "
+Examples:
+    # Change the version from 3.3.6.2-1 to 3.3.6.2-101
+    git_sync branch change-version --all --branch ODP-3.3.6.2-1 --old-version 3.3.6.2-1 --new-version 3.3.6.2-101
+Notes:
+    This action is a regex match and replace, so be careful what you pass as the old version.
+    Strictly speaking, this can be used to replace any matching regex within a repository
+"
 )]
 pub struct ChangeVersionCommand {
     /// Change the version of a branch in a repository
     #[arg(short, long)]
     pub repository: Option<String>,
     /// Branch to change version in
-    #[arg(short, long, required = true)]
+    #[arg(short, long)]
     pub branch: String,
     /// The old version you wish to change
-    #[arg(short, long, required = true)]
+    #[arg(short, long)]
     pub old_version: String,
     /// The new version you want to change it to
-    #[arg(short, long, required = true)]
+    #[arg(short, long)]
     pub new_version: String,
     /// Change the version for the specified branch across all configured repositories
     #[arg(short, long, default_value_t = false)]
     pub all: bool,
+    /// An optional commit message to override the automatic commit message
+    #[arg(short, long)]
+    pub message: Option<String>,
 }
 
 /// Create a new branch.
@@ -530,7 +541,7 @@ pub struct CreateBranchCommand {
     #[arg(short, long)]
     pub repository: Option<String>,
     /// New branch to create
-    #[arg(short, long, required = true)]
+    #[arg(short, long)]
     pub new_branch: String,
     /// The base branch for the new branch. Not valid if --base-tag is passed
     #[arg(short = 'b', long)]
@@ -556,10 +567,10 @@ pub struct CreateBranchCommand {
 )]
 pub struct CreateReleaseCommand {
     /// The tag to base the release off of
-    #[arg(short, long, required = true)]
+    #[arg(short, long)]
     pub current_release: String,
     /// The previous release tag. This is used to generate the changelog
-    #[arg(short, long, required = true)]
+    #[arg(short, long)]
     pub previous_release: String,
     /// The repository for which to create the release
     #[arg(short, long)]
