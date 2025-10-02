@@ -494,7 +494,7 @@ pub struct DeleteBranchCommand {
     )
 )]
 pub struct ChangeVersionCommand {
-    /// Delete a branch from a repository
+    /// Change version in a branch from a repository
     #[arg(short, long)]
     pub repository: Option<String>,
     /// Branch to delete
