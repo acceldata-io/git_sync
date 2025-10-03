@@ -437,11 +437,11 @@ impl GithubClient {
     ) -> Result<(), GitError> {
         let info = get_repo_info_from_url(url)?;
         let (repo, owner, url) = (info.repo_name, info.owner, info.url);
-        let repo_copy = repo.clone();
-        let old_version_copy = old_version.clone();
-        let new_version_copy = new_version.clone();
-        let owner_copy = owner.clone();
-        let branch_copy = branch.clone();
+        let repo_slack = repo.clone();
+        let old_version_slack = old_version.clone();
+        let new_version_slack = new_version.clone();
+        let owner_slack = owner.clone();
+        let branch_slack = branch.clone();
 
         // Acquire a lock on the semaphore to limit concurrent operations
         let permit = self.semaphore.clone().acquire_owned().await?;
@@ -603,7 +603,7 @@ impl GithubClient {
             Ok(m) => {
                 if m.is_empty() {
                     let message = format!(
-                        "{repo_copy}/{owner_copy}: Successfully changed version from {old_version_copy} to {new_version_copy} for branch {branch_copy}"
+                        "{repo_slack}/{owner_slack}: Successfully changed version from {old_version_slack} to {new_version_slack} for branch {branch_slack}"
                     );
                     println!("✅ {message}");
                     self.append_slack_message(message).await;
@@ -615,10 +615,10 @@ impl GithubClient {
             }
             Err(e) => {
                 eprintln!(
-                    "❌ Failed to change version from {old_version_copy} to {new_version_copy} for {repo_copy}/{owner_copy}: {e}"
+                    "❌ Failed to change version from {old_version_slack} to {new_version_slack} for {repo_slack}/{owner_slack}: {e}"
                 );
                 self.append_slack_error(format!(
-                    "{repo_copy}/{owner_copy}: Failed to change version from {old_version_copy} to {new_version_copy}: {e}"
+                    "{repo_slack}/{owner_slack}: Failed to change version from {old_version_slack} to {new_version_slack}: {e}"
                 )).await;
                 Err(e)
             }
