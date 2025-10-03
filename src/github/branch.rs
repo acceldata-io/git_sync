@@ -26,7 +26,7 @@ use fancy_regex::Regex;
 use futures::{StreamExt, stream::FuturesUnordered};
 use octocrab::models::repos::Object;
 use octocrab::params::repos::Reference;
-use std::fmt::{Display};
+use std::fmt::Display;
 use std::fs;
 use std::path::PathBuf;
 use std::process::Command;

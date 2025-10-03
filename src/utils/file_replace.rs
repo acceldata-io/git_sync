@@ -43,10 +43,7 @@ pub fn replace_all_in_directory<T: AsRef<str> + Copy>(
     re: &Regex,
     replacement: T,
 ) {
-    for entry in WalkDir::new(path)
-        .into_iter()
-        .filter_map(Result::ok)
-    {
+    for entry in WalkDir::new(path).into_iter().filter_map(Result::ok) {
         let path = entry.path();
         if path.components().any(|c| c.as_os_str() == ".git") {
             continue;

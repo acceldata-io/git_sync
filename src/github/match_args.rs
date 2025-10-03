@@ -141,9 +141,7 @@ pub async fn match_arguments(app: &AppArgs, config: Config) -> Result<(), GitErr
         Command::Generate { kind, out } => {
             let mut cmd = cli();
 
-            let out_dir = out
-                .clone()
-                .unwrap_or_else(|| env::current_dir().unwrap());
+            let out_dir = out.clone().unwrap_or_else(|| env::current_dir().unwrap());
             match kind.as_str() {
                 "bash" => {
                     generate_to(Bash, &mut cmd, "git_sync", out_dir)?;
@@ -158,9 +156,7 @@ pub async fn match_arguments(app: &AppArgs, config: Config) -> Result<(), GitErr
                     println!("Generated fish completions");
                 }
                 "man" => {
-                    let out_dir = out
-                        .clone()
-                        .unwrap_or_else(|| env::current_dir().unwrap());
+                    let out_dir = out.clone().unwrap_or_else(|| env::current_dir().unwrap());
                     let cmd = cli();
                     generate_man_pages(cmd, &out_dir, None);
                     println!("Man pages generated");
@@ -313,7 +309,7 @@ async fn match_branch_cmds(
                         new_version,
                         &repos[..],
                         message,
-                        dry_run
+                        dry_run,
                     )
                     .await?;
             } else if let Some(repository) = &repository {
@@ -324,7 +320,7 @@ async fn match_branch_cmds(
                         old_version,
                         new_version,
                         message,
-                        dry_run
+                        dry_run,
                     )
                     .await?;
             }

@@ -115,7 +115,7 @@ impl GithubClient {
             } else {
                 tokio::task::spawn_blocking(move || {
                     let _lock = semaphore_lock;
-                    // Clone the reposittory as a mirror
+                    // Clone the repository as a mirror
                     let output = Command::new("git")
                         .stdout(Stdio::piped())
                         .stderr(Stdio::piped())
@@ -154,7 +154,7 @@ impl GithubClient {
                 .await?
             };
 
-        // Match outside of the spawn_blocking to avoid ownership issues
+        // Match outside the spawn_blocking to avoid ownership issues
         match result {
             Ok(m) => {
                 if let Some(t) = self.output.get()
@@ -180,7 +180,7 @@ impl GithubClient {
         Ok(output_path.into())
     }
     /// Backup all configured repositories into the specified folder. This can take a long time,
-    /// dependiing on the number of repositories and their sizes
+    /// depending on the number of repositories and their sizes
     pub async fn backup_all_repos(
         &self,
         repositories: &[impl std::fmt::Display + AsRef<str> + ToString],
@@ -363,7 +363,7 @@ impl GithubClient {
             String::new()
         };
 
-        // Use the behavour version from when this was developped
+        // Use the behaviour version from when this was developed
         let config = aws_config::defaults(BehaviorVersion::v2025_08_07())
             .region(region)
             .load()
@@ -492,9 +492,7 @@ impl GithubClient {
 
             // Acquire the semaphore lock here to limit the number of concurrent uploads
             let lock = Arc::clone(&self.semaphore).acquire_owned().await?;
-            if self.is_tty
-                && self.output.get() != Some(&crate::github::client::OutputMode::Progress)
-            {
+            if self.is_tty && self.output.get() != Some(&OutputMode::Progress) {
                 println!("Starting upload of part {local_part_number}");
             }
             let is_tty = self.is_tty;
@@ -516,8 +514,7 @@ impl GithubClient {
                     .map_err(|e| GitError::AWSError(e.to_string()))?;
                 let etag = response.e_tag().unwrap().to_string();
 
-                if is_tty && output_type.get() != Some(&crate::github::client::OutputMode::Progress)
-                {
+                if is_tty && output_type.get() != Some(&OutputMode::Progress) {
                     println!("Uploaded part {local_part_number}");
                 }
 
