@@ -426,6 +426,7 @@ impl GithubClient {
     /// Clones the specified branch from a repository, updates the release version in all files,
     /// renames package files if necessary, commits, and pushes the changes.
     /// Returns an error if any step fails.
+    #[allow(clippy::too_many_lines)]
     pub async fn change_release_version(
         &self,
         url: String,
@@ -450,16 +451,15 @@ impl GithubClient {
 
         let result = tokio::task::spawn_blocking(move || {
             let _lock = permit;
-            let tmp_holder;
-            if dry_run {
+            let tmp_holder = if dry_run {
                 let tmp_dir = PathBuf::from(format!("/tmp/{branch}"));
                 fs::create_dir_all(&tmp_dir)?;
-                tmp_holder = TmpDirHolder::DryRun(tmp_dir);
+                TmpDirHolder::DryRun(tmp_dir)
             } else {
                 let tmp_dir = TempDir::new()
                     .map_err(|e| GitError::Other(format!("Failed to create temp dir: {e}")))?;
-                tmp_holder = TmpDirHolder::Temp(tmp_dir);
-            }
+                TmpDirHolder::Temp(tmp_dir)
+            };
             let tmp = match &tmp_holder {
                 TmpDirHolder::DryRun(p) => p.as_path(),
                 TmpDirHolder::Temp(t) => t.path(),
@@ -504,18 +504,18 @@ impl GithubClient {
             if repo == "odp-bigtop" {
                 let build_number = new_version
                     .split('-')
-                    .last()
+                    .next_back()
                     .ok_or_else(|| GitError::Other("Invalid new version format".to_string()))?;
 
                 replace_all_in_directory(
                     &repo_dir,
                     &Regex::new(r#"odp_bn\s*=\s*"\d+";"#).expect("Invalid odp_bn regex"),
-                    &format!(r#"odp_bn = "{}";"#, build_number),
+                    &format!(r#"odp_bn = "{build_number}";"#),
                 );
                 replace_all_in_directory(
                     &repo_dir,
                     &Regex::new(r#"ODP_BN\s*=\s*"\d+";"#).expect("Invalid ODP_BN regex"),
-                    &format!(r#"ODP_BN = "{}";"#, build_number),
+                    &format!(r#"ODP_BN = "{build_number}";"#),
                 );
 
                 let dir = format!("{}/bigtop-packages/src/deb", repo_dir.display());
