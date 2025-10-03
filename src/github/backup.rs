@@ -23,6 +23,7 @@ use crate::utils::compress::compress_directory;
 use crate::utils::repo::http_to_ssh_repo;
 use futures::stream::{FuturesUnordered, StreamExt};
 use indicatif::{ProgressBar, ProgressStyle};
+use std::fmt::Display;
 use std::path::PathBuf;
 use std::process::Command;
 use std::sync::Arc;
@@ -587,7 +588,7 @@ impl GithubClient {
         Ok(())
     }
     /// Backup all repositories to S3
-    pub async fn backup_all_to_s3<T: AsRef<str>>(
+    pub async fn backup_all_to_s3<T: AsRef<str> + Display>(
         &self,
         paths: Vec<PathBuf>,
         bucket: T,
@@ -617,18 +618,17 @@ impl GithubClient {
                 let result = self.backup_to_s3(&file_path, bucket).await;
                 (file_path, result)
             });
-
-            while let Some((path, result)) = futures.next().await {
-                match result {
-                    Ok(()) => {
-                        if let Some(ref pb) = progress {
-                            pb.inc(1);
-                            pb.println(format!("Uploaded {} to {bucket}", path.to_string_lossy()));
-                        }
+        }
+        while let Some((path, result)) = futures.next().await {
+            match result {
+                Ok(()) => {
+                    if let Some(ref pb) = progress {
+                        pb.inc(1);
+                        pb.println(format!("Uploaded {} to {bucket}", path.to_string_lossy()));
                     }
-                    Err(e) => {
-                        errors.push((path.to_string_lossy().to_string(), e));
-                    }
+                }
+                Err(e) => {
+                    errors.push((path.to_string_lossy().to_string(), e));
                 }
             }
         }
