@@ -154,8 +154,10 @@ impl GithubClient {
         match res {
             Ok(_) => {
                 if !quiet {
-                    self.append_slack_message(format!("New branch {new_branch} created"))
-                        .await;
+                    self.append_slack_message(format!(
+                        "{owner}/{repo}: New branch '{new_branch}' created"
+                    ))
+                    .await;
                 }
                 Ok(())
             }
@@ -299,7 +301,6 @@ impl GithubClient {
         repositories: &[U],
         quiet: bool,
     ) -> Result<(), GitError> {
-        println!("Base tag is {base_tag}");
         let mut futures = FuturesUnordered::new();
         for repo in repositories {
             let base_branch = base_branch.to_string();
@@ -584,7 +585,7 @@ impl GithubClient {
                 let stdout = String::from_utf8_lossy(&output.stdout);
                 let stderr = String::from_utf8_lossy(&output.stderr);
 
-                let message = format!("No changes to push in {repo}/{owner} for old version '{old_version}' on branch {branch}");
+                let message = format!("No changes to push in {owner}/{repo} for old version '{old_version}' on branch {branch}");
 
                 if stdout.contains("Everything up-to-date") || stderr.contains("Everything up-to-date") {
                     return Ok(message);
@@ -603,7 +604,7 @@ impl GithubClient {
             Ok(m) => {
                 if m.is_empty() {
                     let message = format!(
-                        "{repo_slack}/{owner_slack}: Successfully changed version from {old_version_slack} to {new_version_slack} for branch {branch_slack}"
+                        "{owner_slack}/{repo_slack}: Successfully changed version from {old_version_slack} to {new_version_slack} for branch {branch_slack}"
                     );
                     println!("✅ {message}");
                     self.append_slack_message(message).await;
@@ -615,10 +616,10 @@ impl GithubClient {
             }
             Err(e) => {
                 eprintln!(
-                    "❌ Failed to change version from {old_version_slack} to {new_version_slack} for {repo_slack}/{owner_slack}: {e}"
+                    "❌ Failed to change version from {old_version_slack} to {new_version_slack} for {owner_slack}/{repo_slack}: {e}"
                 );
                 self.append_slack_error(format!(
-                    "{repo_slack}/{owner_slack}: Failed to change version from {old_version_slack} to {new_version_slack}: {e}"
+                    "{owner_slack}/{repo_slack}: Failed to change version from {old_version_slack} to {new_version_slack}: {e}"
                 )).await;
                 Err(e)
             }

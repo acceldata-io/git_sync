@@ -79,9 +79,8 @@ impl GithubClient {
             println!("Backing up repository {} to path: {path}", url.as_ref());
         }
         // If the mirrored repo already exists, update it rather than clone again
-        let result =
-            if Path::new(&path).exists() {
-                tokio::task::spawn_blocking(move || {
+        let result = if Path::new(&path).exists() {
+            tokio::task::spawn_blocking(move || {
                 let _lock = semaphore_lock;
                 // If the path exists, we assume it's a git repository and we fetch the latest changes
                 let output = Command::new("git")
@@ -90,18 +89,23 @@ impl GithubClient {
                     .args(["remote", "update"])
                     .current_dir(&path)
                     .output();
-                let name = ssh_url.clone().split('/').next_back().unwrap_or("").to_string();
+                let name = ssh_url
+                    .clone()
+                    .split('/')
+                    .next_back()
+                    .unwrap_or("")
+                    .to_string();
                 match output {
                     // This branch happens only if the output of the command was successful
                     Ok(s) if s.status.success() => Ok::<_, GitError>(format!(
-                        "\tSuccessfully backed up repository: {name} to path: {path}"
+                        "Successfully backed up repository: {name} to path: {path}"
                     )),
                     Ok(s) => {
                         let stderr = String::from_utf8_lossy(&s.stderr);
                         eprintln!("Error while backing up.");
                         eprintln!("STDERR:\n{stderr}");
                         Err(GitError::Other(format!(
-                            "\tFailed to back up repository: {name}, git exited with status: {}",
+                            "Failed to back up repository: {name}, git exited with status: {}",
                             s.status
                         )))
                     }
@@ -111,48 +115,48 @@ impl GithubClient {
                 }
             })
             .await?
-            // Mirror the repo
-            } else {
-                tokio::task::spawn_blocking(move || {
-                    let _lock = semaphore_lock;
-                    // Clone the repository as a mirror
-                    let output = Command::new("git")
-                        .stdout(Stdio::piped())
-                        .stderr(Stdio::piped())
-                        .args(["clone", "--mirror", &ssh_url, &path])
-                        .output();
-                    let name = ssh_url
-                        .clone()
-                        .split('/')
-                        .next_back()
-                        .unwrap_or("")
-                        .to_string();
+        // Mirror the repo
+        } else {
+            tokio::task::spawn_blocking(move || {
+                let _lock = semaphore_lock;
+                // Clone the repository as a mirror
+                let output = Command::new("git")
+                    .stdout(Stdio::piped())
+                    .stderr(Stdio::piped())
+                    .args(["clone", "--mirror", &ssh_url, &path])
+                    .output();
+                let name = ssh_url
+                    .clone()
+                    .split('/')
+                    .next_back()
+                    .unwrap_or("")
+                    .to_string();
 
-                    match output {
-                        // This branch happens only if the output of the command was successful
-                        Ok(s) if s.status.success() => Ok::<_, GitError>(format!(
-                            "\tSuccessfully backed up repository: {name} to path: {path}"
-                        )),
-                        Ok(s) => {
-                            if Path::new(&path).exists() {
-                                // If the clone failed, remove the directory to avoid leaving a broken repo
-                                std::fs::remove_dir_all(&path)?;
-                            }
-                            let stderr = String::from_utf8_lossy(&s.stderr);
-                            eprintln!("Error while backing up.");
-                            eprintln!("STDERR:\n{stderr}");
-                            Err(GitError::Other(format!(
-                                "Failed to back up repository: {name}, git exited with status: {}",
-                                s.status
-                            )))
+                match output {
+                    // This branch happens only if the output of the command was successful
+                    Ok(s) if s.status.success() => Ok::<_, GitError>(format!(
+                        "\tSuccessfully backed up repository: {name} to path: {path}"
+                    )),
+                    Ok(s) => {
+                        if Path::new(&path).exists() {
+                            // If the clone failed, remove the directory to avoid leaving a broken repo
+                            std::fs::remove_dir_all(&path)?;
                         }
-                        Err(e) => Err(GitError::Other(format!(
-                            "Failed to back up repository: {ssh_url}, error: {e}"
-                        ))),
+                        let stderr = String::from_utf8_lossy(&s.stderr);
+                        eprintln!("Error while backing up.");
+                        eprintln!("STDERR:\n{stderr}");
+                        Err(GitError::Other(format!(
+                            "Failed to back up repository: {name}, git exited with status: {}",
+                            s.status
+                        )))
                     }
-                })
-                .await?
-            };
+                    Err(e) => Err(GitError::Other(format!(
+                        "Failed to back up repository: {ssh_url}, error: {e}"
+                    ))),
+                }
+            })
+            .await?
+        };
 
         // Match outside the spawn_blocking to avoid ownership issues
         match result {
