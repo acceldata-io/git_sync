@@ -236,7 +236,7 @@ async fn match_tag_cmds(
                             .sync_tags(repository, Some(parent), process_annotated_tags)
                             .await?;
                     } else {
-                        return Err(GitError::NoUpstreamRepo);
+                        client.sync_tags(repository, None, process_annotated_tags).await?;
                     }
                 } else {
                     return Err(GitError::MissingRepositoryName);
