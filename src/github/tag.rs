@@ -28,6 +28,7 @@ use octocrab::params::repos::Reference;
 use serde::Deserialize;
 use std::collections::{HashMap, HashSet};
 use std::error::Error;
+use std::hash::Hash;
 use std::process::Command;
 use temp_dir::TempDir;
 
@@ -318,10 +319,22 @@ impl GithubClient {
     pub async fn sync_tags<T: AsRef<str> + Display + Copy>(
         &self,
         url: T,
+        parent_url: Option<T>,
         process_annotated: bool,
     ) -> Result<(), GitError> {
         let info = get_repo_info_from_url(url)?;
-        let parent = self.get_parent_repo(url).await?;
+
+        let parent = if let Some(u) = parent_url {
+            let info = get_repo_info_from_url(u)?;
+            RepoInfo {
+                repo_name: info.repo_name,
+                owner: info.owner,
+                url: u.to_string(),
+                main_branch: info.main_branch,
+            }
+        } else {
+            self.get_parent_repo(url).await?
+        };
         let (owner, repo) = (info.owner, info.repo_name);
         let all_tags = self.compare_tags(url, &parent).await?;
 
@@ -442,15 +455,17 @@ impl GithubClient {
         Ok(())
     }
     /// Sync tags for all configured repositories
-    pub async fn sync_all_tags<T: AsRef<str> + ToString + Display>(
+    pub async fn sync_all_tags<T: AsRef<str> + ToString + Display + Eq + Hash>(
         &self,
         process_annotated: bool,
         repositories: &[T],
+        fork_workaround: HashMap<T, T>,
     ) -> Result<(), GitError> {
         let mut futures = FuturesUnordered::new();
         for url in repositories {
+            let parent_url = fork_workaround.get(url);
             futures.push(async move {
-                let result = self.sync_tags(url, process_annotated).await;
+                let result = self.sync_tags(url, parent_url, process_annotated).await;
                 (url, result)
             });
         }
