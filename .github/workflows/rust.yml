@@ -28,6 +28,8 @@ jobs:
 
       - name: Check formatting
         run: cargo fmt --all -- --check
+      - name: Check for compiler warnings/suggestions
+        run: cargo clippy
   audit:
     name: Check for vulnerabilities
     runs-on: ubuntu-latest
