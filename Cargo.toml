@@ -7,14 +7,14 @@ version = "0.4.0"
 
 
 [dependencies]
-aws-config = { version = "1.8.6", features = ["rustls"], optional = true }
-aws-lc-rs = "1.13"
-aws-sdk-s3 = { version = "1.105", optional = true }
+aws-config = { version = "1.8.7", features = ["rustls"], optional = true }
+aws-lc-rs = "1.14.1"
+aws-sdk-s3 = { version = "1.107", optional = true }
 chrono = { version = "0.4", features = ["clock", "iana-time-zone", "std"] }
 clap = { version = "4.5", features = ["derive", "env", "unicode", "wrap_help"] }
-clap_complete = "4.5.57"
+clap_complete = "4.5.58"
 clap_mangen = "0.2.29"
-console = "0.16.0"
+console = "0.16.1"
 fancy-regex = "0.16"
 flate2 = { version = "1.1.2", default-features = false, features = ["zlib-ng"] }
 futures = { version = "0.3.31", features = ["alloc", "async-await", "std"] }
@@ -23,6 +23,7 @@ hyper = { version = "1.7.0", default-features = false }
 iana-time-zone = "0.1"
 indexmap = { version = "2.11", features = ["serde"] }
 indicatif = { version = "0.18.0", features = ["tokio"] }
+microxdg = "0.2.0"
 octocrab = { version = "0.46", default-features = false, features = [
   "default-client",
   "follow-redirect",
@@ -46,33 +47,31 @@ rustls = { version = "0.23", features = ["aws_lc_rs"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 tabled = { version = "0.20", features = ["ansi", "macros", "std"] }
+tar = "0.4.44"
 temp-dir = "0.1"
 thiserror = "2.0"
 tokio = { version = "1.47", features = ["macros", "rt-multi-thread"] }
 tokio-retry = "0.3"
-toml = "0.9.5"
-
-microxdg = "0.2.0"
-sqlx = { version = "0.8.6", optional = true, default-features = false, features = [
-  "chrono",
-  "derive",
-  "json",
-  "macros",
-  "migrate",
-  "runtime-tokio-rustls",
-  "time",
-  "tls-rustls-aws-lc-rs",
-] }
-tar = "0.4.44"
+toml = "0.9"
+#sqlx = { version = "0.8.6", optional = true, default-features = false, features = [
+#  "chrono",
+#  "derive",
+#  "json",
+#  "macros",
+#  "migrate",
+#  "runtime-tokio-rustls",
+#  "time",
+#  "tls-rustls-aws-lc-rs",
+#] }
 walkdir = "2.5.0"
 
 [features]
-aws      = ["dep:aws-config", "dep:aws-sdk-s3"]
-default  = ["aws", "slack"]
-postgres = ["sql", "sqlx/postgres"]
-slack    = []
-sql      = ["dep:sqlx"]
-sqlite   = ["sql", "sqlx/sqlite"]
+aws     = ["dep:aws-config", "dep:aws-sdk-s3"]
+default = ["aws", "slack"]
+#postgres = ["sql", "sqlx/postgres"]
+slack = []
+#sql      = ["dep:sqlx"]
+#sqlite   = ["sql", "sqlx/sqlite"]
 
 [profile.release]
 lto   = true

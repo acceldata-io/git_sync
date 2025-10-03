@@ -179,12 +179,11 @@ async fn match_tag_cmds(
     client: &GithubClient,
     repos: Vec<String>,
     cmd: &TagCommand,
-    _fork_workaround: HashMap<String, String>,
+    fork_workaround: HashMap<String, String>,
 ) -> Result<(), GitError> {
     let result = async {
         match cmd {
             TagCommand::Compare(compare_cmd) => {
-                //compare_cmd.validate().map_err(GitError::Other)?;
                 let repository = compare_cmd.repository.as_ref();
                 if compare_cmd.all && !repos.is_empty() {
                     client.diff_all_tags(repos).await?;
@@ -226,12 +225,21 @@ async fn match_tag_cmds(
                 let repository = sync_cmd.repository.as_ref();
                 // By default, this is false
                 let process_annotated_tags = sync_cmd.with_annotated;
+
                 if sync_cmd.all {
                     client
-                        .sync_all_tags(process_annotated_tags, &repos[..])
+                        .sync_all_tags(process_annotated_tags, &repos[..], fork_workaround)
                         .await?;
                 } else if let Some(repository) = repository {
-                    client.sync_tags(repository, process_annotated_tags).await?;
+                    if let Some(parent) = fork_workaround.get(repository) {
+                        client
+                            .sync_tags(repository, Some(parent), process_annotated_tags)
+                            .await?;
+                    } else {
+                        client
+                            .sync_tags(repository, None, process_annotated_tags)
+                            .await?;
+                    }
                 } else {
                     return Err(GitError::MissingRepositoryName);
                 }
