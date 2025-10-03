@@ -24,9 +24,9 @@ use std::fmt::Write as _;
 use std::hash::{Hash, Hasher};
 use std::sync::OnceLock;
 
-// Initialized once, then it becomes available
-// from then on so we don't have to compile our regex every
-// single time test_get_repo_info_from_url is called
+/// Initialized once, then it becomes available
+/// from then on so we don't have to compile our regex every
+/// single time `test_get_repo_info_from_url` is called
 static REPO_REGEX: OnceLock<Regex> = OnceLock::new();
 
 /// Hold basic information about a github url

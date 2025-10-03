@@ -17,6 +17,7 @@ specific language governing permissions and limitations
 under the License.
 */
 pub mod compress;
+pub mod file_replace;
 pub mod macros;
 pub mod pr;
 pub mod repo;
