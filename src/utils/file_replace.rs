@@ -22,7 +22,7 @@ use std::fs;
 use std::io;
 use walkdir::WalkDir;
 
-/// Replace all occurences of the regex `re` with `replacement`
+/// Replace all occurrences of the regex `re` with `replacement`
 pub fn replace_in_file<T: AsRef<str>>(
     path: &std::path::Path,
     re: &Regex,
@@ -45,7 +45,7 @@ pub fn replace_all_in_directory<T: AsRef<str> + Copy>(
 ) {
     for entry in WalkDir::new(path)
         .into_iter()
-        .filter_map(std::result::Result::ok)
+        .filter_map(Result::ok)
     {
         let path = entry.path();
         if path.components().any(|c| c.as_os_str() == ".git") {

@@ -42,7 +42,7 @@ use std::path::{Path, PathBuf};
 /// Parse the argument that gets passed, and run their associated methods
 pub async fn match_arguments(app: &AppArgs, config: Config) -> Result<(), GitError> {
     // If we're trying to generate man pages or shell completion, we don't need
-    // a github token
+    // a GitHub token
     let token = match &app.command {
         Command::Generate { .. } | Command::Config { .. } => String::new(),
         _ => app
@@ -53,6 +53,7 @@ pub async fn match_arguments(app: &AppArgs, config: Config) -> Result<(), GitErr
     };
     let verbose = app.verbose;
     let quiet = app.quiet;
+    let dry_run = app.dry_run;
 
     let fork_workaround_repositories = if app.with_fork_workaround {
         config.get_fork_workaround_repositories()
@@ -128,7 +129,7 @@ pub async fn match_arguments(app: &AppArgs, config: Config) -> Result<(), GitErr
         Command::Repo { cmd } => {
             match_repo_cmds(&client, repos, config, cmd, fork_workaround_repositories).await?;
         }
-        Command::Branch { cmd } => match_branch_cmds(&client, repos, cmd, quiet).await?,
+        Command::Branch { cmd } => match_branch_cmds(&client, repos, cmd, quiet, dry_run).await?,
         Command::Release { cmd } => match_release_cmds(&client, repos, config, cmd).await?,
         Command::PR { cmd } => match_pr_cmds(&client, repos, config, cmd).await?,
         Command::Backup { cmd } => {
@@ -142,7 +143,7 @@ pub async fn match_arguments(app: &AppArgs, config: Config) -> Result<(), GitErr
 
             let out_dir = out
                 .clone()
-                .unwrap_or_else(|| std::env::current_dir().unwrap());
+                .unwrap_or_else(|| env::current_dir().unwrap());
             match kind.as_str() {
                 "bash" => {
                     generate_to(Bash, &mut cmd, "git_sync", out_dir)?;
@@ -159,10 +160,10 @@ pub async fn match_arguments(app: &AppArgs, config: Config) -> Result<(), GitErr
                 "man" => {
                     let out_dir = out
                         .clone()
-                        .unwrap_or_else(|| std::env::current_dir().unwrap());
+                        .unwrap_or_else(|| env::current_dir().unwrap());
                     let cmd = cli();
-                    generate_manpages(cmd, &out_dir, None);
-                    println!("Manpages generated");
+                    generate_man_pages(cmd, &out_dir, None);
+                    println!("Man pages generated");
                 }
                 _ => {}
             }
@@ -256,6 +257,7 @@ async fn match_branch_cmds(
     repos: Vec<String>,
     cmd: &BranchCommand,
     quiet: bool,
+    dry_run: bool,
 ) -> Result<(), GitError> {
     match cmd {
         BranchCommand::Create(create_cmd) => {
@@ -311,6 +313,7 @@ async fn match_branch_cmds(
                         new_version,
                         &repos[..],
                         message,
+                        dry_run
                     )
                     .await?;
             } else if let Some(repository) = &repository {
@@ -321,6 +324,7 @@ async fn match_branch_cmds(
                         old_version,
                         new_version,
                         message,
+                        dry_run
                     )
                     .await?;
             }
@@ -618,15 +622,15 @@ async fn match_backup_cmds(
     Ok(())
 }
 
-/// Helper to write manpages
+/// Helper to write man pages
 fn write_man(cmd: &mut clap::Command, out_dir: &Path, name: &str) {
     let man = Man::new(cmd.clone());
     let mut file = File::create(out_dir.join(name)).unwrap();
     man.render(&mut file).unwrap();
 }
 
-/// Generate manpages for all subcommands. Otherwise we only get a manpage for the root command.
-fn generate_manpages(mut cmd: clap::Command, out_dir: &PathBuf, parent: Option<String>) {
+/// Generate man pages for all subcommands. Otherwise, we only get a manpage for the root command.
+fn generate_man_pages(mut cmd: clap::Command, out_dir: &PathBuf, parent: Option<String>) {
     let name = if let Some(parent) = parent {
         format!("git_sync-{parent}.1")
     } else {
@@ -639,6 +643,6 @@ fn generate_manpages(mut cmd: clap::Command, out_dir: &PathBuf, parent: Option<S
             continue;
         }
         let sub_name = subcommand.get_name().to_string().replace('_', "-");
-        generate_manpages(subcommand.clone(), out_dir, Some(sub_name));
+        generate_man_pages(subcommand.clone(), out_dir, Some(sub_name));
     }
 }

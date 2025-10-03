@@ -26,8 +26,9 @@ use fancy_regex::Regex;
 use futures::{StreamExt, stream::FuturesUnordered};
 use octocrab::models::repos::Object;
 use octocrab::params::repos::Reference;
-use std::fmt::Display;
+use std::fmt::{Display};
 use std::fs;
+use std::path::PathBuf;
 use std::process::Command;
 use temp_dir::TempDir;
 use walkdir::WalkDir;
@@ -49,6 +50,11 @@ struct GitTagObject {
 #[derive(Debug, serde::Deserialize)]
 struct GitTagTarget {
     sha: String,
+}
+
+enum TmpDirHolder {
+    DryRun(PathBuf),
+    Temp(TempDir),
 }
 
 impl GithubClient {
@@ -78,7 +84,7 @@ impl GithubClient {
 
         match res {
             Ok(r) => {
-                let octocrab::models::repos::Object::Commit { sha, .. } = r.object else {
+                let Object::Commit { sha, .. } = r.object else {
                     return Err(GitError::NoSuchBranch(branch.to_string()));
                 };
 
@@ -124,7 +130,7 @@ impl GithubClient {
             }
         };
 
-        let octocrab::models::repos::Object::Commit { sha, .. } = response.object else {
+        let Object::Commit { sha, .. } = response.object else {
             self.append_slack_error(format!("{owner}/{repo}: No such branch {base_branch}"))
                 .await;
 
@@ -427,6 +433,7 @@ impl GithubClient {
         old_version: String,
         new_version: String,
         message: Option<String>,
+        dry_run: bool,
     ) -> Result<(), GitError> {
         let info = get_repo_info_from_url(url)?;
         let (repo, owner, url) = (info.repo_name, info.owner, info.url);
@@ -443,10 +450,21 @@ impl GithubClient {
 
         let result = tokio::task::spawn_blocking(move || {
             let _lock = permit;
-            // Use a temp directory for the git repository so it's cleaned up automatically
-            let tmp_dir = TempDir::new()
-                .map_err(|e| GitError::Other(format!("Failed to create temp dir: {e}")))?;
-            let tmp = tmp_dir.path();
+            let tmp_holder;
+            if dry_run {
+                let tmp_dir = PathBuf::from(format!("/tmp/{branch}"));
+                fs::create_dir_all(&tmp_dir)?;
+                tmp_holder = TmpDirHolder::DryRun(tmp_dir);
+            } else {
+                let tmp_dir = TempDir::new()
+                    .map_err(|e| GitError::Other(format!("Failed to create temp dir: {e}")))?;
+                tmp_holder = TmpDirHolder::Temp(tmp_dir);
+            }
+            let tmp = match &tmp_holder {
+                TmpDirHolder::DryRun(p) => p.as_path(),
+                TmpDirHolder::Temp(t) => t.path(),
+            };
+
             let repo_dir = tmp.join(&repo);
             println!(
                 "Starting to clone {repo}'s branch {branch} into {}",
@@ -484,6 +502,22 @@ impl GithubClient {
             // If we're working with the odp-bigtop repo, we also need to rename package files
             // in bigtop-packages/src/deb
             if repo == "odp-bigtop" {
+                let build_number = new_version
+                    .split('-')
+                    .last()
+                    .ok_or_else(|| GitError::Other("Invalid new version format".to_string()))?;
+
+                replace_all_in_directory(
+                    &repo_dir,
+                    &Regex::new(r#"odp_bn\s*=\s*"\d+";"#).expect("Invalid odp_bn regex"),
+                    &format!(r#"odp_bn = "{}";"#, build_number),
+                );
+                replace_all_in_directory(
+                    &repo_dir,
+                    &Regex::new(r#"ODP_BN\s*=\s*"\d+";"#).expect("Invalid ODP_BN regex"),
+                    &format!(r#"ODP_BN = "{}";"#, build_number),
+                );
+
                 let dir = format!("{}/bigtop-packages/src/deb", repo_dir.display());
 
                 let old_version_dash = &old_version.to_string().replace('.', "-");
@@ -495,11 +529,11 @@ impl GithubClient {
                     r"^(.*)-{}([.-].*)(.*)$",
                     fancy_regex::escape(old_version_dash)
                 ))
-                .expect("Faild to compile old version regex");
+                .expect("Failed to compile old version regex");
 
                 for entry in WalkDir::new(&dir)
                     .into_iter()
-                    .filter_map(std::result::Result::ok)
+                    .filter_map(Result::ok)
                 {
                     let path = entry.path();
                     if path.is_dir() {
@@ -542,22 +576,24 @@ impl GithubClient {
                 .current_dir(&repo_dir)
                 .status()?;
 
-            let output = Command::new("git")
-                .arg("push")
-                .current_dir(&repo_dir)
-                .output()?;
-            let stdout = String::from_utf8_lossy(&output.stdout);
-            let stderr = String::from_utf8_lossy(&output.stderr);
+            if !dry_run {
+                let output = Command::new("git")
+                    .arg("push")
+                    .current_dir(&repo_dir)
+                    .output()?;
+                let stdout = String::from_utf8_lossy(&output.stdout);
+                let stderr = String::from_utf8_lossy(&output.stderr);
 
-            let message = format!("No changes to push in {repo}/{owner} for old version '{old_version}' on branch {branch}");
+                let message = format!("No changes to push in {repo}/{owner} for old version '{old_version}' on branch {branch}");
 
-            if stdout.contains("Everything up-to-date") || stderr.contains("Everything up-to-date") {
-                return Ok(message);
-            } else if !output.status.success() {
-                return Err(GitError::Other(format!(
-                    "Failed to push changes to {repo} on branch {branch}: {}",
-                    stderr.trim()
-                )));
+                if stdout.contains("Everything up-to-date") || stderr.contains("Everything up-to-date") {
+                    return Ok(message);
+                } else if !output.status.success() {
+                    return Err(GitError::Other(format!(
+                        "Failed to push changes to {repo} on branch {branch}: {}",
+                        stderr.trim()
+                    )));
+                }
             }
 
             Ok(String::new())
@@ -598,6 +634,7 @@ impl GithubClient {
         new_version: String,
         repositories: &[String],
         message: Option<String>,
+        dry_run: bool,
     ) -> Result<(), GitError> {
         let mut futures = FuturesUnordered::new();
         for repo in repositories {
@@ -613,6 +650,7 @@ impl GithubClient {
                         old_version,
                         new_version,
                         message,
+                        dry_run,
                     )
                     .await;
                 (repo, result)

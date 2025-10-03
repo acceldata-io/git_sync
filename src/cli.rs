@@ -22,7 +22,7 @@ use clap::{ArgGroup, Args, CommandFactory, Parser, Subcommand, ValueEnum};
 use std::fmt;
 use std::path::PathBuf;
 
-/// `git_sync` is an application for managing multiple github repositories at once.
+/// `git_sync` is an application for managing multiple GitHub repositories at once.
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None,
     after_help="\
@@ -31,7 +31,7 @@ NOTES:
 )]
 #[allow(clippy::struct_excessive_bools)]
 pub struct AppArgs {
-    /// Github Personal Access Token
+    /// GitHub Personal Access Token
     #[arg(short, long, env = "GITHUB_TOKEN")]
     pub token: Option<String>,
 
@@ -58,7 +58,7 @@ pub struct AppArgs {
     #[command(subcommand)]
     pub command: Command,
 
-    /// Make output quiet. This is useful when not running in interactive mode. If slack is
+    /// Make output quiet. This is useful when not running in interactive mode. If Slack is
     /// enabled, this will silence some success messages to slack.
     #[arg(short, long, default_value_t = false, global = true)]
     pub quiet: bool,
@@ -72,22 +72,27 @@ pub struct AppArgs {
     pub jobs: Option<usize>,
 
     /// Also process repositories that are forks that do not have the parent repository set in a way that
-    /// Github understands.
+    /// GitHub understands.
     #[arg(long, default_value_t = false, global = true)]
     pub with_fork_workaround: bool,
 
-    /// Enable sending the results of the operation to a slack channel using the
+    /// Enable sending the results of the operation to a Slack channel using the
     /// configured webhook in git-manage.toml
     #[cfg(feature = "slack")]
     #[arg(short, long, global = true, default_value_t = false)]
     pub slack: bool,
+
+    /// When true, runs through and reports activity without pushing any commits.
+    #[arg(long, global = true, default_value_t = false)]
+    pub dry_run: bool,
+
     /// Override the slack webhook url from the config file
     #[cfg(feature = "slack")]
     #[arg(long, global = true, env = "SLACK_WEBHOOK")]
     pub slack_webhook: Option<String>,
 }
 
-/// Validate that the maximum number of paralllel jobs is between 1 and 64.
+/// Validate that the maximum number of parallel jobs is between 1 and 64.
 /// Strictly speaking, there isn't a reason that this couldn't be higher, but
 /// there isn't much point in allowing more jobs than cpu cores available
 fn validate_jobs(s: &str) -> Result<usize, String> {
@@ -281,7 +286,7 @@ pub struct SyncRepoCommand {
         .args(&["license", "protected", "old_branches"])
     ),
     long_about = "Check repositories for various conditions, such as the license used, branch protection status, and stale branches. \
-        You can target a single repository or all configured repositories. Multiple checks can be run is a single commmand.",
+        You can target a single repository or all configured repositories. Multiple checks can be run is a single command.",
     after_help="\
 EXAMPLES:
     # Check all repositories for license and branch protection
@@ -352,7 +357,7 @@ NOTES:
     the PR will still be created, but you will need to fix the conflicts.
 
     You can specify --sha for single repositories, but cannot use this with --all.
-    If you do not specifiy it, it will be fetched automatically.
+    If you do not specify it, it will be fetched automatically.
 "
 )]
 pub struct CreatePRCommand {
@@ -383,7 +388,7 @@ pub struct CreatePRCommand {
     /// Extra detail to append to automatic commit message
     #[arg(long)]
     pub merge_body: Option<String>,
-    /// The method to use when merging the PR. The default, per Github, is "merge"
+    /// The method to use when merging the PR. The default, per GitHub, is "merge"
     #[arg(long, value_enum, default_value = "merge")]
     pub merge_method: MergeMethod,
     /// SHA that the pull request head must match to permit merging
@@ -397,7 +402,7 @@ pub struct CreatePRCommand {
     pub delete: Option<String>,
 }
 
-/// Close a PR for a repository. Currently doesn't do anything, since it's kind of pointless
+/// Close a PR for a repository. Currently, doesn't do anything, since it's kind of pointless
 /// to close PRs specified by number from the cli. May be updated later to be useful
 #[derive(Args, Clone, Debug)]
 #[command(
@@ -598,7 +603,7 @@ pub struct CreateReleaseCommand {
     ),
 )]
 pub struct BackupRepoCommand {
-    /// The repository to backup
+    /// The repository to back up
     #[arg(short, long)]
     pub repository: Option<String>,
     /// Backup all configured repositories
@@ -670,7 +675,7 @@ pub enum BackupCommand {
     Clean(PruneBackupCommand),
 }
 
-/// Define all the valid commands for actiong on releases
+/// Define all the valid commands for action on releases
 #[derive(Subcommand, Clone, Debug)]
 pub enum ReleaseCommand {
     /// Create a new release
@@ -761,10 +766,10 @@ pub enum Command {
         #[command(subcommand)]
         cmd: PRCommand,
     },
-    /// Generate shell completions or manpages.
+    /// Generate shell completions or man pages.
     #[command(hide = true)]
     Generate {
-        /// What to generate. Can be shell completion for bash, zsh, fish, or manpages.
+        /// What to generate. Can be shell completion for bash, zsh, fish, or man pages.
         #[arg(long, value_parser = ["bash", "zsh", "fish", "man"])]
         kind: String,
         /// An optional output path. If not specified, the current directory will be used instead
