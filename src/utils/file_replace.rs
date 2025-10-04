@@ -43,12 +43,11 @@ pub fn replace_all_in_directory<T: AsRef<str> + Copy>(
     re: &Regex,
     replacement: T,
 ) {
-    for entry in WalkDir::new(path).into_iter().filter_map(Result::ok) {
-        let path = entry.path();
-        if path.components().any(|c| c.as_os_str() == ".git") {
-            continue;
-        }
-
+    for entry in WalkDir::new(path)
+        .into_iter()
+        .filter_entry(|e| !(e.file_type().is_dir() && e.file_name() == ".git"))
+        .filter_map(Result::ok)
+    {
         if entry.file_type().is_file() {
             let file_path = entry.path();
             match replace_in_file(file_path, re, replacement) {
