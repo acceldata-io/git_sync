@@ -228,14 +228,22 @@ If you want to include your `fork_with_workaround` repositories in the backup, y
 
 
 #### Local backup
-Ensure you have enough space on your local filesystem to house all of your backups since these can be surprisingly large. For example, a `git clone --mirror` of [ClickHouse](https://github.com/ClickHouse/ClickHouse) is around 1.8GB on its own. You must have read-write access to this folder.
+Ensure you have enough space on your local filesystem to house all of your backups since these can be surprisingly large. For example, a `git clone --mirror` of [ClickHouse](https://github.com/ClickHouse/ClickHouse) is around 1.8GB on its own. You must have read write access to this folder; if you do not, any backup operation will fail.
 
+You can also optionally enable a repository blacklist, if there are repositories you do not wish to be included in a particular backup. This can be enabled by adding 
+```toml
+[misc]
+backup_blacklist = ["https://github.com/my-org/repository"]
+```
+to your configuration file.  
 
-Importantly, the path you pick here must be a folder. 
+To then enable your blacklist, pass `--blacklist` to any backup operation. This option can be useful when you have very large repositories that you don't need to backup every time, but may wish to sometimes backup since you can remove the `--blacklist` flag to then update everything. 
+
+Importantly, the path you pick here must either be a folder or not exist. If it does not exist, it will be created automatically. 
 ```bash
 $ git_sync backup create -r https://github.com/my-org/my-repo --path /path/to/backup/folder 
 $ git_sync backup create --all -p /path/to/backup/folder --slack
-# Backing up every single repsitory listed in the configuration file
+# Backing up every single repository listed in the configuration file
 $ git_sync backup create --repository-type all -p /path/to/backup/folder --slack
 ```
 

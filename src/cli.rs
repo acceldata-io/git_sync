@@ -619,6 +619,11 @@ pub struct BackupRepoCommand {
     /// currently.
     #[arg(short, long, default_value_t = false)]
     pub update: bool,
+    /// Enable the backup blacklist to prevent repositories from being backed up from the
+    /// `backup_blacklist` set in git-manage.toml. This option will be ignored if
+    /// `--repository` is specified
+    #[arg(long, default_value_t = false)]
+    pub blacklist: bool,
     /// Bucket name for where you want to store your backup if using `S3`
     #[cfg(feature = "aws")]
     #[arg(short, long, required_if_eq("destination", "s3"))]

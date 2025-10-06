@@ -27,7 +27,6 @@ use tokio::sync::Mutex;
 use indexmap::IndexSet;
 use tokio::sync::Semaphore;
 
-use std::cmp;
 use std::collections::HashSet;
 use std::fmt::Write as _;
 use std::io::IsTerminal;
@@ -92,8 +91,6 @@ impl GithubClient {
             .personal_token(github_token.as_ref())
             .build()
             .map_err(GitError::GithubApiError)?;
-        // Shadow max_jobs. This value makes no sense if it's less than 1
-        let max_jobs: usize = cmp::max(1, max_jobs);
         let webhook_url: String = slack_webhook.unwrap_or_default().trim().to_string();
 
         Ok(Self {
@@ -101,6 +98,8 @@ impl GithubClient {
             semaphore: Arc::new(Semaphore::new(max_jobs)),
             webhook_url,
             is_tty: std::io::stdout().is_terminal(),
+            // This is a type that can only be written to once, and represents the type of output
+            // that we have.
             output: Arc::new(OnceCell::new()),
             // Arbitrary initial capacity to avoid allocations if there aren't that many messages
             slack_messages: Arc::new(Mutex::new(Vec::with_capacity(100))),

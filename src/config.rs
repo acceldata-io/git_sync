@@ -54,6 +54,7 @@ pub struct Config {
 }
 
 #[derive(Debug, Deserialize, Default)]
+#[allow(clippy::struct_field_names)]
 pub struct MiscSettings {
     /// A blacklist for branches when searching for stale ones.
     /// This allows you to ignore long living branches that should always exist
@@ -61,6 +62,10 @@ pub struct MiscSettings {
     /// A blacklist for licenses. If one of your repositories has one of these licenses, you will
     /// get a warning about it
     pub license_blacklist: Option<HashSet<String>>,
+    /// A blacklist for repositories when you are backing up.
+    /// This allows you to say that you don't want to back up certain repositories, even when
+    /// selecting 'all' as your backup target
+    pub backup_blacklist: Option<HashSet<String>>,
 }
 
 #[derive(Debug, Deserialize, Default)]
