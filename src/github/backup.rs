@@ -23,7 +23,8 @@ use crate::utils::compress::compress_directory;
 use crate::utils::repo::http_to_ssh_repo;
 use futures::stream::{FuturesUnordered, StreamExt};
 use indicatif::{ProgressBar, ProgressStyle};
-use std::fmt::Display;
+use std::collections::HashSet;
+use std::fmt::{Debug, Display};
 use std::path::PathBuf;
 use std::process::Command;
 use std::sync::Arc;
@@ -188,10 +189,15 @@ impl GithubClient {
     /// depending on the number of repositories and their sizes
     pub async fn backup_all_repos(
         &self,
-        repositories: &[impl std::fmt::Display + AsRef<str> + ToString],
+        repositories: &[impl std::fmt::Display + AsRef<str> + ToString + Debug],
         path: &Path,
+        blacklist: HashSet<String>,
     ) -> Result<Vec<PathBuf>, GitError> {
         let mut futures = FuturesUnordered::new();
+        let repositories: Vec<_> = repositories
+            .iter()
+            .filter(|r| !blacklist.contains(&r.to_string()))
+            .collect();
         let number_of_repos = repositories.len();
 
         if self.is_tty && number_of_repos > 1 {

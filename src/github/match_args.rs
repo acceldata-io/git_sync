@@ -107,7 +107,7 @@ pub async fn match_arguments(app: &AppArgs, config: Config) -> Result<(), GitErr
         .or_else(|| config.slack.webhook_url.clone());
 
     // This value must be greater than 0
-    let jobs: usize = std::cmp::min(app.jobs.unwrap_or(default_jobs), 1);
+    let jobs: usize = app.jobs.unwrap_or(default_jobs);
 
     let client = GithubClient::new(&token, &config, jobs, slack_webhook)?;
     if !token.is_empty() && verbose {
@@ -570,7 +570,7 @@ async fn match_release_cmds(
 async fn match_backup_cmds(
     client: &GithubClient,
     repos: Vec<String>,
-    _config: Config,
+    config: Config,
     cmd: &BackupCommand,
     fork_workaround: HashMap<String, String>,
 ) -> Result<(), GitError> {
@@ -580,6 +580,14 @@ async fn match_backup_cmds(
             let passed_path = create_cmd.path.as_ref();
             let current_dir;
             let dest = create_cmd.destination;
+            // This is only a meaningful option when '--all' is passed
+            let enable_blacklist = create_cmd.blacklist;
+            let blacklist = if enable_blacklist {
+                config.misc.backup_blacklist.unwrap_or_default()
+            } else {
+                HashSet::new()
+            };
+
             let path = if let Some(p) = passed_path {
                 p
             } else {
@@ -593,7 +601,7 @@ async fn match_backup_cmds(
                 if !fork_workaround.is_empty() {
                     repos.extend(fork_workaround.keys().cloned());
                 }
-                let successful = client.backup_all_repos(&repos[..], path).await?;
+                let successful = client.backup_all_repos(&repos[..], path, blacklist).await?;
                 if dest == BackupDestination::S3 {
                     if let Some(bucket) = bucket {
                         client.backup_all_to_s3(successful, bucket).await?;
