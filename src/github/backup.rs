@@ -189,7 +189,7 @@ impl GithubClient {
     /// depending on the number of repositories and their sizes
     pub async fn backup_all_repos(
         &self,
-        repositories: &[impl std::fmt::Display + AsRef<str> + ToString + Debug],
+        repositories: &[impl std::fmt::Display + AsRef<str> + ToString],
         path: &Path,
         blacklist: HashSet<String>,
     ) -> Result<Vec<PathBuf>, GitError> {
