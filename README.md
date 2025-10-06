@@ -228,7 +228,7 @@ If you want to include your `fork_with_workaround` repositories in the backup, y
 
 
 #### Local backup
-Ensure you have enough space on your local filesystem to house all of your backups since these can be surprisingly large. For example, a `git clone --mirror` of [ClickHouse](https://github.com/ClickHouse/ClickHouse) is around 1.8GB on its own. You must have read write access to this folder; if you do not, any backup operation will fail.
+Ensure you have enough space on your local filesystem to house all of your backups since these can be surprisingly large. For example, a `git clone --mirror` of [ClickHouse](https://github.com/ClickHouse/ClickHouse) is around 1.8GB on its own. You must have read-write access to this folder; if you do not, any backup operation will fail.
 
 You can also optionally enable a repository blacklist, if there are repositories you do not wish to be included in a particular backup. This can be enabled by adding 
 ```toml
