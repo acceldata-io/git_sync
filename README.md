@@ -356,9 +356,8 @@ It will detect you are not running in an interactive terminal and will create a 
 ## Getting help
 All commands and subcommand have a `--help` flag that will give you information about the various flags, including valid options for each flag.
 
-Rust documentation can be generated locally by running `cargo doc --no-deps --open`. You can also view the documentation online [hosted on Github](https://jeffreysmith.github.io/git_sync/git_sync/).
+The API documentation can be generated locally by running `cargo doc --no-deps --open`.
 
-Deploying updates to the Github hosted documentation can be done by, when in the main branch, running `./generate_docs.sh` and then committing those new/changed files. Github will automatically deploy the updated documentation when this commit is pushed.
 
 ## Compatibility
 This has been verified to run on both Redhat 7 and MacOS 15 meaning that it likely works on just about any Unix Operating System. It will likely not work on Windows since this tool expects a Unix environment, and has not been tested on Windows. No issues involving Windows will be addressed at this time.
