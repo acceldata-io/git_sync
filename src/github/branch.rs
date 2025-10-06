@@ -427,21 +427,22 @@ impl GithubClient {
     /// Clones the specified branch from a repository, updates the release version in all files,
     /// renames package files if necessary, commits, and pushes the changes.
     /// Returns an error if any step fails.
-    #[allow(clippy::too_many_lines)]
-    pub async fn change_release_version(
+    #[allow(clippy::too_many_lines, clippy::too_many_arguments)]
+    pub async fn modify_branch(
         &self,
         url: String,
         branch: String,
-        old_version: String,
-        new_version: String,
+        old_text: String,
+        new_text: String,
         message: Option<String>,
         dry_run: bool,
+        is_version: bool,
     ) -> Result<(), GitError> {
         let info = get_repo_info_from_url(url)?;
         let (repo, owner, url) = (info.repo_name, info.owner, info.url);
         let repo_slack = repo.clone();
-        let old_version_slack = old_version.clone();
-        let new_version_slack = new_version.clone();
+        let old_text_slack = old_text.clone();
+        let new_text_slack = new_text.clone();
         let owner_slack = owner.clone();
         let branch_slack = branch.clone();
 
@@ -467,10 +468,11 @@ impl GithubClient {
             };
 
             let repo_dir = tmp.join(&repo);
-            println!(
-                "Starting to clone {repo}'s branch {branch} into {}",
-                tmp.display()
-            );
+                println!(
+                    "Starting to clone {repo}'s branch {branch} into {}",
+                    tmp.display()
+                );
+
             // Clone the specified branch into a temporary directory
             // We use --depth 1 to only get the latest commit
             // We use --single-branch to only get the specified branch
@@ -496,14 +498,14 @@ impl GithubClient {
             }
 
             let re = REPO_REGEX.get_or_init(|| {
-                let msg = format!("Invalid regex for changing version '{old_version}'");
-                Regex::new(&fancy_regex::escape(old_version.as_ref())).expect(&msg)
+                let msg = format!("Invalid regex for changing version '{old_text}'");
+                Regex::new(&fancy_regex::escape(old_text.as_ref())).expect(&msg)
             });
-            replace_all_in_directory(&repo_dir, re, new_version.as_str());
+            replace_all_in_directory(&repo_dir, re, new_text.as_str());
             // If we're working with the odp-bigtop repo, we also need to rename package files
             // in bigtop-packages/src/deb
-            if repo == "odp-bigtop" {
-                let build_number = new_version
+            if repo == "odp-bigtop" && is_version {
+                let build_number = new_text
                     .split('-')
                     .next_back()
                     .ok_or_else(|| GitError::Other("Invalid new version format".to_string()))?;
@@ -521,14 +523,12 @@ impl GithubClient {
 
                 let dir = format!("{}/bigtop-packages/src/deb", repo_dir.display());
 
-                let old_version_dash = &old_version.to_string().replace('.', "-");
-                let new_version_dash = &new_version.to_string().replace('.', "-");
-                println!("{old_version_dash}");
-                println!("{new_version_dash}");
+                let old_text_dash = &old_text.to_string().replace('.', "-");
+                let new_text_dash = &new_text.to_string().replace('.', "-");
 
                 let bigtop_re = Regex::new(&format!(
                     r"^(.*)-{}([.-].*)(.*)$",
-                    fancy_regex::escape(old_version_dash)
+                    fancy_regex::escape(old_text_dash)
                 ))
                 .expect("Failed to compile old version regex");
 
@@ -540,28 +540,25 @@ impl GithubClient {
                     if path.is_dir() {
                         continue;
                     }
-                    if let Some(file_name) = path.file_name().and_then(|n| n.to_str()) {
-                        println!("File name is {file_name}");
-                        if let Some(caps) = bigtop_re.captures(file_name)?
+                    if let Some(file_name) = path.file_name().and_then(|n| n.to_str()) &&
+                        let Some(caps) = bigtop_re.captures(file_name)?
                         {
-                            println!("Modifying file names...");
                             let prefix = &caps[1];
                             let suffix = &caps[2];
-                            println!("Prefix: {prefix}, Suffix: {suffix}");
-                            let new_file_name = format!("{prefix}-{new_version_dash}{suffix}");
-                            println!("New file name: {new_file_name}");
+                            let new_file_name = format!("{prefix}-{new_text_dash}{suffix}");
                             let new_path = path.with_file_name(new_file_name);
-                            println!("New path: {}", new_path.display());
                             fs::rename(path, &new_path)?;
-                        }
                     }
                 }
             }
             let commit_message = if let Some(msg) = message {
                 msg.to_string()
+            } else if is_version {
+                    format!("[Automated] Changed version from '{old_text}' to '{new_text}'")
             } else {
-                format!("[Automated] Changed version from {old_version} to {new_version}")
+                    format!("[Automated] Changed '{old_text}' to '{new_text}'")
             };
+
             // Commit and push the changes
             Command::new("git")
                 .arg("add")
@@ -585,7 +582,7 @@ impl GithubClient {
                 let stdout = String::from_utf8_lossy(&output.stdout);
                 let stderr = String::from_utf8_lossy(&output.stderr);
 
-                let message = format!("No changes to push in {owner}/{repo} for old version '{old_version}' on branch {branch}");
+                let message = format!("No changes to push in {owner}/{repo} for old version '{old_text}' on branch {branch}");
 
                 if stdout.contains("Everything up-to-date") || stderr.contains("Everything up-to-date") {
                     return Ok(message);
@@ -604,7 +601,7 @@ impl GithubClient {
             Ok(m) => {
                 if m.is_empty() {
                     let message = format!(
-                        "{owner_slack}/{repo_slack}: Successfully changed version from {old_version_slack} to {new_version_slack} for branch {branch_slack}"
+                        "{owner_slack}/{repo_slack}: Successfully changed {old_text_slack} to {new_text_slack} for branch {branch_slack}"
                     );
                     println!("✅ {message}");
                     self.append_slack_message(message).await;
@@ -616,10 +613,10 @@ impl GithubClient {
             }
             Err(e) => {
                 eprintln!(
-                    "❌ Failed to change version from {old_version_slack} to {new_version_slack} for {owner_slack}/{repo_slack}: {e}"
+                    "❌ Failed to change {old_text_slack} to {new_text_slack} for {owner_slack}/{repo_slack}: {e}"
                 );
                 self.append_slack_error(format!(
-                    "{owner_slack}/{repo_slack}: Failed to change version from {old_version_slack} to {new_version_slack}: {e}"
+                    "{owner_slack}/{repo_slack}: Failed to change {old_text_slack} to {new_text_slack}: {e}"
                 )).await;
                 Err(e)
             }
@@ -628,30 +625,33 @@ impl GithubClient {
     /// Change the release version for a specified branch across all configured repositories.
     /// This function clones each repository, updates the version, commits, and pushes the changes.
     /// Errors from each repository are collected and returned as a single error if any occur.
-    pub async fn change_all_release_version(
+    #[allow(clippy::too_many_arguments)]
+    pub async fn modify_all_branches(
         &self,
         branch: String,
-        old_version: String,
-        new_version: String,
+        old_text: String,
+        new_text: String,
         repositories: &[String],
         message: Option<String>,
         dry_run: bool,
+        is_version: bool,
     ) -> Result<(), GitError> {
         let mut futures = FuturesUnordered::new();
         for repo in repositories {
             let branch = branch.to_string();
-            let old_version = old_version.to_string();
-            let new_version = new_version.to_string();
+            let old_text = old_text.to_string();
+            let new_text = new_text.to_string();
             let message = message.clone();
             futures.push(async move {
                 let result = self
-                    .change_release_version(
+                    .modify_branch(
                         repo.to_string(),
                         branch,
-                        old_version,
-                        new_version,
+                        old_text,
+                        new_text,
                         message,
                         dry_run,
+                        is_version,
                     )
                     .await;
                 (repo, result)

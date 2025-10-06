@@ -301,34 +301,38 @@ async fn match_branch_cmds(
                 client.delete_branch(repository, &delete_cmd.branch).await?;
             }
         }
-        BranchCommand::ChangeVersion(change_version_cmd) => {
-            let repository = change_version_cmd.repository.clone();
-            let message = change_version_cmd.message.clone();
-            let (branch, old_version, new_version) = (
-                change_version_cmd.branch.clone(),
-                change_version_cmd.old_version.clone(),
-                change_version_cmd.new_version.clone(),
+        BranchCommand::Modify(modify_cmd) => {
+            let repository = modify_cmd.repository.clone();
+            let message = modify_cmd.message.clone();
+            // Awkwardly named, I know, but since it's a boolean we don't have too many options
+            let is_version = !modify_cmd.not_version;
+            let (branch, old_text, new_text) = (
+                modify_cmd.branch.clone(),
+                modify_cmd.old.clone(),
+                modify_cmd.new.clone(),
             );
-            if change_version_cmd.all {
+            if modify_cmd.all {
                 client
-                    .change_all_release_version(
+                    .modify_all_branches(
                         branch,
-                        old_version,
-                        new_version,
+                        old_text,
+                        new_text,
                         &repos[..],
                         message,
                         dry_run,
+                        is_version,
                     )
                     .await?;
             } else if let Some(repository) = &repository {
                 client
-                    .change_release_version(
+                    .modify_branch(
                         repository.to_string(),
                         branch,
-                        old_version,
-                        new_version,
+                        old_text,
+                        new_text,
                         message,
                         dry_run,
+                        is_version,
                     )
                     .await?;
             }
