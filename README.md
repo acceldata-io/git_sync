@@ -34,7 +34,7 @@
 ### Build from Source
 
 ```bash
-$ git clone https://github.com/JeffreySmith/git_sync.git
+$ git clone https://github.com/acceldata-io/git_sync.git
 $ cd git_sync
 $ cargo build --release
 ```
@@ -119,9 +119,9 @@ Legend:
 - '0': Clean (no security findings detected)
 ```
 
-The above example was taken from Trivy [release notes for v0.31.0](https://github.com/aquasecurity/trivy/discussions/2716)
+The above example was taken (and modified slightly) from Trivy [release notes for v0.31.0](https://github.com/aquasecurity/trivy/discussions/2716)
 
-You can also check the Github repo for CVEs by running `trivy repo --branch main https://github.com/JeffreySmith/git_sync`.
+You can also check the Github repo for CVEs by running `trivy repo --branch main https://github.com/acceldata-io/git_sync`.
 
 To use `cargo-audit`, simply run `cargo audit` in the root of the source code tree. If instead you want to check the binary if it's been compiled with `cargo-auditable`, you can run: 
 ```bash
@@ -214,7 +214,7 @@ $ git_sync tag sync -r https://github.com/my-org/my-forked-repo --slack
 $ git_sync tag sync --all --with-annotated -j4 # With a maximum of 4 parallel jobs
 ```
 
-**TODO** Add `--fork_with_workaround` and its functionality to syncing tags.
+Like when syncing a fork, you can use `--with-fork-workaround` to enable syncing tags for repositories that do not have a parent repository configured in Github. 
 
 **Note**: 
   Syncing tags can still fail to work the way you expect if an upstream tag exists that points to a commit that is not present in your fork. This situation could occur if your repository is missing some commits or if it's missing branches that the tags point to.
@@ -258,10 +258,16 @@ $ git_sync backup create --repository-type all -p /path/to/backup/folder --desti
 
 This is an example of when using `--repository-type all` along with `--all` target is useful behaviour.
 
-**TODO** Update documentation for using an IAM persistent user.
+You can also use a long lasting IAM secret key and access key. This can be done by adding two variables to your environment:
+```bash
+export AWS_ACCESS_KEY_ID="your access key id"
+export AWS_SECRET_ACCESS_KEY="your secret access key"
+```
+
+You may also need to have `export AWS_REGION=ca-central-1` (or your region) set in the environment as well.
 
 ### Managing branches
-You can create and delete branches for a single repository or for all configured repositories. This is useful when you have a set of common branches across all of your repositories. You can also change text to with a regex to change the version of software used. This is primarily useful after creating a branch based off some older tag/branch version where you want to match it to your new version.
+You can create and delete branches for a single repository or for all configured repositories. This is useful when you have a set of common branches across all of your repositories. You can also change text to change the version of software used. This is primarily useful after creating a branch based off some older tag/branch version where you want to match it to your new version, but can be used to make any simple change (no regexes) across any repositories.
 
 ```bash
 # Create a new branch from an existing branch
@@ -270,6 +276,8 @@ $ git_sync branch create --all --new-branch rel/ODP-3.3.6.2-101 --base-branch OD
 $ git_sync branch create --all --new-branch rel/ODP-3.3.6.2-101 --base-tag ODP-3.3.6.2-1-tag
 # Optionally, update the ODP version for the branch you just created
 $ git_sync branch change-version --all --branch rel/ODP-3.3.6.2-101 --old-version 3.3.6.2-1 --new-version 3.3.6.2-101
+# Or update actions/upload-artifact@v3 to actions/upload-artifact@v4 for a repository
+$ git_sync branch change-version -r https://github.com/acceldata-io/nifi --branch my_branch --old-version actions/upload-artifact@v3 --new-version actions/upload-artifact@v4
 # Delete a branch
 $ git_sync branch delete --all --branch my_branch_name
 ```
