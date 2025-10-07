@@ -23,6 +23,7 @@ use crate::utils::compress::compress_directory;
 use crate::utils::repo::http_to_ssh_repo;
 use futures::stream::{FuturesUnordered, StreamExt};
 use indicatif::{ProgressBar, ProgressStyle};
+use std::collections::HashSet;
 use std::fmt::Display;
 use std::path::PathBuf;
 use std::process::Command;
@@ -188,11 +189,18 @@ impl GithubClient {
     /// depending on the number of repositories and their sizes
     pub async fn backup_all_repos(
         &self,
-        repositories: &[impl std::fmt::Display + AsRef<str> + ToString],
+        repositories: &[impl ToString],
         path: &Path,
+        blacklist: HashSet<String>,
     ) -> Result<Vec<PathBuf>, GitError> {
         let mut futures = FuturesUnordered::new();
-        let number_of_repos = repositories.len();
+        let filtered_repositories: Vec<String> = repositories
+            .iter()
+            .filter(|r| !blacklist.contains(&r.to_string()))
+            .map(std::string::ToString::to_string)
+            .collect();
+
+        let number_of_repos = filtered_repositories.len();
 
         if self.is_tty && number_of_repos > 1 {
             let _ = self.output.set(OutputMode::Progress);
@@ -217,9 +225,9 @@ impl GithubClient {
             progress.println("Backing up all selected repositories...");
         }
 
-        for repo in repositories {
+        for repo in filtered_repositories {
             futures.push(async move {
-                let result = self.backup_repo(repo, path).await;
+                let result = self.backup_repo(&repo, path).await;
                 (result, repo)
             });
         }
