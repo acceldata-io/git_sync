@@ -28,71 +28,182 @@ use thiserror::Error;
 /// Error type to make it easier to handle returning from functions
 #[derive(Error, Debug)]
 pub enum GitError {
+    /// Generic holder for multiple errors
     #[error("Multiple errors: {0:?}")]
     MultipleErrors(Vec<(String, GitError)>),
+    /// Convert octocrab errors into our own error type
     #[error("Github API error: {0}")]
     GithubApiError(#[from] octocrab::Error),
+    /// PR Merge error
     #[error("PR #{0} not mergeable")]
-    PRNotMergeable(u64),
-    #[error("Upstream not found for fork")]
-    NoUpstreamRepo,
+    PRNotMergeable(
+        /// Pull Request number
+        u64,
+    ),
+    /// No upstream repository found for a fork
+    #[error("Upstream not found for {0}")]
+    NoUpstreamRepo(
+        /// Repository
+        String,
+    ),
 
     #[cfg(feature = "aws")]
     #[error("AWS error: {0}")]
+    /// Generic AWS error
     AWSError(String),
+    /// Failure to parse date
     #[error("Date parse error: {0}")]
     DateParseError(#[from] chrono::ParseError),
-
+    /// URL is not a vaild repository
     #[error("Invalid repository URL: {0}")]
     InvalidRepository(String),
-
+    /// Generic sync failure
+    #[error("Could not sync {ref_type} for {repository}")]
+    SyncFailure {
+        ref_type: String,
+        repository: String,
+    },
     /// This error is too big, so we wrap it in a Box, then implement the conversion below
     #[error("Regex error: {0}")]
     RegexError(#[from] Box<fancy_regex::Error>),
-
+    /// Repository list is empty
     #[error("No repos configured")]
     NoReposConfigured,
-
+    /// Repository is not a fork for an action that requires a fork
     #[error("Repository is not a fork")]
     NotAFork,
-
+    /// No repository name was provided
     #[error("Missing repository name")]
     MissingRepositoryName,
-
+    /// Some git reference cannot be found
+    #[error("No such reference: {0}")]
+    NoSuchReference(
+        /// Git Reference
+        String,
+    ),
+    /// Branch does not exist
     #[error("No such branch: {0}")]
-    NoSuchBranch(String),
-    #[allow(dead_code)]
+    NoSuchBranch(
+        /// Branch name
+        String,
+    ),
+    /// Tag does not exist
     #[error("No such tag: {0}")]
-    NoSuchTag(String),
-
+    NoSuchTag(
+        /// Tag ame
+        String,
+    ),
+    /// Pull Request cannot be found
+    #[error("No such pull request for {repository} with head '{head}' and base '{base}'")]
+    NoSuchPR {
+        /// Repository
+        repository: String,
+        /// head branch
+        head: String,
+        /// base branch
+        base: String,
+    },
+    /// Some toml parsing error
     #[error("TOML parsing error: {0}")]
     TomlError(#[from] toml::de::Error),
 
+    /// File could not be found
     #[error("File does not exist: {0}")]
-    FileDoesNotExist(String),
-
+    FileDoesNotExist(
+        /// File Path
+        String,
+    ),
+    /// Github token is missing
     #[error(
         "Missing GitHub token. Please provide a token via --token, GITHUB_TOKEN environment variable, or in your config file."
     )]
     MissingToken,
+    /// Generic type for join errors from tokio tasks
     #[error("Join error: {0}")]
     JoinError(#[from] tokio::task::JoinError),
+    /// Some IO error
     #[error("IO error: {0}")]
     IoError(#[from] std::io::Error),
+    /// Failure to parse JSON
     #[error("JSON error: {0}")]
     JsonError(#[from] serde_json::Error),
+    /// Timezone could not be found
     #[error("Timezone error: {0}")]
     GetTimezoneError(#[from] iana_time_zone::GetTimezoneError),
-
-    #[error("Semaphore acquire failure: {0}")]
+    /// A failure to acquire a semaphore permit. If this happens, something is very wrong
+    #[error("Failed to acquire semaphore: {0}")]
     SemaphoreError(#[from] tokio::sync::AcquireError),
-
-    #[error("Error: {0}")]
-    Other(String),
+    /// A failure to push changes to a repository
+    #[error("Failed to push changes to {0}")]
+    GitPushError(String),
+    /// Git clone failure
+    #[error("Failed to clone {repository}:{branch}")]
+    GitCloneError { repository: String, branch: String },
+    /// Likely a merge conflict
+    #[error("Could not fast forward merge branch {branch} for repository {repository}")]
+    GitFFMergeError { branch: String, repository: String },
+    /// Could not upload a file to aws
+    #[error("Failed to upload file: {0}")]
+    FileUploadError(
+        /// File Path
+        String,
+    ),
+    /// Provided path is something other than a directory
+    #[error("'{0}' is not a directory")]
+    NotADirectory(
+        /// File Path
+        String,
+    ),
+    /// Did not detect a valid git mirror
+    #[error("'{0}' is not a git mirror")]
+    NotGitMirror(
+        /// File Path
+        String,
+    ),
+    /// Failed to run an external command
+    #[error("Execution error while running {command}: {status}")]
+    ExecutionError { command: String, status: String },
+    /// File has no contents
+    #[error("'{0}' is an empty file")]
+    EmptyFile(
+        /// File Path
+        String,
+    ),
+    /// File already exists
+    #[error("File {0} already exists")]
+    FileExists(
+        /// File Path
+        String,
+    ),
+    /// Invalid version for ODP-bigtop
+    #[error("Invalid odp-bigtop version: {0}")]
+    InvalidBigtopVersion(
+        /// Version String
+        String,
+    ),
+    /// Group not found in configuration file
+    #[error("Invalid group '{0}'")]
+    InvalidGroup(
+        /// Group Name
+        String,
+    ),
+    /// Group exists but has no repositories in it
+    #[error("Group '{0}' is empty")]
+    EmptyGroup(
+        /// Group Name
+        /// /// Group Name
+        String,
+    ),
+    /// Unclassified error
+    #[error("{0}")]
+    Other(
+        /// Some message
+        String,
+    ),
 }
 
 impl GitError {
-    /// Convert this error into a user-friendly version
+    /// Convert errors into a user-friendly format. Include a suggestion on how to proceed, if possible.
     #[allow(clippy::too_many_lines)]
     pub fn to_user_error(&self) -> UserError {
         match self {
@@ -119,25 +230,45 @@ impl GitError {
                 };
                 UserError { code, message: msg, suggestion }
             }
+            GitError::SyncFailure{ref_type, repository} => UserError {
+                code: None,
+                message: format!("Could not sync {ref_type} for repository {repository}"),
+                suggestion: Some("Check that the your references exist in {repository}.".into()),
+            },
             GitError::PRNotMergeable(pr_number) => UserError {
                 code: None,
                 message: format!("PR #{pr_number} cannot be merged automatically"),
                 suggestion: Some("Human intervention may be required.".into()),
             },
-            GitError::NoUpstreamRepo => UserError {
+            GitError::NoSuchPR{repository, head, base} => UserError {
                 code: None,
-                message: "Could not find an upstream repository for this fork.".into(),
-                suggestion: Some("Make sure the repository is a fork and has an upstream set.".into()),
+                message: format!("No such PR for {repository} with head '{head}' and base '{base}'"),
+                suggestion: Some("Check that the branch names are correct.".into()),
+            },
+            GitError::NoUpstreamRepo(repo) => UserError {
+                code: None,
+                message: format!("Could not find an upstream repository for {repo}"),
+                suggestion: Some(format!("Try adding {repo} to the fork_with_workaround group in your config file")),
             },
             GitError::DateParseError(e) => UserError {
                 code: None,
                 message: format!("Invalid date: {e}"),
                 suggestion: Some("Use a valid date format.".into()),
             },
+            GitError::GitFFMergeError{branch, repository} => UserError {
+                code: None,
+                message: format!("Could not fast forward merge branch {branch} for repository {repository}"),
+                suggestion: Some("Check that the branch exists and that there are no merge conflicts.".into()),
+            },
             GitError::InvalidRepository(url) => UserError {
                 code: None,
                 message: format!("Invalid repository URL: {url}"),
                 suggestion: Some("Check the repository URL.".into()),
+            },
+            GitError::InvalidBigtopVersion(version) => UserError {
+                code: None,
+                message: format!("Invalid odp-bigtop version: {version}"),
+                suggestion: Some("Try fixing your version string; if you do not want to modify the version of files and build numbers in odp-bigtop, add the --not-version flag".into()),
             },
             GitError::RegexError(e) => UserError {
                 code: None,
@@ -159,6 +290,26 @@ impl GitError {
                 message: "Repository name is missing.".into(),
                 suggestion: Some("Specify the repository name.".into()),
             },
+            GitError::InvalidGroup(group) => UserError {
+                code: None,
+                message: format!("Invalid group '{group}'"),
+                suggestion: Some("Check your config file for typos.".into()),
+            },
+            GitError::EmptyGroup(group) => UserError {
+                code: None,
+                message: format!("Group '{group}' is empty"),
+                suggestion: Some("Add repositories to '{group}' in your config file.".into()),
+            },
+            GitError::GitCloneError{repository, branch} => UserError {
+                code: None,
+                message: format!("Failed to clone {repository}:{branch}"),
+                suggestion: Some(format!("Check that the {repository} and the branch '{branch}' exist and that you have access.")),
+            },
+            GitError::GitPushError(repository) => UserError {
+                code: None,
+                message: format!("Failed to push changes to {repository}"),
+                suggestion: Some(format!("Check that you have write access to '{repository}' and that your local branch is up to date.")),
+            },
             GitError::NoSuchBranch(branch) => UserError {
                 code: None,
                 message: format!("No such branch: {branch}"),
@@ -169,10 +320,45 @@ impl GitError {
                 message: format!("No such tag: {tag}"),
                 suggestion: Some("Check the tag name or create it first.".into()),
             },
+            GitError::NoSuchReference(reference) => UserError {
+                code: None,
+                message: format!("No such reference: {reference}"),
+                suggestion: Some(format!("Make sure your reference {reference} exists")),
+            },
+            GitError::ExecutionError{command, status} => UserError {
+                code: None,
+                message: format!("Execution error while running '{command}': '{status}'"),
+                suggestion: Some(format!("Ensure that '{command}' is correct and that the base command is available in your PATH")),
+            },
             GitError::FileDoesNotExist(file) => UserError {
                 code: None,
                 message: format!("'{file}' does not exist"),
                 suggestion: Some("Check that you passed the right path.".into()),
+            },
+            GitError::EmptyFile(file) => UserError {
+                code: None,
+                message: format!("'{file}' is an empty file"),
+                suggestion: Some("Try restarting the backup process.".into()),
+            },
+            GitError::NotADirectory(dir) => UserError {
+                code: None,
+                message: format!("'{dir}' is not a directory"),
+                suggestion: Some("Check that you passed the right path.".into()),
+            },
+            GitError::NotGitMirror(dir) => UserError {
+                code: None,
+                message: format!("'{dir}' is not a git mirror"),
+                suggestion: Some("Check that you passed the right path.".into()),
+            },
+            GitError::FileExists(file) => UserError {
+                code: None,
+                message: format!("File '{file}' already exists"),
+                suggestion: Some("Use --force to overwrite the existing file.".into()),
+            },
+            GitError::FileUploadError(msg) => UserError {
+                code: None,
+                message: format!("Failed to upload file: {msg}"),
+                suggestion: Some("Check the file path and permissions.".into()),
             },
             GitError::TomlError(e) => UserError {
                 code: None,
@@ -303,7 +489,8 @@ impl std::fmt::Display for UserError {
     }
 }
 
-/// Check if whatever error is passed is reasonably retryable. Most errors aren't.
+/// Check if whatever error is passed is reasonably retryable. Most errors aren't, but there are a
+/// few we can try to repeat.
 pub fn is_retryable(e: &octocrab::Error) -> bool {
     match e {
         octocrab::Error::GitHub { source, .. } => {
@@ -371,6 +558,8 @@ pub fn octocrab_error_info(e: &octocrab::Error) -> (Option<http::StatusCode>, St
     }
 }
 
+/// Check if an error is a network error by walking the error chain. If it is, it might be a
+/// retryable error.
 fn is_network_error(e: &(dyn Error + 'static)) -> bool {
     let mut current = Some(e);
 

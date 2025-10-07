@@ -401,17 +401,16 @@ impl GithubClient {
                     no_update += is_updated;
                 } else {
                     eprintln!("Skipping branch {branch} due to non-fast-forward merge");
-                    errors.push(GitError::Other(format!(
-                        "Skipping branch {branch} due to non-fast-forward merge"
-                    )));
+                    errors.push(GitError::GitFFMergeError {
+                        branch: branch.to_string(),
+                        repository: ssh_url.to_string(),
+                    });
                 }
             }
 
             // If no branches were synced, and there are errors, then we return an error
             if successful == 0 && !errors.is_empty() {
-                return Err(GitError::Other(
-                    "No branches were successfully synced".to_string(),
-                ));
+                return Err(GitError::GitPushError(ssh_url.to_string()));
             }
 
             Command::new("git")
