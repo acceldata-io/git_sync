@@ -9,7 +9,7 @@
 - Sync changes between a fork and its parent repository.
 - Sync tags from upstream to your forked repository.
 - Create/delete branches.
-  - Including changing the versions of software within a repository
+- Change text in a branch
 - Create/delete tags.
 - Create releases with automatically generated release notes.
 - Create and automatically merge pull requests, where possible.
@@ -230,6 +230,7 @@ If you want to include your `fork_with_workaround` repositories in the backup, y
 #### Local backup
 Ensure you have enough space on your local filesystem to house all of your backups since these can be surprisingly large. For example, a `git clone --mirror` of [ClickHouse](https://github.com/ClickHouse/ClickHouse) is around 1.8GB on its own. You must have read write access to this folder; if you do not, any backup operation will fail.
 
+
 You can also optionally enable a repository blacklist, if there are repositories you do not wish to be included in a particular backup. This can be enabled by adding 
 ```toml
 [misc]
@@ -282,15 +283,21 @@ You can create and delete branches for a single repository or for all configured
 $ git_sync branch create --all --new-branch rel/ODP-3.3.6.2-101 --base-branch ODP-3.3.6.2-1
 # Or, create a branch from an existing tag
 $ git_sync branch create --all --new-branch rel/ODP-3.3.6.2-101 --base-tag ODP-3.3.6.2-1-tag
-# Optionally, update the ODP version for the branch you just created
-$ git_sync branch change-version --all --branch rel/ODP-3.3.6.2-101 --old-version 3.3.6.2-1 --new-version 3.3.6.2-101
+# Optionally update the ODP version for the new branch you've created
+$ git_sync branch modify --all --branch rel/ODP-3.3.6.2-101 --old 3.3.6.2-1 --new 3.3.6.2-101
 # Or update actions/upload-artifact@v3 to actions/upload-artifact@v4 for a repository
-$ git_sync branch change-version -r https://github.com/acceldata-io/nifi --branch my_branch --old-version actions/upload-artifact@v3 --new-version actions/upload-artifact@v4
+$ git_sync branch modify -r https://github.com/acceldata-io/nifi --not-version --branch my_branch --old actions/upload-artifact@v3 --new actions/upload-artifact@v4
 # Delete a branch
 $ git_sync branch delete --all --branch my_branch_name
 ```
 
+
 At the moment, running `branch delete` will immediately delete the branch without any confirmation. A future feature planned is a configurable delete queue that will create a 'cooling off' period before actually deleting the branch in order to avoid deleting branches permanently by accident. Support for this will come along with any SQL features since that will allow for persistent storage.
+
+Notes for the `branch modify` command:
+  - odp-bigtop has a specific workaround involving version numbers, file names, and build numbers. If you do not want this behaviour (ie you are modifying something other than a version number), you can specify the `--not-version` flag to disable this behaviour.
+  - The `--not-version` flag also changes the automated commit message to be more generic for any `branch modify` subcommand
+  - `--message <custom message>` can be used to specify whatever commit message you would like. Without this, a message prefixed with [Automated] will be used.
 
 ### Managing tags
 Managing tags is very similar to managing branches. You can create and delete lightweight tags for a single repository or for all configured repositories. If you want to create an annotated tag, you must use git directly and create it yourself.

@@ -500,26 +500,33 @@ pub struct DeleteBranchCommand {
     long_about = "
 Examples:
     # Change the version from 3.3.6.2-1 to 3.3.6.2-101
-    git_sync branch change-version --all --branch ODP-3.3.6.2-1 --old-version 3.3.6.2-1 --new-version 3.3.6.2-101
+    git_sync branch change --all --branch ODP-3.3.6.2-1 --old 3.3.6.2-1 --new 3.3.6.2-101
 Notes:
     This action is a regex match and replace, so be careful what you pass as the old version.
     Strictly speaking, this can be used to replace any matching regex within a repository
+
+    If you run this against odp-bigtop in order to update its version, make sure that `is-version` is true.
+    This ensures that it will correctly update filenames and other odp-bigtop specific changes.
 "
 )]
-pub struct ChangeVersionCommand {
-    /// Change the version of a branch in a repository
+pub struct ChangeBranchTextCommand {
+    /// Change text of a branch in a repository
     #[arg(short, long)]
     pub repository: Option<String>,
-    /// Branch to change version in
+    /// Branch to change text in
     #[arg(short, long)]
     pub branch: String,
-    /// The old version you wish to change
+    /// The old text you wish to change
     #[arg(short, long)]
-    pub old_version: String,
-    /// The new version you want to change it to
+    pub old: String,
+    /// The new text you want to change it to
     #[arg(short, long)]
-    pub new_version: String,
-    /// Change the version for the specified branch across all configured repositories
+    pub new: String,
+    /// Specify that the text you're modifying is a version. This affects the default commit
+    /// message as well as running additional steps for odp-bigtop.
+    #[arg(long, default_value_t = false)]
+    pub not_version: bool,
+    /// Change the text for the specified branch across all configured repositories
     #[arg(short, long, default_value_t = false)]
     pub all: bool,
     /// An optional commit message to override the automatic commit message
@@ -713,12 +720,12 @@ pub enum RepoCommand {
 /// Define all the valid commands for acting on branches
 #[derive(Subcommand, Clone, Debug)]
 pub enum BranchCommand {
-    /// Delete a branch in repositories
-    Delete(DeleteBranchCommand),
     /// Create a branch for repositories
     Create(CreateBranchCommand),
-    /// Change version in a branch for repositories
-    ChangeVersion(ChangeVersionCommand),
+    /// Delete a branch in repositories
+    Delete(DeleteBranchCommand),
+    /// Modify text in a branch for repositories
+    Modify(ChangeBranchTextCommand),
 }
 
 /// The top-level command enum for the CLI
