@@ -232,12 +232,12 @@ impl GitError {
             GitError::SyncFailure{ref_type, repository} => UserError {
                 code: None,
                 message: format!("Could not sync {ref_type} for repository {repository}"),
-                suggestion: Some("Check that the your references exist in {repository}.".into()),
+                suggestion: Some(format!("Check that your references exist in {repository}.")),
             },
             GitError::PRNotMergeable(pr_number) => UserError {
                 code: None,
                 message: format!("PR #{pr_number} cannot be merged automatically"),
-                suggestion: Some("Human intervention may be required.".into()),
+                suggestion: Some("Human intervention is required.".into()),
             },
             GitError::NoSuchPR{repository, head, base} => UserError {
                 code: None,
@@ -297,7 +297,7 @@ impl GitError {
             GitError::EmptyGroup(group) => UserError {
                 code: None,
                 message: format!("Group '{group}' is empty"),
-                suggestion: Some("Add repositories to '{group}' in your config file.".into()),
+                suggestion: Some(format!("Add repositories to '{group}' in your config file.")),
             },
             GitError::GitCloneError{repository, branch} => UserError {
                 code: None,
