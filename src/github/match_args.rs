@@ -134,12 +134,8 @@ pub async fn match_arguments(app: &AppArgs, config: Config) -> Result<(), GitErr
             match_backup_cmds(&client, repos, config, cmd, fork_workaround_repositories).await
         }
         Command::Config { file, force } => {
-            let generate = generate_config(file.as_ref(), *force);
-            if generate.is_ok() {
-                Ok(())
-            } else {
-                Err(generate.err().unwrap())
-            }
+            generate_config(file.as_ref(), *force)?;
+            Ok(())
         }
         Command::Generate { kind, out } => {
             let mut cmd = cli();
