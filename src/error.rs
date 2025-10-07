@@ -90,7 +90,7 @@ pub enum GitError {
     /// Tag does not exist
     #[error("No such tag: {0}")]
     NoSuchTag(
-        /// Tag ame
+        /// Tag name
         String,
     ),
     /// Pull Request cannot be found
