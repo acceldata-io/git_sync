@@ -191,7 +191,6 @@ pub enum GitError {
     #[error("Group '{0}' is empty")]
     EmptyGroup(
         /// Group Name
-        /// /// Group Name
         String,
     ),
     /// Unclassified error
