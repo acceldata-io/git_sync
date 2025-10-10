@@ -144,7 +144,7 @@ impl GithubClient {
         let url_owned = url.as_ref().to_string();
         while has_next_page {
             // Acquire a lock on the semaphore
-            let permit= self.semaphore.clone().acquire_owned().await?;
+            let permit = self.semaphore.clone().acquire_owned().await?;
 
             let payload = json!({
                 "query": query,
@@ -177,10 +177,7 @@ impl GithubClient {
                     other => return Err(GitError::Other(format!("Unknown tag type '{other}'"))),
                 };
                 let sha = tag.target.oid;
-                let commit_sha = tag
-                    .target
-                    .target
-                    .map(|inner| inner.oid);
+                let commit_sha = tag.target.target.map(|inner| inner.oid);
 
                 if let Some(url) = parent_url.as_ref()
                     && !parent_urls.contains(&url_owned)
