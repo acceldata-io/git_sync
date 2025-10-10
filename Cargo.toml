@@ -74,5 +74,9 @@ slack = []
 #sqlite   = ["sql", "sqlx/sqlite"]
 
 [profile.release]
+<<<<<<< HEAD
 lto   = "thin"
+=======
+lto = "thin"
+>>>>>>> b3d5367 (ODP-5235: Enable atomic file operations for backups)
 strip = true
