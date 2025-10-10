@@ -505,7 +505,7 @@ Notes:
     This action is a regex match and replace, so be careful what you pass as the old version.
     Strictly speaking, this can be used to replace any matching regex within a repository
 
-    If you run this against odp-bigtop in order to update its version, make sure that `is-version` is true.
+    If you run this against odp-bigtop in order to update its version, make sure that `--not-version` is *not* specified.
     This ensures that it will correctly update filenames and other odp-bigtop specific changes.
 "
 )]

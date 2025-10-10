@@ -95,10 +95,7 @@ pub fn generate_config(path: Option<&PathBuf>, force: bool) -> Result<PathBuf, G
         }
         (Some(path), false, _) => {
             if path.exists() {
-                return Err(GitError::Other(format!(
-                    "Config file already exists at {}. Use --force to overwrite",
-                    path.display()
-                )));
+                return Err(GitError::FileExists(path.to_string_lossy().to_string()));
             }
             fs::write(path, SAMPLE_CONFIG)?;
             Ok(path.clone())
@@ -115,10 +112,9 @@ pub fn generate_config(path: Option<&PathBuf>, force: bool) -> Result<PathBuf, G
         (None, false, Some(config_path)) => {
             println!("{}", config_path.display());
             if config_path.exists() {
-                return Err(GitError::Other(format!(
-                    "Config file already exists at {}. Use --force to overwrite",
-                    config_path.display()
-                )));
+                return Err(GitError::FileExists(
+                    config_path.to_string_lossy().to_string(),
+                ));
             }
             fs::write(&config_path, SAMPLE_CONFIG)?;
             Ok(config_path)

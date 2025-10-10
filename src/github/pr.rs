@@ -128,12 +128,15 @@ impl GithubClient {
                 },
             );
             match pr_result {
-                Ok(p) => p.items.first().map(|pr| pr.number).ok_or_else(|| {
-                    GitError::Other(format!(
-                        "Cannot get existing PR number for {owner}/{repo} with head {} and base {}",
-                        opts.head, opts.base
-                    ))
-                })?,
+                Ok(p) => p
+                    .items
+                    .first()
+                    .map(|pr| pr.number)
+                    .ok_or_else(|| GitError::NoSuchPR {
+                        repository: format!("{owner}/{repo}"),
+                        head: opts.head.to_string(),
+                        base: opts.base.to_string(),
+                    })?,
                 Err(e) => {
                     self.append_slack_error(format!(
                         "Failed to get existing PR number for {owner}/{repo}: {e}"

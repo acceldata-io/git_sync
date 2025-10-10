@@ -231,7 +231,7 @@ impl GithubClient {
                     "{owner}/{repo}: Unable to get SHA for tag '{base_tag}'"
                 ))
                 .await;
-                return Err(GitError::Other("Unable to get tag".to_string()));
+                return Err(GitError::NoSuchTag(base_tag.to_string()));
             }
             Err(e) => {
                 eprintln!("ERROR: {e}");
@@ -491,11 +491,7 @@ impl GithubClient {
             if git_status.success() {
                 println!("Cloned {repo}'s branch {branch} into {}", tmp.display());
             } else {
-                return Err(GitError::Other(format!(
-                    "Failed to clone {repo}'s branch {branch} into {}",
-                    tmp.display()
-                )));
-            }
+                return Err(GitError::GitCloneError{repository:repo, branch})}
 
             let re = REPO_REGEX.get_or_init(|| {
                 let msg = format!("Invalid regex for changing version '{old_text}'");
@@ -508,7 +504,7 @@ impl GithubClient {
                 let build_number = new_text
                     .split('-')
                     .next_back()
-                    .ok_or_else(|| GitError::Other("Invalid new version format".to_string()))?;
+                    .ok_or_else(|| GitError::InvalidBigtopVersion(new_text.to_string()))?;
 
                 replace_all_in_directory(
                     &repo_dir,
@@ -587,8 +583,8 @@ impl GithubClient {
                 if stdout.contains("Everything up-to-date") || stderr.contains("Everything up-to-date") {
                     return Ok(message);
                 } else if !output.status.success() {
-                    return Err(GitError::Other(format!(
-                        "Failed to push changes to {repo} on branch {branch}: {}",
+                    return Err(GitError::GitPushError(format!(
+                        "{repo}/{branch} '{}'",
                         stderr.trim()
                     )));
                 }

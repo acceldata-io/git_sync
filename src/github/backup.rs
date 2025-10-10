@@ -65,9 +65,7 @@ impl GithubClient {
         let ssh_url = http_to_ssh_repo(url.as_ref())?;
 
         let Some(name) = ssh_url.split('/').next_back() else {
-            return Err(GitError::Other(format!(
-                "Failed to extract repository name from URL: {ssh_url}"
-            )));
+            return Err(GitError::InvalidRepository(url.as_ref().to_string()));
         };
 
         let mut path = canonical_path.to_string_lossy().to_string();
@@ -106,10 +104,10 @@ impl GithubClient {
                         let stderr = String::from_utf8_lossy(&s.stderr);
                         eprintln!("Error while backing up.");
                         eprintln!("STDERR:\n{stderr}");
-                        Err(GitError::Other(format!(
-                            "Failed to back up repository: {name}, git exited with status: {}",
-                            s.status
-                        )))
+                        Err(GitError::ExecutionError {
+                            command: format!("git remote update -C {path}"),
+                            status: s.status.to_string(),
+                        })
                     }
                     Err(e) => Err(GitError::Other(format!(
                         "Failed to back up repository: {ssh_url}, error: {e}"
@@ -147,10 +145,10 @@ impl GithubClient {
                         let stderr = String::from_utf8_lossy(&s.stderr);
                         eprintln!("Error while backing up.");
                         eprintln!("STDERR:\n{stderr}");
-                        Err(GitError::Other(format!(
-                            "Failed to back up repository: {name}, git exited with status: {}",
-                            s.status
-                        )))
+                        Err(GitError::ExecutionError {
+                            command: format!("git clone --mirror {ssh_url} {path}"),
+                            status: s.status.to_string(),
+                        })
                     }
                     Err(e) => Err(GitError::Other(format!(
                         "Failed to back up repository: {ssh_url}, error: {e}"
@@ -278,16 +276,12 @@ impl GithubClient {
         };
 
         if !path.exists() {
-            return Err(GitError::Other(format!(
-                "Path {} does not exist",
-                path.display()
-            )));
+            return Err(GitError::FileDoesNotExist(
+                path.to_string_lossy().to_string(),
+            ));
         }
         if ext != "git" {
-            return Err(GitError::Other(format!(
-                "Path {} is not a git repository",
-                path.display()
-            )));
+            return Err(GitError::NotGitMirror(path.to_string_lossy().to_string()));
         }
         let _lock = self.semaphore.clone().acquire_owned().await?;
         let path = path.to_path_buf();
@@ -318,11 +312,10 @@ impl GithubClient {
                     let stderr = String::from_utf8_lossy(&s.stderr);
                     eprintln!("Error while pruning backup.");
                     eprintln!("STDERR:\n{stderr}");
-                    Err(GitError::Other(format!(
-                        "Failed to prune backup at path: {}, git exited with status: {}",
-                        path.display(),
-                        s.status
-                    )))
+                    Err(GitError::ExecutionError {
+                        command: format!("git gc --prune=now -C {}", path.display()),
+                        status: s.status.to_string(),
+                    })
                 }
                 Err(e) => Err(GitError::Other(format!(
                     "Failed to prune backup at path: {}, error: {e}",
@@ -391,18 +384,16 @@ impl GithubClient {
         }
 
         if !file_path.is_dir() {
-            return Err(GitError::Other(format!(
-                "File {} is not a directory",
-                file_path.display()
-            )));
+            return Err(GitError::NotADirectory(
+                file_path.to_string_lossy().to_string(),
+            ));
         }
         if let Some(ext) = file_path.extension()
             && ext != "git"
         {
-            return Err(GitError::Other(format!(
-                "File {} is not a git mirror",
-                file_path.display()
-            )));
+            return Err(GitError::NotGitMirror(
+                file_path.to_string_lossy().to_string(),
+            ));
         }
         let compressed_dir = compress_directory(file_path)?;
         // We know that this directory exists, so we can unwrap it safely
@@ -421,7 +412,9 @@ impl GithubClient {
         // smaller than the minimum part size, just upload the whole thing
         let size = file_buffer.get_ref().metadata().await?.len();
         if size == 0 {
-            return Err(GitError::Other("Backup file is empty".to_string()));
+            return Err(GitError::EmptyFile(
+                compressed_dir.to_string_lossy().to_string(),
+            ));
         }
 
         if size < PART_SIZE as u64 {
@@ -539,9 +532,7 @@ impl GithubClient {
             match res {
                 Ok(r) => results.push(r?),
                 Err(e) => {
-                    return Err(GitError::Other(format!(
-                        "Failure when uploading multipart file: {e}"
-                    )));
+                    return Err(GitError::FileUploadError(e.to_string()));
                 }
             }
         }
