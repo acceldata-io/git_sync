@@ -20,8 +20,8 @@ under the License.
 use fancy_regex::Regex;
 use std::fs;
 use std::io;
+use std::path::Path;
 use walkdir::WalkDir;
-
 /// Replace all occurrences of the regex `re` with `replacement`
 pub fn replace_in_file<T: AsRef<str>>(
     path: &std::path::Path,
@@ -37,7 +37,8 @@ pub fn replace_in_file<T: AsRef<str>>(
         Ok(true)
     }
 }
-
+/// Recursively replace all occurrences of the regex `re` with `replacement` in all files in the
+/// directory `path`
 pub fn replace_all_in_directory<T: AsRef<str> + Copy>(
     path: &std::path::Path,
     re: &Regex,
@@ -59,4 +60,18 @@ pub fn replace_all_in_directory<T: AsRef<str> + Copy>(
             }
         }
     }
+}
+/// Copy all files and directories from `src` to `dst` recursively
+pub fn copy_recursive(src: impl AsRef<Path>, dst: impl AsRef<Path>) -> io::Result<()> {
+    fs::create_dir_all(&dst)?;
+    for entry in fs::read_dir(src)? {
+        let entry = entry?;
+        let file_type = entry.file_type()?;
+        if file_type.is_dir() {
+            copy_recursive(entry.path(), dst.as_ref().join(entry.file_name()))?;
+        } else {
+            fs::copy(entry.path(), dst.as_ref().join(entry.file_name()))?;
+        }
+    }
+    Ok(())
 }
