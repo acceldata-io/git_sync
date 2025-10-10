@@ -126,7 +126,8 @@ pub enum MakeLatest {
     Legacy,
 }
 
-/// Choose where to store backups
+/// Choose where to store backups. When the aws feature is not enabled, only `Local` is a valid
+/// option
 #[derive(Copy, Clone, PartialEq, Eq, Debug, ValueEnum)]
 pub enum BackupDestination {
     Local,
@@ -505,7 +506,7 @@ Notes:
     This action is a regex match and replace, so be careful what you pass as the old version.
     Strictly speaking, this can be used to replace any matching regex within a repository
 
-    If you run this against odp-bigtop in order to update its version, make sure that `is-version` is true.
+    If you run this against odp-bigtop in order to update its version, make sure that `--not-version` is *not* specified.
     This ensures that it will correctly update filenames and other odp-bigtop specific changes.
 "
 )]
@@ -609,6 +610,7 @@ pub struct CreateReleaseCommand {
         .args(&["all", "repository"])
     ),
 )]
+#[allow(clippy::struct_excessive_bools)]
 pub struct BackupRepoCommand {
     /// The repository to back up
     #[arg(short, long)]
@@ -622,6 +624,10 @@ pub struct BackupRepoCommand {
     /// The destination for the backup
     #[arg(short, long, default_value_t = BackupDestination::Local)]
     pub destination: BackupDestination,
+    /// Disable cloning atomically. If something goes wrong during the clone, your backup may be in
+    /// an undefined state.
+    #[arg(long = "no-atomic", default_value_t = true, action = clap::ArgAction::SetFalse)]
+    pub atomic: bool,
     /// Update an existing backup instead of making a new mirror clone. Does not do anything
     /// currently.
     #[arg(short, long, default_value_t = false)]

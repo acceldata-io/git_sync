@@ -74,5 +74,5 @@ slack = []
 #sqlite   = ["sql", "sqlx/sqlite"]
 
 [profile.release]
-lto = "thin"
-#strip = true
+lto   = "thin"
+strip = true

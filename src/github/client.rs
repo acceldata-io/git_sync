@@ -127,7 +127,10 @@ impl GithubClient {
 
         let parent = *repo_info.parent.ok_or(GitError::NotAFork)?;
 
-        let parent_owner = parent.owner.ok_or(GitError::NoUpstreamRepo)?.login;
+        let parent_owner = parent
+            .owner
+            .ok_or(GitError::NoUpstreamRepo(url.as_ref().to_string()))?
+            .login;
 
         let url = parent
             .html_url

@@ -75,13 +75,11 @@ pub async fn match_arguments(app: &AppArgs, config: Config) -> Result<(), GitErr
                 .cloned();
             if let Some(repository) = &repository {
                 if repository.is_empty() {
-                    return Err(GitError::Other(format!(
-                        "No repositories found for custom group '{name}'"
-                    )));
+                    return Err(GitError::EmptyGroup(name));
                 }
                 repository.clone()
             } else {
-                return Err(GitError::Other(format!("Custom group '{name}' not found")));
+                return Err(GitError::InvalidGroup(name));
             }
         }
     };
@@ -122,21 +120,22 @@ pub async fn match_arguments(app: &AppArgs, config: Config) -> Result<(), GitErr
         }
     }
 
-    match &app.command {
+    let result = match &app.command {
         Command::Tag { cmd } => {
-            match_tag_cmds(&client, repos, cmd, fork_workaround_repositories).await?;
+            match_tag_cmds(&client, repos, cmd, fork_workaround_repositories).await
         }
         Command::Repo { cmd } => {
-            match_repo_cmds(&client, repos, config, cmd, fork_workaround_repositories).await?;
+            match_repo_cmds(&client, repos, config, cmd, fork_workaround_repositories).await
         }
-        Command::Branch { cmd } => match_branch_cmds(&client, repos, cmd, quiet, dry_run).await?,
-        Command::Release { cmd } => match_release_cmds(&client, repos, config, cmd).await?,
-        Command::PR { cmd } => match_pr_cmds(&client, repos, config, cmd).await?,
+        Command::Branch { cmd } => match_branch_cmds(&client, repos, cmd, quiet, dry_run).await,
+        Command::Release { cmd } => match_release_cmds(&client, repos, config, cmd).await,
+        Command::PR { cmd } => match_pr_cmds(&client, repos, config, cmd).await,
         Command::Backup { cmd } => {
-            match_backup_cmds(&client, repos, config, cmd, fork_workaround_repositories).await?;
+            match_backup_cmds(&client, repos, config, cmd, fork_workaround_repositories).await
         }
         Command::Config { file, force } => {
             generate_config(file.as_ref(), *force)?;
+            Ok(())
         }
         Command::Generate { kind, out } => {
             let mut cmd = cli();
@@ -163,15 +162,16 @@ pub async fn match_arguments(app: &AppArgs, config: Config) -> Result<(), GitErr
                 }
                 _ => {}
             }
+            Ok(())
         }
-    }
+    };
     // despite collecting the messages and errors always, we only actually send them to slack if
     // it's enabled.
     #[cfg(feature = "slack")]
     if app.slack {
         client.slack_message().await;
     }
-    Ok(())
+    if let Err(e) = result { Err(e) } else { Ok(()) }
 }
 
 /// Process all Tag commands
@@ -372,9 +372,7 @@ async fn match_repo_cmds(
                 if let Some(parent) = fork_workaround.get(repository) {
                     client.sync_with_upstream(repository, parent).await?;
                 } else if forks_with_workaround.contains_key(repository) {
-                    return Err(GitError::Other(format!(
-                        "Repository '{repository}' has no configured parent. Use the '--with-fork-workaround' flag to enable syncing it."
-                    )));
+                    return Err(GitError::NoUpstreamRepo(repository.to_string()));
                 } else if recursive {
                     client.sync_fork_recursive(repository).await?;
                 } else {
@@ -584,6 +582,7 @@ async fn match_backup_cmds(
             let passed_path = create_cmd.path.as_ref();
             let current_dir;
             let dest = create_cmd.destination;
+            let atomic = create_cmd.atomic;
             // This is only a meaningful option when '--all' is passed
             let enable_blacklist = create_cmd.blacklist;
             let blacklist = if enable_blacklist {
@@ -605,7 +604,9 @@ async fn match_backup_cmds(
                 if !fork_workaround.is_empty() {
                     repos.extend(fork_workaround.keys().cloned());
                 }
-                let successful = client.backup_all_repos(&repos[..], path, blacklist).await?;
+                let successful = client
+                    .backup_all_repos(&repos[..], path, blacklist, atomic)
+                    .await?;
                 if dest == BackupDestination::S3 {
                     if let Some(bucket) = bucket {
                         client.backup_all_to_s3(successful, bucket).await?;
@@ -617,7 +618,9 @@ async fn match_backup_cmds(
                     return Ok(());
                 }
             } else if let Some(repository) = repository {
-                let repo_dist = client.backup_repo(repository.to_string(), path).await?;
+                let repo_dist = client
+                    .backup_repo(repository.to_string(), path, atomic)
+                    .await?;
                 if dest == BackupDestination::S3 {
                     if let Some(bucket) = bucket {
                         client.backup_to_s3(&repo_dist, bucket).await?;
