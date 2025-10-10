@@ -98,11 +98,11 @@ impl GithubClient {
     /// we can skip the fairly slow git clone and push process
     ///
     /// `IndexSet` is an implementation of an orderered Set.
-    pub async fn get_tags<T: AsRef<str> + ToString + Copy>(
+    pub async fn get_tags<T: AsRef<str>>(
         &self,
         url: T,
     ) -> Result<(IndexSet<TagInfo>, HashSet<String>), GitError> {
-        let info = get_repo_info_from_url(url)?;
+        let info = get_repo_info_from_url(&url)?;
         let (owner, repo) = (info.owner, info.repo_name);
 
         let mut all_tags: IndexSet<TagInfo> = IndexSet::new();
@@ -141,10 +141,10 @@ impl GithubClient {
             }
         }
         "#;
-
+        let url_owned = url.as_ref().to_string();
         while has_next_page {
             // Acquire a lock on the semaphore
-            let permit = self.semaphore.clone().acquire_owned().await?;
+            let permit= self.semaphore.clone().acquire_owned().await?;
 
             let payload = json!({
                 "query": query,
@@ -166,29 +166,33 @@ impl GithubClient {
             // Drop the lock on the semaphore so other network activities can potentially run
             drop(permit);
 
-            let mut repo = res.data.repository;
+            let repo = res.data.repository;
 
             let parent_url = repo.parent.as_ref().map(|p| p.url.clone());
 
-            for tag in &mut repo.refs.nodes {
+            for tag in repo.refs.nodes {
                 let tag_type = match tag.target.typename.as_str() {
                     "Tag" => TagType::Annotated,
                     "Commit" => TagType::Lightweight,
                     other => return Err(GitError::Other(format!("Unknown tag type '{other}'"))),
                 };
-                let commit_sha = tag.target.target.as_ref().map(|t| t.oid.to_string());
+                let sha = tag.target.oid;
+                let commit_sha = tag
+                    .target
+                    .target
+                    .map(|inner| inner.oid);
 
                 if let Some(url) = parent_url.as_ref()
-                    && !parent_urls.contains(url)
+                    && !parent_urls.contains(&url_owned)
                 {
                     parent_urls.insert(url.to_owned());
                 }
 
                 all_tags.insert(TagInfo {
-                    name: tag.name.clone(),
+                    name: tag.name,
                     tag_type,
-                    sha: tag.target.oid.clone(),
-                    url: url.to_string(),
+                    sha,
+                    url: url_owned.clone(),
                     commit_sha,
                 });
             }
@@ -213,18 +217,20 @@ impl GithubClient {
             );
         }
 
-        let missing_in_fork: IndexSet<TagInfo> =
-            parent_tags.difference(&fork_tags).cloned().collect();
+        let mut missing_annotated: IndexSet<TagInfo> = IndexSet::new();
+        let mut missing_in_fork: IndexSet<TagInfo> = IndexSet::new();
+
+        for tag in parent_tags.difference(&fork_tags) {
+            if tag.tag_type == TagType::Annotated {
+                missing_annotated.insert(tag.clone());
+            }
+            missing_in_fork.insert(tag.clone());
+        }
+
         let missing = missing_in_fork.len();
 
         if missing > 0 {
-            let mut slack_message = String::new();
-            let missing_annotated: IndexSet<TagInfo> = missing_in_fork
-                .iter()
-                .filter(|t| t.tag_type == TagType::Annotated)
-                .cloned()
-                .collect();
-
+            let mut slack_message = String::with_capacity(256);
             if missing == 1 {
                 let _ = writeln!(
                     slack_message,
