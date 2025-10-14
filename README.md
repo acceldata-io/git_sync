@@ -14,7 +14,8 @@
 - Create releases with automatically generated release notes.
 - Create and automatically merge pull requests, where possible.
 - Run various checks for a repository.
-- Backup a repository, including backing up to AWS.
+- Modify text in a branch
+- Backup a repository atomically, including backing up a tarball to AWS.
 - Send notifications to Slack, if Slack support is enabled (default feature).
 - Run all of the above for all configured repositories.
 
@@ -25,7 +26,7 @@
 ### Prerequisites
 
 - [Rust](https://www.rust-lang.org/tools/install). You will need at least Rust 1.86 installed. This has been tested with Rust 1.88 and 1.90.
-- Either [clang](https://clang.llvm.org/) or [gcc](https://gcc.gnu.org/) installed to compile the code since several dependencies require a C compiler to build. Using [musl](https://musl.libc.org/) and [gcc](https://gcc.gnu.org/) to build a static binary is covered in a [later section](#building-with-musl-for-a-completely-static-binary).
+- Modern versions of either [clang](https://clang.llvm.org/) or [gcc](https://gcc.gnu.org/) installed to compile the code since several dependencies require a C compiler to build. Using [musl](https://musl.libc.org/) and [gcc](https://gcc.gnu.org/) to build a static binary is covered in a [later section](#building-with-musl-for-a-completely-static-binary).
 
 ### Runtime dependency
 
@@ -166,6 +167,12 @@ You can set the number of parallel jobs to run at a time by specifying the --job
 
 If you have a forked repository on Github that does not have a configured parent repository, you can put it into the fork_with_workaround map, where "forked repo" = "actual upstream repo". Ex: `fork_with_workaround = {"https://github.com/my-org/livy" = "https://github.com/apache/incubator-livy"}`. This will require that you have write access to your forked repository, and git set up correctly on your machine. 
 
+#### ENV variables
+A few options can be set through environment variables instead of the configuration file. These are:
+1. GITHUB_TOKEN - Your Github api key
+2. SLACK_WEBHOOK - Your slack webhook url, for Slack notifications
+3. CONFIG_FILE - The path to your configuration file. This is only needed if you do not want to use the default path of `$XDG_CONFIG_HOME/git-manage.toml` or `~/.config/git-manage.toml` if `$XDG_CONFIG_HOME` is not set.
+
 ### Tests
 
 There are a few tests for some of the helper functions, and they can be executed by running `cargo test` in the source tree.
@@ -173,6 +180,13 @@ There are a few tests for some of the helper functions, and they can be executed
 ### Making changes
 
 Before trying to commit any changes, ensure that you run `cargo fmt` to make sure that there are no formatting inconsistencies. There is API reference [hosted on Github](https://jeffreysmith.github.io/git_sync/git_sync/) should you need to lookup information about any of the functions, types, macros, or enums.
+
+The above hosted API reference is likely to drift from reality over time as this project develops. You can build the API docs locally by runnning 
+```bash
+$ cargo doc --no-deps --open
+```
+
+This will open the API documentation in your default web browser.
 
 ## Usage examples
 
@@ -249,6 +263,11 @@ $ git_sync backup create --repository-type all -p /path/to/backup/folder --slack
 ```
 
 When using --repository-type all, any repositories listed in more than one place or group will only be backed up once.
+
+##### Atomic backups
+All backup operations are atomic, meaning that any backups will only be kept if they are successfully cloned. This ensures you don't end up with backups in unknown states. The repositories will be cloned into a {name}.git.tmp folder, and once fully cloned, will be moved to {name}.git. 
+
+Backups can also be updated atomically; the existing {name}.git folder will be copied into {name}.git.tmp. This folder will then be updated, and if everything succeeds, the original {name}.git folder will be deleted and the new folder will be renamed to {name}.git. This ensures that if something goes wrong during the update, your existing backup will remain intact.
 
 #### S3 backup
 Back ups can also be automatically uploaded to S3. This requires that you have the `aws` feature enabled at build time, and that you have configured your AWS credentials correctly. The bucket you are uploading to must already exist, and you must have write access to it. You may also need to set the name of your AWS profile in the terminal before starting the process.

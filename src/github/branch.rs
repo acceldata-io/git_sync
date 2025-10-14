@@ -20,7 +20,7 @@ under the License.
 use crate::async_retry;
 use crate::error::{GitError, is_retryable};
 use crate::github::client::GithubClient;
-use crate::utils::file_replace::replace_all_in_directory;
+use crate::utils::file_utils::replace_all_in_directory;
 use crate::utils::repo::{get_repo_info_from_url, http_to_ssh_repo};
 use fancy_regex::Regex;
 use futures::{StreamExt, stream::FuturesUnordered};
