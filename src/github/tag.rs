@@ -144,7 +144,7 @@ impl GithubClient {
         let url_owned = url.as_ref().to_string();
         while has_next_page {
             // Acquire a lock on the semaphore
-            let permit= self.semaphore.clone().acquire_owned().await?;
+            let permit = self.semaphore.clone().acquire_owned().await?;
 
             let payload = json!({
                 "query": query,
@@ -177,10 +177,8 @@ impl GithubClient {
                     other => return Err(GitError::Other(format!("Unknown tag type '{other}'"))),
                 };
                 let sha = tag.target.oid;
-                let commit_sha = tag
-                    .target
-                    .target
-                    .map(|inner| inner.oid);
+
+                let commit_sha = tag.target.target.map(|inner| inner.oid);
 
                 if let Some(url) = parent_url.as_ref()
                     && !parent_urls.contains(&url_owned)
@@ -411,7 +409,10 @@ impl GithubClient {
                     "Failed to sync lightweight tags for {owner}/{repo}: {e}"
                 ))
                 .await;
-                return Err(GitError::Other("Failed to sync tag".to_string()));
+                return Err(GitError::SyncFailure {
+                    ref_type: String::from("lightweight tags"),
+                    repository: format!("{owner}/{repo}"),
+                });
             }
         }
         if !errors.is_empty() {
@@ -628,10 +629,9 @@ impl GithubClient {
                     ])
                     .status()?;
                 if !fetch_status.success() {
-                    return Err(GitError::Other(format!(
-                        "Failed to fetch annotated tag {} from ",
-                        tag.name,
-                    )));
+                    return Err(GitError::NoSuchTag(
+                        tag.name.to_string(),
+                    ));
                 }
                 if let Some(sha) = tag.commit_sha.as_ref() {
                     let output = Command::new("git")
@@ -645,6 +645,7 @@ impl GithubClient {
                         .output()?;
                     if !output.status.success() {
                         eprintln!("Commit {sha} does not exist in any configured remote.");
+                        return Err(GitError::NoSuchReference(sha.to_string()));
                     }
                     let branch_output = String::from_utf8_lossy(&output.stdout);
                     if !branch_output.contains("origin") {
@@ -670,9 +671,8 @@ impl GithubClient {
 
             let status = Command::new("git").args(&push_args).status()?;
             if !status.success() {
-                              return Err(GitError::Other(format!(
-                    "Failed to push annotated tags to {ssh_url}"
-                )));
+                              return Err(GitError::GitPushError(ssh_url.to_string()
+                ));
             }
             if slack_error.is_empty() {
                 Ok(None)
@@ -770,11 +770,19 @@ impl GithubClient {
             });
         }
 
+        let mut errors: Vec<(String, GitError)> = Vec::new();
+
         while let Some((repo, result)) = futures.next().await {
             match result {
                 Ok(()) => {}
-                Err(e) => eprintln!("Failed to create tag '{tag}' for '{repo}': {e}"),
+                Err(e) => {
+                    eprintln!("Failed to create tag '{tag}' for '{repo}': {e}");
+                    errors.push((repo.to_string(), e));
+                }
             }
+        }
+        if !errors.is_empty() {
+            return Err(GitError::MultipleErrors(errors));
         }
         Ok(())
     }
@@ -853,12 +861,18 @@ impl GithubClient {
                 (repo, result)
             });
         }
-
+        let mut errors: Vec<(String, GitError)> = Vec::new();
         while let Some((repo, result)) = futures.next().await {
             match result {
                 Ok(()) => {}
-                Err(e) => eprintln!("Failed to delete tag '{tag}' for {repo}: {e}"),
+                Err(e) => {
+                    eprintln!("Failed to delete tag '{tag}' for {repo}: {e}");
+                    errors.push((repo.to_string(), e));
+                }
             }
+        }
+        if !errors.is_empty() {
+            return Err(GitError::MultipleErrors(errors));
         }
         Ok(())
     }
