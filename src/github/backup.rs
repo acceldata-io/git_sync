@@ -166,10 +166,9 @@ impl GithubClient {
                             // If the clone failed, remove the directory to avoid leaving a broken repo
                             std::fs::remove_dir_all(tmp_directory)?;
                         }
-                        Err(GitError::ExecutionError {
-                            command: format!("git remote update -C {path}"),
-                            status: s.status.to_string(),
-                        })
+                        Err(GitError::Other(format!(
+                            "Failed to back up repository: {ssh_url}, error: {e}"
+                        )))
                     }
                 }
             })
