@@ -177,6 +177,7 @@ impl GithubClient {
                     other => return Err(GitError::Other(format!("Unknown tag type '{other}'"))),
                 };
                 let sha = tag.target.oid;
+
                 let commit_sha = tag.target.target.map(|inner| inner.oid);
 
                 if let Some(url) = parent_url.as_ref()

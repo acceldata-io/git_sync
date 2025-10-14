@@ -150,6 +150,7 @@ impl GithubClient {
                         let stderr = String::from_utf8_lossy(&s.stderr);
                         eprintln!("Error while backing up.");
                         eprintln!("STDERR:\n{stderr}");
+
                         let actual_commmand = if atomic {
                             tmp_path.clone()
                         } else {
@@ -165,9 +166,10 @@ impl GithubClient {
                             // If the clone failed, remove the directory to avoid leaving a broken repo
                             std::fs::remove_dir_all(tmp_directory)?;
                         }
-                        Err(GitError::Other(format!(
-                            "Failed to back up repository: {ssh_url}, error: {e}"
-                        )))
+                        Err(GitError::ExecutionError {
+                            command: format!("git remote update -C {path}"),
+                            status: s.status.to_string(),
+                        })
                     }
                 }
             })
