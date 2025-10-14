@@ -20,6 +20,7 @@ under the License.
 use crate::error::GitError;
 use crate::github::client::{GithubClient, OutputMode};
 use crate::utils::compress::compress_directory;
+use crate::utils::file_utils::copy_recursive;
 use crate::utils::repo::http_to_ssh_repo;
 use futures::stream::{FuturesUnordered, StreamExt};
 use indicatif::{ProgressBar, ProgressStyle};
@@ -29,10 +30,9 @@ use std::path::PathBuf;
 use std::process::Command;
 use std::sync::Arc;
 use std::{path::Path, process::Stdio};
-use tokio::sync::OnceCell;
-
 use tokio::fs::File;
 use tokio::io::{AsyncReadExt, BufReader};
+use tokio::sync::OnceCell;
 use tokio::task::JoinHandle;
 
 #[cfg(feature = "aws")]
@@ -50,10 +50,12 @@ const PART_SIZE: usize = 64 * 1024 * 1024;
 impl GithubClient {
     /// Backup a single repository into the specified folder. If the backup already exists, try to
     /// update it instead of cloning again.
+    #[allow(clippy::too_many_lines)]
     pub async fn backup_repo<T: AsRef<str>>(
         &self,
         url: T,
         path: &Path,
+        atomic: bool,
     ) -> Result<PathBuf, GitError> {
         let semaphore_lock = Arc::clone(&self.semaphore).acquire_owned().await?;
         let canonical_path = if let Ok(p) = path.canonicalize() {
@@ -73,45 +75,100 @@ impl GithubClient {
         path.push_str(name);
         let output_path = path.clone();
 
-        if let Some(t) = self.output.get()
-            && *t == OutputMode::Print
-        {
-            println!("Backing up repository {} to path: {path}", url.as_ref());
+        let tmp_path = format!("{path}.tmp");
+        if Path::new(&tmp_path).exists() && atomic {
+            // If the tmp path exists, remove it to avoid issues. This probably indicates a
+            // previous attempt that was cancelled part way through (kill, ctrl-c, etc)
+            std::fs::remove_dir_all(&tmp_path).map_err(|e| {
+                GitError::Other(format!(
+                    "Failed to remove temporary path {tmp_path}, error: {e}"
+                ))
+            })?;
+            if matches!(self.output.get(), Some(OutputMode::Print)) {
+                println!("Deleting pre-existing temporary path: {tmp_path}");
+            }
         }
-        // If the mirrored repo already exists, update it rather than clone again
+
+        let clone_output = if atomic {
+            tmp_path.clone()
+        } else {
+            path.clone()
+        };
+
+        if matches!(self.output.get(), Some(OutputMode::Print)) {
+            println!(
+                "Backing up repository {} to path: {clone_output}",
+                url.as_ref()
+            );
+        }
+
+        // If the mirrored repo already exists, update it rather than clone again. Also, if atomic
+        // is passed, we won't attempt to update the existing backup and instead replace it
         let result = if Path::new(&path).exists() {
             tokio::task::spawn_blocking(move || {
                 let _lock = semaphore_lock;
+
+                if atomic {
+                    copy_recursive(&path, &tmp_path)?;
+                }
+
                 // If the path exists, we assume it's a git repository and we fetch the latest changes
                 let output = Command::new("git")
                     .stdout(Stdio::piped())
                     .stderr(Stdio::piped())
                     .args(["remote", "update"])
-                    .current_dir(&path)
+                    .current_dir(&clone_output)
                     .output();
+
                 let name = ssh_url
                     .clone()
                     .split('/')
                     .next_back()
                     .unwrap_or("")
                     .to_string();
+
+                let tmp_directory = Path::new(&tmp_path);
                 match output {
                     // This branch happens only if the output of the command was successful
-                    Ok(s) if s.status.success() => Ok::<_, GitError>(format!(
-                        "Successfully backed up repository: {name} to path: {path}"
-                    )),
+                    Ok(s) if s.status.success() => {
+                        if atomic {
+                            if Path::new(&path).exists() {
+                                std::fs::remove_dir_all(&path)?;
+                            }
+                            std::fs::rename(&tmp_path, &path)?;
+                        }
+                        Ok::<_, GitError>(format!(
+                            "Successfully updated the backup of {name} to {path}"
+                        ))
+                    }
                     Ok(s) => {
+                        if atomic && tmp_directory.exists() {
+                            // If the clone failed, remove the directory to avoid leaving a broken repo
+                            std::fs::remove_dir_all(&clone_output)?;
+                        }
+
                         let stderr = String::from_utf8_lossy(&s.stderr);
                         eprintln!("Error while backing up.");
                         eprintln!("STDERR:\n{stderr}");
+                        let actual_commmand = if atomic {
+                            tmp_path.clone()
+                        } else {
+                            path.clone()
+                        };
                         Err(GitError::ExecutionError {
-                            command: format!("git remote update -C {path}"),
+                            command: format!("git remote update -C {actual_commmand}"),
                             status: s.status.to_string(),
                         })
                     }
-                    Err(e) => Err(GitError::Other(format!(
-                        "Failed to back up repository: {ssh_url}, error: {e}"
-                    ))),
+                    Err(e) => {
+                        if atomic && tmp_directory.exists() {
+                            // If the clone failed, remove the directory to avoid leaving a broken repo
+                            std::fs::remove_dir_all(tmp_directory)?;
+                        }
+                        Err(GitError::Other(format!(
+                            "Failed to back up repository: {ssh_url}, error: {e}"
+                        )))
+                    }
                 }
             })
             .await?
@@ -123,7 +180,7 @@ impl GithubClient {
                 let output = Command::new("git")
                     .stdout(Stdio::piped())
                     .stderr(Stdio::piped())
-                    .args(["clone", "--mirror", &ssh_url, &path])
+                    .args(["clone", "--mirror", &ssh_url, &clone_output])
                     .output();
                 let name = ssh_url
                     .clone()
@@ -134,13 +191,21 @@ impl GithubClient {
 
                 match output {
                     // This branch happens only if the output of the command was successful
-                    Ok(s) if s.status.success() => Ok::<_, GitError>(format!(
-                        "\tSuccessfully backed up repository: {name} to path: {path}"
-                    )),
+                    Ok(s) if s.status.success() => {
+                        if atomic {
+                            if Path::new(&path).exists() {
+                                std::fs::remove_dir_all(&path)?;
+                            }
+                            std::fs::rename(&tmp_path, &path)?;
+                        }
+                        Ok::<_, GitError>(format!(
+                            "\tSuccessfully backed up repository: {name} to path: {path}"
+                        ))
+                    }
                     Ok(s) => {
-                        if Path::new(&path).exists() {
+                        if atomic && Path::new(&tmp_path).exists() {
                             // If the clone failed, remove the directory to avoid leaving a broken repo
-                            std::fs::remove_dir_all(&path)?;
+                            std::fs::remove_dir_all(&clone_output)?;
                         }
                         let stderr = String::from_utf8_lossy(&s.stderr);
                         eprintln!("Error while backing up.");
@@ -150,9 +215,15 @@ impl GithubClient {
                             status: s.status.to_string(),
                         })
                     }
-                    Err(e) => Err(GitError::Other(format!(
-                        "Failed to back up repository: {ssh_url}, error: {e}"
-                    ))),
+                    Err(e) => {
+                        if atomic && Path::new(&tmp_path).exists() {
+                            // If the clone failed, remove the directory to avoid leaving a broken repo
+                            std::fs::remove_dir_all(&clone_output).ok();
+                        }
+                        Err(GitError::Other(format!(
+                            "Failed to back up repository: {ssh_url}, error: {e}"
+                        )))
+                    }
                 }
             })
             .await?
@@ -161,19 +232,13 @@ impl GithubClient {
         // Match outside the spawn_blocking to avoid ownership issues
         match result {
             Ok(m) => {
-                if let Some(t) = self.output.get()
-                    && *t == OutputMode::Print
-                    && self.is_tty
-                {
+                if matches!(self.output.get(), Some(OutputMode::Print)) {
                     println!("{m}");
                 }
                 self.append_slack_message(m).await;
             }
             Err(e) => {
-                if let Some(t) = self.output.get()
-                    && *t == OutputMode::Print
-                    && self.is_tty
-                {
+                if matches!(self.output.get(), Some(OutputMode::Print)) {
                     eprintln!("{e}");
                 }
                 self.append_slack_error(e.to_string()).await;
@@ -190,6 +255,7 @@ impl GithubClient {
         repositories: &[impl ToString],
         path: &Path,
         blacklist: HashSet<String>,
+        atomic: bool,
     ) -> Result<Vec<PathBuf>, GitError> {
         let mut futures = FuturesUnordered::new();
         let filtered_repositories: Vec<String> = repositories
@@ -200,6 +266,7 @@ impl GithubClient {
 
         let number_of_repos = filtered_repositories.len();
 
+        // This is what enables the progress bar
         if self.is_tty && number_of_repos > 1 {
             let _ = self.output.set(OutputMode::Progress);
         }
@@ -225,7 +292,7 @@ impl GithubClient {
 
         for repo in filtered_repositories {
             futures.push(async move {
-                let result = self.backup_repo(&repo, path).await;
+                let result = self.backup_repo(&repo, path, atomic).await;
                 (result, repo)
             });
         }

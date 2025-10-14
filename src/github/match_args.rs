@@ -582,6 +582,7 @@ async fn match_backup_cmds(
             let passed_path = create_cmd.path.as_ref();
             let current_dir;
             let dest = create_cmd.destination;
+            let atomic = create_cmd.atomic;
             // This is only a meaningful option when '--all' is passed
             let enable_blacklist = create_cmd.blacklist;
             let blacklist = if enable_blacklist {
@@ -603,7 +604,9 @@ async fn match_backup_cmds(
                 if !fork_workaround.is_empty() {
                     repos.extend(fork_workaround.keys().cloned());
                 }
-                let successful = client.backup_all_repos(&repos[..], path, blacklist).await?;
+                let successful = client
+                    .backup_all_repos(&repos[..], path, blacklist, atomic)
+                    .await?;
                 if dest == BackupDestination::S3 {
                     if let Some(bucket) = bucket {
                         client.backup_all_to_s3(successful, bucket).await?;
@@ -615,7 +618,9 @@ async fn match_backup_cmds(
                     return Ok(());
                 }
             } else if let Some(repository) = repository {
-                let repo_dist = client.backup_repo(repository.to_string(), path).await?;
+                let repo_dist = client
+                    .backup_repo(repository.to_string(), path, atomic)
+                    .await?;
                 if dest == BackupDestination::S3 {
                     if let Some(bucket) = bucket {
                         client.backup_to_s3(&repo_dist, bucket).await?;
