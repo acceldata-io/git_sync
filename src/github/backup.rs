@@ -107,9 +107,10 @@ impl GithubClient {
         let result = if Path::new(&path).exists() {
             tokio::task::spawn_blocking(move || {
                 let _lock = semaphore_lock;
+                let tmp_directory = Path::new(&tmp_path);
 
                 if atomic {
-                    copy_recursive(&path, &tmp_path)?;
+                    copy_recursive(&path, tmp_directory)?;
                 }
 
                 // If the path exists, we assume it's a git repository and we fetch the latest changes
@@ -127,7 +128,6 @@ impl GithubClient {
                     .unwrap_or("")
                     .to_string();
 
-                let tmp_directory = Path::new(&tmp_path);
                 match output {
                     // This branch happens only if the output of the command was successful
                     Ok(s) if s.status.success() => {
@@ -144,20 +144,20 @@ impl GithubClient {
                     Ok(s) => {
                         if atomic && tmp_directory.exists() {
                             // If the clone failed, remove the directory to avoid leaving a broken repo
-                            std::fs::remove_dir_all(&clone_output)?;
+                            std::fs::remove_dir_all(tmp_directory)?;
                         }
 
                         let stderr = String::from_utf8_lossy(&s.stderr);
                         eprintln!("Error while backing up.");
                         eprintln!("STDERR:\n{stderr}");
 
-                        let actual_commmand = if atomic {
+                        let actual_command = if atomic {
                             tmp_path.clone()
                         } else {
                             path.clone()
                         };
                         Err(GitError::ExecutionError {
-                            command: format!("git remote update -C {actual_commmand}"),
+                            command: format!("git remote update -C {actual_command}"),
                             status: s.status.to_string(),
                         })
                     }
@@ -190,6 +190,7 @@ impl GithubClient {
                     .unwrap_or("")
                     .to_string();
 
+                let tmp_directory = Path::new(&tmp_path);
                 match output {
                     // This branch happens only if the output of the command was successful
                     Ok(s) if s.status.success() => {
@@ -204,9 +205,9 @@ impl GithubClient {
                         ))
                     }
                     Ok(s) => {
-                        if atomic && Path::new(&tmp_path).exists() {
+                        if atomic && tmp_directory.exists() {
                             // If the clone failed, remove the directory to avoid leaving a broken repo
-                            std::fs::remove_dir_all(&clone_output)?;
+                            std::fs::remove_dir_all(tmp_directory)?;
                         }
                         let stderr = String::from_utf8_lossy(&s.stderr);
                         eprintln!("Error while backing up.");
@@ -217,9 +218,9 @@ impl GithubClient {
                         })
                     }
                     Err(e) => {
-                        if atomic && Path::new(&tmp_path).exists() {
+                        if atomic && tmp_directory.exists() {
                             // If the clone failed, remove the directory to avoid leaving a broken repo
-                            std::fs::remove_dir_all(&clone_output).ok();
+                            std::fs::remove_dir_all(tmp_directory).ok();
                         }
                         Err(GitError::Other(format!(
                             "Failed to back up repository: {ssh_url}, error: {e}"
