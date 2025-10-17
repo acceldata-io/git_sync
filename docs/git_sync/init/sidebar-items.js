@@ -1,1 +1,0 @@
-window.SIDEBAR_ITEMS = {"constant":["SAMPLE_CONFIG"],"fn":["generate_config"]};

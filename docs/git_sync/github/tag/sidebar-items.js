@@ -1,1 +1,0 @@
-window.SIDEBAR_ITEMS = {"struct":["PageInfo","ParentRepo","Refs","RepoData","RepoResponse","Repository","TagNode","TagTarget"]};

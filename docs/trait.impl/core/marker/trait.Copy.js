@@ -1,9 +1,0 @@
-(function() {
-    var implementors = Object.fromEntries([["git_sync",[["impl <a class=\"trait\" href=\"https://doc.rust-lang.org/1.90.0/core/marker/trait.Copy.html\" title=\"trait core::marker::Copy\">Copy</a> for <a class=\"enum\" href=\"git_sync/cli/enum.BackupDestination.html\" title=\"enum git_sync::cli::BackupDestination\">BackupDestination</a>"],["impl <a class=\"trait\" href=\"https://doc.rust-lang.org/1.90.0/core/marker/trait.Copy.html\" title=\"trait core::marker::Copy\">Copy</a> for <a class=\"enum\" href=\"git_sync/cli/enum.MakeLatest.html\" title=\"enum git_sync::cli::MakeLatest\">MakeLatest</a>"],["impl <a class=\"trait\" href=\"https://doc.rust-lang.org/1.90.0/core/marker/trait.Copy.html\" title=\"trait core::marker::Copy\">Copy</a> for <a class=\"enum\" href=\"git_sync/cli/enum.RepositoryType.html\" title=\"enum git_sync::cli::RepositoryType\">RepositoryType</a>"],["impl <a class=\"trait\" href=\"https://doc.rust-lang.org/1.90.0/core/marker/trait.Copy.html\" title=\"trait core::marker::Copy\">Copy</a> for <a class=\"enum\" href=\"git_sync/utils/pr/enum.MergeMethod.html\" title=\"enum git_sync::utils::pr::MergeMethod\">MergeMethod</a>"],["impl <a class=\"trait\" href=\"https://doc.rust-lang.org/1.90.0/core/marker/trait.Copy.html\" title=\"trait core::marker::Copy\">Copy</a> for <a class=\"enum\" href=\"git_sync/utils/repo/enum.TagType.html\" title=\"enum git_sync::utils::repo::TagType\">TagType</a>"]]]]);
-    if (window.register_implementors) {
-        window.register_implementors(implementors);
-    } else {
-        window.pending_implementors = implementors;
-    }
-})()
-//{"start":57,"fragment_lengths":[1382]}

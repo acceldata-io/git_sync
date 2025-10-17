@@ -1,1 +1,0 @@
-window.SIDEBAR_ITEMS = {"fn":["main"],"macro":["async_retry","handle_api_response","handle_futures_unordered"],"mod":["cli","config","error","github","init","slack","utils"]};

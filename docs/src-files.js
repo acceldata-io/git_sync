@@ -1,2 +1,0 @@
-createSrcSidebar('[["git_sync",["",[["github",[],["backup.rs","branch.rs","check.rs","client.rs","fork.rs","match_args.rs","mod.rs","pr.rs","release.rs","tag.rs"]],["slack",[],["mod.rs","post_message.rs"]],["utils",[],["compress.rs","macros.rs","mod.rs","pr.rs","repo.rs","tables.rs","user.rs"]]],["cli.rs","config.rs","error.rs","init.rs","main.rs"]]]]');
-//{"start":19,"fragment_lengths":[333]}

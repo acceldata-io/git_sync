@@ -1,1 +1,0 @@
-window.SIDEBAR_ITEMS = {"fn":["compress_directory","decode_tar_gz"]};

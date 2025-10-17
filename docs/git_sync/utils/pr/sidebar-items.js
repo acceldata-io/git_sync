@@ -1,1 +1,0 @@
-window.SIDEBAR_ITEMS = {"enum":["MergeMethod"],"struct":["CreatePrOptions","MergePrOptions"]};

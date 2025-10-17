@@ -1,1 +1,0 @@
-window.SIDEBAR_ITEMS = {"static":["GRAPHQL_QUERY"],"struct":["BranchCommits","BranchConnection","BranchNode","CommitTarget","PageInfo","RepoRefs","RepositoryData"]};

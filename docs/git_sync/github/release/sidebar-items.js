@@ -1,1 +1,0 @@
-window.SIDEBAR_ITEMS = {"static":["CVE_REGEX","ODP_REGEX"]};

@@ -1,1 +1,0 @@
-window.SIDEBAR_ITEMS = {"fn":["generate_manpages","match_arguments","match_backup_cmds","match_branch_cmds","match_pr_cmds","match_release_cmds","match_repo_cmds","match_tag_cmds","write_man"]};

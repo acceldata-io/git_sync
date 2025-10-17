@@ -1,1 +1,0 @@
-window.SIDEBAR_ITEMS = {"enum":["TagType"],"fn":["get_http_status","get_repo_info_from_url","http_to_ssh_repo","opt_bool"],"static":["REPO_REGEX"],"struct":["BranchProtectionRule","Checks","LicenseInfo","RepoChecks","RepoInfo","TagInfo"]};
