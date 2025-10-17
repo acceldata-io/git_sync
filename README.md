@@ -1,23 +1,23 @@
 # git_sync
 
-**git_sync** is a tool designed to simplify and automate management of Git repositories on Github. 
+**git_sync** is a tool designed to simplify and automate management of Git repositories on Github.
 
 ---
 
 ## Features
 
-- Sync changes between a fork and its parent repository.
-- Sync tags from upstream to your forked repository.
-- Create/delete branches.
+- Sync changes between a fork and its parent repository
+- Sync tags from upstream to your forked repository
+- Create/delete branches
 - Change text in a branch
-- Create/delete tags.
-- Create releases with automatically generated release notes.
-- Create and automatically merge pull requests, where possible.
-- Run various checks for a repository.
+- Create/delete tags
+- Create releases with automatically generated release notes
+- Create and automatically merge pull requests, where possible
+- Run various checks for a repository
 - Modify text in a branch
-- Backup a repository atomically, including backing up a tarball to AWS.
-- Send notifications to Slack, if Slack support is enabled (default feature).
-- Run all of the above for all configured repositories.
+- Backup a repository atomically, including backing up a tarball to AWS
+- Send notifications to Slack, if Slack support is enabled (default feature)
+- Run all of the above for all configured repositories
 
 ---
 
@@ -26,7 +26,7 @@
 ### Prerequisites
 
 - [Rust](https://www.rust-lang.org/tools/install). You will need at least Rust 1.86 installed. This has been tested with Rust 1.88 and 1.90.
-- Modern versions of either [clang](https://clang.llvm.org/) or [gcc](https://gcc.gnu.org/) installed to compile the code since several dependencies require a C compiler to build. Using [musl](https://musl.libc.org/) and [gcc](https://gcc.gnu.org/) to build a static binary is covered in a [later section](#building-with-musl-for-a-completely-static-binary).
+- Modern versions of either [clang](https://clang.llvm.org/) or [gcc](https://gcc.gnu.org/) installed to compile the code since several dependencies require a C compiler to build. Using [musl](https://musl.libc.org/) and [gcc](https://gcc.gnu.org/) to build a static binary is covered in the `Building with musl for a completely static binary` section later in this document.
 
 ### Runtime dependency
 
@@ -194,7 +194,8 @@ By default, git_sync uses the `fork` group from the git-manage.toml file for the
 
 When using a `custom` group, you must also specify the `--group <group_name>` flag to indicate which custom group you want to use.
 
-Be careful with `--repository-type all` as it will apply to every single repository within your configuration file, including custom groups. This is useful for querying information about all of your repositories, but can cause issues if you try to create a release for 
+Be careful with `--repository-type all` as it will apply to every single repository within your configuration file, including custom groups. This is useful for querying information about all of your repositories or backing up all projects, but can cause issues if you try to create a release for all configured project, for example. It will generally fail gracefully in the case where some operation can't be run against a particular branch, repository, tag, or release.
+
 
 ### Syncing a fork with its parent
 
