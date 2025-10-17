@@ -485,7 +485,7 @@ async fn match_pr_cmds(
 ) -> Result<(), GitError> {
     match cmd {
         PRCommand::Open(open_cmd) => {
-            let repository = open_cmd.repository.clone().unwrap_or_default();
+            let repository = open_cmd.repository.clone().unwrap_or_default().trim().to_owned();
             let merge = open_cmd.merge;
             let opts = CreatePrOptions {
                 url: repository.clone(),
@@ -514,7 +514,7 @@ async fn match_pr_cmds(
                 // Merging is handled within the create_all_prs method. It gets complicated
                 // managing the SHA for the latest commit across multiple repositories otherwise
                 let _pr_hashmap = client.create_all_prs(&opts, merge_opts, repos).await?;
-            } else if !repository.len() > 0 {
+            } else if !repository.is_empty() {
                 let Some((pr_number, sha)) = client.create_pr(&opts).await? else {
                     return Ok(());
                 };
