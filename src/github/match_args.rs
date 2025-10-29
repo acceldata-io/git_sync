@@ -485,7 +485,12 @@ async fn match_pr_cmds(
 ) -> Result<(), GitError> {
     match cmd {
         PRCommand::Open(open_cmd) => {
-            let repository = open_cmd.repository.clone().unwrap_or_default().trim().to_owned();
+            let repository = open_cmd
+                .repository
+                .clone()
+                .unwrap_or_default()
+                .trim()
+                .to_owned();
             let merge = open_cmd.merge;
             let opts = CreatePrOptions {
                 url: repository.clone(),
