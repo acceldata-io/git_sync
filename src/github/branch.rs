@@ -374,7 +374,7 @@ impl GithubClient {
                     && source.message.contains("Reference does not exist")
                 {
                     // Branch doesn't exist, so we can consider this a success
-                    eprintln!("Branch '{branch}' already exists, ignoring");
+                    eprintln!("Branch '{branch}' does not exist, ignoring");
                     return Ok(());
                 }
                 eprintln!("❌ Failed to delete branch '{branch}' for {repo}: {e}");
