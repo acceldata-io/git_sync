@@ -247,12 +247,14 @@ impl GithubClient {
         // Keep track of which PR number belongs to which repository
         let mut pr_map: HashMap<String, u64> = HashMap::new();
         let mut errors: Vec<(String, GitError)> = Vec::new();
-        while let Some(Some((repo, result))) = futures.next().await {
-            match result {
-                Ok(pr_number) => {
-                    pr_map.insert(repo.to_string(), pr_number);
+        while let Some(res) = futures.next().await {
+            if let Some((repo, result)) = res {
+                match result {
+                    Ok(pr_number) => {
+                        pr_map.insert(repo.to_string(), pr_number);
+                    }
+                    Err(e) => errors.push((repo.to_string(), e)),
                 }
-                Err(e) => errors.push((repo.to_string(), e)),
             }
         }
         if !errors.is_empty() {
