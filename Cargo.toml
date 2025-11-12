@@ -3,7 +3,7 @@ authors = ["Jeffrey Smith <jeffrey.smith7@gmail.com>"]
 edition = "2024"
 license = "Apache-2.0"
 name    = "git_sync"
-version = "0.4.0"
+version = "1.0.0"
 
 
 [dependencies]
@@ -24,7 +24,7 @@ iana-time-zone = "0.1"
 indexmap = { version = "2.11", features = ["serde"] }
 indicatif = { version = "0.18.0", features = ["tokio"] }
 microxdg = "0.2.0"
-octocrab = { version = "0.46", default-features = false, features = [
+octocrab = { version = "0.47", default-features = false, features = [
   "default-client",
   "follow-redirect",
   "retry",
