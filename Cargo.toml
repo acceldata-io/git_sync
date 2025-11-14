@@ -1,9 +1,11 @@
 [package]
-authors = ["Jeffrey Smith <jeffrey.smith7@gmail.com>"]
-edition = "2024"
-license = "Apache-2.0"
-name    = "git_sync"
-version = "1.0.0"
+authors     = ["Jeffrey Smith <jeffrey.smith@acceldata.io>"]
+description = "A tool for managing git repositories"
+edition     = "2024"
+homepage    = "https://github.com/acceldata-io/git_sync"
+license     = "Apache-2.0"
+name        = "git_sync"
+version     = "1.0.0"
 
 
 [dependencies]
@@ -76,3 +78,11 @@ slack = []
 [profile.release]
 lto   = "thin"
 strip = true
+
+[package.metadata.generate-rpm]
+assets = [
+  { source = "target/release/git_sync", dest = "/usr/bin/git_sync", mode = "755" },
+]
+
+[package.metadata.generate-rpm.requires]
+git = " > 2.40"
