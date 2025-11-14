@@ -23,6 +23,15 @@
 
 ## Installation
 
+### Using Homebrew (MacOS and Linux)
+
+You can skip all the below installation steps and simply install it using [homebrew](https://brew.sh/) on MacOS or Linux by running:
+
+```bash
+brew tap acceldata-io/odp-tap git@github.com:acceldata-io/odp-tap.git
+brew install git_sync
+```
+
 ### Prerequisites
 
 - [Rust](https://www.rust-lang.org/tools/install). You will need at least Rust 1.86 installed. This has been tested with Rust 1.88 and 1.90.
