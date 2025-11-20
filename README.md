@@ -36,6 +36,7 @@ brew install git_sync
 
 - [Rust](https://www.rust-lang.org/tools/install). You will need at least Rust 1.86 installed. This has been tested with Rust 1.88 and 1.90.
 - Modern versions of either [clang](https://clang.llvm.org/) or [gcc](https://gcc.gnu.org/) installed to compile the code since several dependencies require a C compiler to build. Using [musl](https://musl.libc.org/) and [gcc](https://gcc.gnu.org/) to build a static binary is covered in the `Building with musl for a completely static binary` section later in this document.
+- [Cmake](https://cmake.org/)
 
 ### Runtime dependency
 
@@ -86,6 +87,31 @@ $ ldd git_sync
 ```
 When building this statically using the above toolchain, you will find the binary at `target/x86_64-unknown-linux-musl/release/git_sync`. This binary can only be run on Linux.
 
+#### Building RPM and DEB packages
+
+##### RPM
+This tool can be built automatically into an RPM package by using the [cargo-generate-rpm](https://github.com/cat-in-136/cargo-generate-rpm) project. In order to do this, run the following commands:
+```bash
+cargo install cargo-generate-rpm
+cargo build --release
+strip -s target/release/git_sync
+cargo generate-rpm
+```
+
+You will then find the resulting RPM package in `target/generate-rpm/`
+
+##### DEB package
+You can also automatically build a .deb package using [cargo-deb](https://github.com/kornelski/cargo-deb).
+
+You need to install a few packages first: `sudo apt install dpkg-dev dpkg liblzma-dev`
+
+In order to build the package, run the following commands:
+```bash
+cargo install cargo-deb
+cargo deb
+```
+
+You will find the resulting deb package in `target/debian/`
 #### Security and CVE notes
 There are two things that can be done to ensure there are no known CVEs in the resulting binary:
 
