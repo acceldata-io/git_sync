@@ -568,7 +568,7 @@ async fn match_release_cmds(
                         &create_cmd.current_release,
                         &previous_release,
                         create_cmd.release_name.as_deref(),
-                        skip_missing_previous_tag
+                        skip_missing_previous_tag,
                     )
                     .await?;
             }
@@ -627,9 +627,7 @@ async fn match_backup_cmds(
                     return Ok(());
                 }
             } else if let Some(repository) = repository {
-                let repo_dist = client
-                    .backup_repo(repository.clone(), path, atomic)
-                    .await?;
+                let repo_dist = client.backup_repo(repository.clone(), path, atomic).await?;
                 if dest == BackupDestination::S3 {
                     if let Some(bucket) = bucket {
                         client.backup_to_s3(&repo_dist, bucket).await?;

@@ -88,8 +88,9 @@ impl GithubClient {
             },
         );
 
-
-        if let Ok(old_commits) = newest_commit && let Some(commit) = old_commits.items.first() {
+        if let Ok(old_commits) = newest_commit
+            && let Some(commit) = old_commits.items.first()
+        {
             commit.commit.committer.as_ref().map_or_else(
                 || eprintln!("No commit found"),
                 |c| {
@@ -240,7 +241,9 @@ impl GithubClient {
         let release_notes = if let Ok(notes) = release_notes {
             notes
         } else if ignore_previous_tag {
-            eprintln!("The previous tag '{previous_tag}' does not exist. Attempting to create a release for '{owner}/{repo}' without release notes.");
+            eprintln!(
+                "The previous tag '{previous_tag}' does not exist. Attempting to create a release for '{owner}/{repo}' without release notes."
+            );
             ReleaseNotes {
                 name: current_tag.to_string(),
                 body: String::new(),
@@ -311,7 +314,13 @@ impl GithubClient {
         for repo in &repositories {
             futures.push(async move {
                 let result = self
-                    .create_release(repo, current_tag, previous_tag, release_name, ignore_previous_tag)
+                    .create_release(
+                        repo,
+                        current_tag,
+                        previous_tag,
+                        release_name,
+                        ignore_previous_tag,
+                    )
                     .await;
                 (repo, result)
             });
