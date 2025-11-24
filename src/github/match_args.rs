@@ -549,13 +549,16 @@ async fn match_release_cmds(
     match cmd {
         ReleaseCommand::Create(create_cmd) => {
             let repository = create_cmd.repository.as_ref();
+            let skip_missing_previous_tag = create_cmd.skip_missing_tag;
+            let previous_release = create_cmd.previous_release.clone().unwrap_or_default();
             if create_cmd.all {
                 client
                     .create_all_releases(
                         &create_cmd.current_release,
-                        &create_cmd.previous_release,
+                        &previous_release,
                         create_cmd.release_name.as_deref(),
                         repos,
+                        skip_missing_previous_tag,
                     )
                     .await?;
             } else if let Some(repository) = repository {
@@ -563,8 +566,9 @@ async fn match_release_cmds(
                     .create_release(
                         repository,
                         &create_cmd.current_release,
-                        &create_cmd.previous_release,
+                        &previous_release,
                         create_cmd.release_name.as_deref(),
+                        skip_missing_previous_tag
                     )
                     .await?;
             }

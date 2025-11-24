@@ -70,6 +70,7 @@ impl GithubClient {
         let per_page = 100;
         let mut date: DateTime<Utc> = Utc::now();
 
+        // This refers to the commits in the previous tag
         let newest_commit = async_retry!(
             ms = 100,
             timeout = 5000,
@@ -85,9 +86,10 @@ impl GithubClient {
                     .send()
                     .await
             },
-        )?;
+        );
 
-        if let Some(commit) = newest_commit.items.first() {
+
+        if let Ok(old_commits) = newest_commit && let Some(commit) = old_commits.items.first() {
             commit.commit.committer.as_ref().map_or_else(
                 || eprintln!("No commit found"),
                 |c| {
@@ -98,9 +100,10 @@ impl GithubClient {
                     } else {
                         eprintln!("Can't get date of commit, assume things are broken");
                     }
-                    println!("Last commit date: {}", date.to_rfc3339());
                 },
             );
+        } else {
+            return Err(GitError::NoSuchTag(previous_tag.to_string()));
         }
 
         // This is an arbitrary pre-allocation that should speed up pushing to the vec. Most of the
@@ -152,7 +155,6 @@ impl GithubClient {
         let mut component_match = Vec::new();
         let mut other = Vec::new();
 
-        println!("Upper case: {}", repo.to_ascii_uppercase());
         let re = Regex::new(&format!("{}-[0-9]+", repo.to_ascii_uppercase()))?;
         let cve =
             CVE_REGEX.get_or_init(|| Regex::new(r"OSV|CVE").expect("Failed to compile CVE regex"));
@@ -223,13 +225,29 @@ impl GithubClient {
         current_tag: &str,
         previous_tag: &str,
         release_name: Option<&str>,
+        ignore_previous_tag: bool,
     ) -> Result<(), GitError> {
         let info = get_repo_info_from_url(url)?;
         let (owner, repo) = (info.owner, info.repo_name);
 
+        // This can fail if the previous tag doesn't exist. So instead of failing here,
+        // check to see if we shuold ignore a missing previous tag and still create the new
+        // release.
         let release_notes = self
             .generate_release_notes(url, current_tag, previous_tag)
-            .await?;
+            .await;
+
+        let release_notes = if let Ok(notes) = release_notes {
+            notes
+        } else if ignore_previous_tag {
+            eprintln!("The previous tag '{previous_tag}' does not exist. Attempting to create a release for '{owner}/{repo}' without release notes.");
+            ReleaseNotes {
+                name: current_tag.to_string(),
+                body: String::new(),
+            }
+        } else {
+            return Err(GitError::NoSuchTag(previous_tag.to_string()));
+        };
 
         let name = if let Some(release_name) = release_name {
             release_name.to_string()
@@ -274,7 +292,7 @@ impl GithubClient {
                 ))
                 .await;
                 eprintln!(
-                    "Verify that there isn't an existing release using {current_tag} for {owner}/{repo}"
+                    "Verify that there isn't an existing release using '{current_tag}' for {owner}/{repo}"
                 );
                 Err(GitError::GithubApiError(e))
             }
@@ -287,12 +305,13 @@ impl GithubClient {
         previous_tag: &str,
         release_name: Option<&str>,
         repositories: Vec<String>,
+        ignore_previous_tag: bool,
     ) -> Result<(), GitError> {
         let mut futures = FuturesUnordered::new();
         for repo in &repositories {
             futures.push(async move {
                 let result = self
-                    .create_release(repo, current_tag, previous_tag, release_name)
+                    .create_release(repo, current_tag, previous_tag, release_name, ignore_previous_tag)
                     .await;
                 (repo, result)
             });

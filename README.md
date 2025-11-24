@@ -376,6 +376,14 @@ $ git_sync release create --current-release v1.0.1 --previous-release v0.99.6 --
 ```
 
 You can also optionally specify the release name by setting the `--release-name <RELEASE NAME>` flag. If you don't specify it, it will use the name of the `--current-release` tag.
+
+There are times where you may want to create a release for components where some do not have a previous release tag. To create a release and generate release notes for components that have a previous release and create a new release without release notes for those that don't, you can use the `--skip-missing-tag` flag. This will create releases for all components, but only generate release notes for those that have a previous release tag.
+
+```
+$ git_sync release create --current-release v1.0.1 --previous-release v0.99.6 --all --skip-missing-tag
+```
+
+You will still get an error if the current tag does not exist, but whether your repository has the `previous-release` tag will no longer matter.
 ### Creating and merging pull requests
 You can create and merge pull requests using the `pr open` command. There are many optional flags that can be used to customize the pull request, and if you would like to see all of them, run `git_sync pr open --help`. 
 
