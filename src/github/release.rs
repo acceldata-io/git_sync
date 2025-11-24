@@ -319,7 +319,7 @@ impl GithubClient {
         let mut errors: Vec<(String, GitError)> = Vec::new();
         while let Some((repo, result)) = futures.next().await {
             if let Err(e) = result {
-                errors.push((repo.to_string(), e));
+                errors.push((repo.clone(), e));
             }
         }
         if !errors.is_empty() {

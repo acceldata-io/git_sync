@@ -525,7 +525,7 @@ pub fn octocrab_error_info(e: &octocrab::Error) -> (Option<http::StatusCode>, St
     match e {
         octocrab::Error::GitHub { source, .. } => {
             let status = source.status_code;
-            let mut message = source.message.to_string();
+            let mut message = source.message.clone();
             if let Some(errors) = &source.errors {
                 for err in errors {
                     if let Some(obj) = err.as_object()
@@ -536,7 +536,7 @@ pub fn octocrab_error_info(e: &octocrab::Error) -> (Option<http::StatusCode>, St
                     }
                 }
             }
-            (Some(status), message.to_string())
+            (Some(status), message.clone())
         }
         octocrab::Error::Http { source, .. } => (None, source.to_string()),
         octocrab::Error::UriParse { source, .. } => (None, source.to_string()),

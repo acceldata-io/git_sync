@@ -216,7 +216,7 @@ impl GithubClient {
             match (parent_date, fork_date) {
                 (Ok(parent), Ok(fork)) => {
                     if parent > fork {
-                        branches_to_sync.push(branch.to_string());
+                        branches_to_sync.push(branch.clone());
                     }
                 }
                 (Err(e), _) | (_, Err(e)) => {
@@ -402,15 +402,15 @@ impl GithubClient {
                 } else {
                     eprintln!("Skipping branch {branch} due to non-fast-forward merge");
                     errors.push(GitError::GitFFMergeError {
-                        branch: branch.to_string(),
-                        repository: ssh_url.to_string(),
+                        branch: branch.clone(),
+                        repository: ssh_url.clone(),
                     });
                 }
             }
 
             // If no branches were synced, and there are errors, then we return an error
             if successful == 0 && !errors.is_empty() {
-                return Err(GitError::GitPushError(ssh_url.to_string()));
+                return Err(GitError::GitPushError(ssh_url.clone()));
             }
 
             Command::new("git")

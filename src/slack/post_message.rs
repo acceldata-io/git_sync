@@ -29,7 +29,7 @@ pub async fn send_slack_message(
 ) -> Result<(), reqwest::Error> {
     let client = Client::new();
     let res = client
-        .post(webhook_url.to_string())
+        .post(webhook_url.clone())
         .json(&data)
         .send()
         .await?;
