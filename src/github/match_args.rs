@@ -326,7 +326,7 @@ async fn match_branch_cmds(
             } else if let Some(repository) = &repository {
                 client
                     .modify_branch(
-                        repository.clone(),
+                        repository.to_string(),
                         branch,
                         old_text,
                         new_text,
@@ -372,7 +372,7 @@ async fn match_repo_cmds(
                 if let Some(parent) = fork_workaround.get(repository) {
                     client.sync_with_upstream(repository, parent).await?;
                 } else if forks_with_workaround.contains_key(repository) {
-                    return Err(GitError::NoUpstreamRepo(repository.clone()));
+                    return Err(GitError::NoUpstreamRepo(repository.to_string()));
                 } else if recursive {
                     client.sync_fork_recursive(repository).await?;
                 } else {
@@ -420,7 +420,7 @@ async fn match_repo_cmds(
 
                     let branches: Vec<Vec<String>> = branches
                         .iter()
-                        .map(|(b, d)| vec![b.clone(), d.clone()])
+                        .map(|(b, d)| vec![b.to_string(), d.to_string()])
                         .collect();
                     client.display_check_results(
                         vec!["Branch".to_string(), "Date".to_string()],
@@ -452,7 +452,7 @@ async fn match_repo_cmds(
                 } = &result.clone();
                 let branches = branches
                     .iter()
-                    .map(|(b, d)| vec![b.clone(), d.clone()])
+                    .map(|(b, d)| vec![b.to_string(), d.to_string()])
                     .collect();
                 if !client.is_tty {
                     println!("Repository,Branch,Date,License,Rules");
@@ -549,16 +549,13 @@ async fn match_release_cmds(
     match cmd {
         ReleaseCommand::Create(create_cmd) => {
             let repository = create_cmd.repository.as_ref();
-            let skip_missing_previous_tag = create_cmd.skip_missing_tag;
-            let previous_release = create_cmd.previous_release.clone().unwrap_or_default();
             if create_cmd.all {
                 client
                     .create_all_releases(
                         &create_cmd.current_release,
-                        &previous_release,
+                        &create_cmd.previous_release,
                         create_cmd.release_name.as_deref(),
                         repos,
-                        skip_missing_previous_tag,
                     )
                     .await?;
             } else if let Some(repository) = repository {
@@ -566,9 +563,8 @@ async fn match_release_cmds(
                     .create_release(
                         repository,
                         &create_cmd.current_release,
-                        &previous_release,
+                        &create_cmd.previous_release,
                         create_cmd.release_name.as_deref(),
-                        skip_missing_previous_tag,
                     )
                     .await?;
             }
@@ -627,7 +623,9 @@ async fn match_backup_cmds(
                     return Ok(());
                 }
             } else if let Some(repository) = repository {
-                let repo_dist = client.backup_repo(repository.clone(), path, atomic).await?;
+                let repo_dist = client
+                    .backup_repo(repository.to_string(), path, atomic)
+                    .await?;
                 if dest == BackupDestination::S3 {
                     if let Some(bucket) = bucket {
                         client.backup_to_s3(&repo_dist, bucket).await?;

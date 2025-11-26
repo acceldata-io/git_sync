@@ -28,7 +28,11 @@ pub async fn send_slack_message(
     data: HashMap<String, String>,
 ) -> Result<(), reqwest::Error> {
     let client = Client::new();
-    let res = client.post(webhook_url.clone()).json(&data).send().await?;
+    let res = client
+        .post(webhook_url.to_string())
+        .json(&data)
+        .send()
+        .await?;
     if !res.status().is_success() {
         eprintln!(
             "Failed to post message to channel, with url {}: {}",

@@ -297,7 +297,7 @@ impl GithubClient {
             (owner, repo, result) {
                 match result {
                     Ok(r) => {
-                        diffs.insert(repo.clone(), r);
+                        diffs.insert(repo.to_string(), r);
                         if self.is_tty {
                             println!("✅ Successfully diffed tags for {owner}/{repo}");
                         } else {
@@ -564,7 +564,7 @@ impl GithubClient {
         let tags = tags.clone();
         let tag_len = tags.len();
         let ssh_url = ssh_url.to_string();
-        let output_url = ssh_url.clone();
+        let output_url = ssh_url.to_string();
         let result = tokio::task::spawn_blocking(move || {
             let _lock = lock;
             let parent_urls: Vec<String> = parent_urls.into_iter().collect();
@@ -630,7 +630,7 @@ impl GithubClient {
                     .status()?;
                 if !fetch_status.success() {
                     return Err(GitError::NoSuchTag(
-                        tag.name.clone(),
+                        tag.name.to_string(),
                     ));
                 }
                 if let Some(sha) = tag.commit_sha.as_ref() {
@@ -645,7 +645,7 @@ impl GithubClient {
                         .output()?;
                     if !output.status.success() {
                         eprintln!("Commit {sha} does not exist in any configured remote.");
-                        return Err(GitError::NoSuchReference(sha.clone()));
+                        return Err(GitError::NoSuchReference(sha.to_string()));
                     }
                     let branch_output = String::from_utf8_lossy(&output.stdout);
                     if !branch_output.contains("origin") {
@@ -671,7 +671,7 @@ impl GithubClient {
 
             let status = Command::new("git").args(&push_args).status()?;
             if !status.success() {
-                              return Err(GitError::GitPushError(ssh_url.clone()
+                              return Err(GitError::GitPushError(ssh_url.to_string()
                 ));
             }
             if slack_error.is_empty() {
@@ -731,7 +731,7 @@ impl GithubClient {
         match res {
             Ok(_) => {
                 let tag = tag.to_string();
-                let repo = repo.clone();
+                let repo = repo.to_string();
 
                 let message =
                     format!(":white_check_mark: Successfully created tag '{tag}' for {repo}");

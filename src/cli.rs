@@ -583,8 +583,8 @@ pub struct CreateReleaseCommand {
     #[arg(short, long)]
     pub current_release: String,
     /// The previous release tag. This is used to generate the changelog
-    #[arg(short, long, required_unless_present = "skip_missing_tag")]
-    pub previous_release: Option<String>,
+    #[arg(short, long)]
+    pub previous_release: String,
     /// The repository for which to create the release
     #[arg(short, long)]
     pub repository: Option<String>,
@@ -597,10 +597,6 @@ pub struct CreateReleaseCommand {
     /// Create this release for all configured repositories
     #[arg(short, long, default_value_t = false)]
     pub all: bool,
-    /// Continue creating the release even if the `previous` tag does not exist.
-    /// This will mean no release notes are generated.
-    #[arg(long, default_value_t = false)]
-    pub skip_missing_tag: bool,
 }
 
 // --- Backup Commands ---

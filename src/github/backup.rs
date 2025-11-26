@@ -327,7 +327,7 @@ impl GithubClient {
                     if let Some(ref progress) = progress {
                         progress.println(format!("Failed to back up repository: {repo}"));
                     }
-                    errors.push((repo.clone(), e));
+                    errors.push((repo.to_string(), e));
                 }
             }
         }
@@ -512,7 +512,7 @@ impl GithubClient {
                 bucket.as_ref()
             );
 
-            let string_name = name.clone();
+            let string_name = name.to_string();
             let base_name = string_name.split('/').next_back().unwrap_or("");
             let message = format!("\t• Uploaded backup {base_name} to {s3_url}");
 
@@ -572,10 +572,10 @@ impl GithubClient {
             }
             let is_tty = self.is_tty;
             let output_type: Arc<OnceCell<OutputMode>> = Arc::clone(&self.output);
-            let key = key_name.clone();
+            let key = key_name.to_string();
 
             futures.push(tokio::spawn(async move {
-                let bucket = bucket.clone();
+                let bucket = bucket.to_string();
                 let _lock = lock;
                 let response = client
                     .upload_part()
