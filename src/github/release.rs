@@ -232,7 +232,7 @@ impl GithubClient {
         let (owner, repo) = (info.owner, info.repo_name);
 
         // This can fail if the previous tag doesn't exist. So instead of failing here,
-        // check to see if we shuold ignore a missing previous tag and still create the new
+        // check to see if we should ignore a missing previous tag and still create the new
         // release.
         let release_notes = self
             .generate_release_notes(url, current_tag, previous_tag)
