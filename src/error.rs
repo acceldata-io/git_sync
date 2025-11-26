@@ -536,7 +536,7 @@ pub fn octocrab_error_info(e: &octocrab::Error) -> (Option<http::StatusCode>, St
                     }
                 }
             }
-            (Some(status), message.clone())
+            (Some(status), message)
         }
         octocrab::Error::Http { source, .. } => (None, source.to_string()),
         octocrab::Error::UriParse { source, .. } => (None, source.to_string()),
