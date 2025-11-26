@@ -379,8 +379,13 @@ You can also optionally specify the release name by setting the `--release-name 
 
 There are times where you may want to create a release for components where some do not have a previous release tag. To create a release and generate release notes for components that have a previous release and create a new release without release notes for those that don't, you can use the `--skip-missing-tag` flag. This will create releases for all components, but only generate release notes for those that have a previous release tag.
 
-```
+```bash
 $ git_sync release create --current-release v1.0.1 --previous-release v0.99.6 --all --skip-missing-tag
+```
+
+When using `--skip-missing-tag`, you do not need to provide the `--previous-release` flag.
+```bash
+$ git_sync release create --current-release v1.0.1 --all --skip-missing-tag
 ```
 
 You will still get an error if the current tag does not exist, but whether your repository has the `previous-release` tag will no longer matter.
@@ -393,7 +398,7 @@ You can specify the most recent commit in your feature branch with the `--sha` f
 
 Automatic merging requires specifying the `--merge` option. If you leave it out, there will be no attempt to merge the pull request automatically. Optionally, you can specify `--delete` when `--merge` is specified to automatically delete the branch after a successful merge. If the merge fails, the branch will not be deleted.
 
-```shell
+```bash
 $ git_sync pr open -r https://github.com/my-org/my-repo --base main --head my_feature_branch --merge
 $ git_sync pr open --all --base MY_MAIN_BRANCH --head my_feature_branch --merge
 ```

@@ -519,12 +519,12 @@ impl GithubClient {
 
                 let dir = format!("{}/bigtop-packages/src/deb", repo_dir.display());
 
-                let old_text_dash = &old_text.clone().replace('.', "-");
-                let new_text_dash = &new_text.clone().replace('.', "-");
+                let old_text_dash = old_text.replace('.', "-");
+                let new_text_dash = new_text.replace('.', "-");
 
                 let bigtop_re = Regex::new(&format!(
                     r"^(.*)-{}([.-].*)(.*)$",
-                    fancy_regex::escape(old_text_dash)
+                    fancy_regex::escape(&old_text_dash)
                 ))
                 .expect("Failed to compile old version regex");
 
