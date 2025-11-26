@@ -43,7 +43,7 @@ impl GithubClient {
         tag: &str,
         previous_tag: &str,
     ) -> Result<ReleaseNotes, GitError> {
-        // If previous_tag is empty, we can immediatley return from here
+        // If previous_tag is empty, we can immediately return from here
         if previous_tag.is_empty() {
             return Err(GitError::NoSuchTag(previous_tag.to_string()));
         }
