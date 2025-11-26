@@ -134,8 +134,8 @@ impl GithubClient {
                     .map(|pr| pr.number)
                     .ok_or_else(|| GitError::NoSuchPR {
                         repository: format!("{owner}/{repo}"),
-                        head: opts.head.to_string(),
-                        base: opts.base.to_string(),
+                        head: opts.head.clone(),
+                        base: opts.base.clone(),
                     })?,
                 Err(e) => {
                     self.append_slack_error(format!(
@@ -220,7 +220,7 @@ impl GithubClient {
             // Copy the fields of the opts struct, except for what we need to override (namely, the
             // url)
             let pr_opts = CreatePrOptions {
-                url: repo.to_string(),
+                url: repo.clone(),
                 ..opts.clone()
             };
             futures.push(async move {
@@ -251,9 +251,9 @@ impl GithubClient {
             if let Some((repo, result)) = res {
                 match result {
                     Ok(pr_number) => {
-                        pr_map.insert(repo.to_string(), pr_number);
+                        pr_map.insert(repo.clone(), pr_number);
                     }
-                    Err(e) => errors.push((repo.to_string(), e)),
+                    Err(e) => errors.push((repo.clone(), e)),
                 }
             }
         }

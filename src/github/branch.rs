@@ -504,7 +504,7 @@ impl GithubClient {
                 let build_number = new_text
                     .split('-')
                     .next_back()
-                    .ok_or_else(|| GitError::InvalidBigtopVersion(new_text.to_string()))?;
+                    .ok_or_else(|| GitError::InvalidBigtopVersion(new_text.clone()))?;
 
                 replace_all_in_directory(
                     &repo_dir,
@@ -519,12 +519,12 @@ impl GithubClient {
 
                 let dir = format!("{}/bigtop-packages/src/deb", repo_dir.display());
 
-                let old_text_dash = &old_text.to_string().replace('.', "-");
-                let new_text_dash = &new_text.to_string().replace('.', "-");
+                let old_text_dash = old_text.replace('.', "-");
+                let new_text_dash = new_text.replace('.', "-");
 
                 let bigtop_re = Regex::new(&format!(
                     r"^(.*)-{}([.-].*)(.*)$",
-                    fancy_regex::escape(old_text_dash)
+                    fancy_regex::escape(&old_text_dash)
                 ))
                 .expect("Failed to compile old version regex");
 
@@ -548,7 +548,7 @@ impl GithubClient {
                 }
             }
             let commit_message = if let Some(msg) = message {
-                msg.to_string()
+                msg.clone()
             } else if is_version {
                     format!("[Automated] Changed version from '{old_text}' to '{new_text}'")
             } else {
@@ -634,14 +634,14 @@ impl GithubClient {
     ) -> Result<(), GitError> {
         let mut futures = FuturesUnordered::new();
         for repo in repositories {
-            let branch = branch.to_string();
-            let old_text = old_text.to_string();
-            let new_text = new_text.to_string();
+            let branch = branch.clone();
+            let old_text = old_text.clone();
+            let new_text = new_text.clone();
             let message = message.clone();
             futures.push(async move {
                 let result = self
                     .modify_branch(
-                        repo.to_string(),
+                        repo.clone(),
                         branch,
                         old_text,
                         new_text,
@@ -658,7 +658,7 @@ impl GithubClient {
         let mut errors: Vec<(String, GitError)> = Vec::new();
         while let Some((repo, result)) = futures.next().await {
             if result.is_err() {
-                errors.push((repo.to_string(), result.err().unwrap()));
+                errors.push((repo.clone(), result.err().unwrap()));
             }
         }
         if !errors.is_empty() {

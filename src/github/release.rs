@@ -18,7 +18,7 @@ under the License.
 */
 
 use crate::async_retry;
-use crate::error::{GitError, is_retryable};
+use crate::error::{GitError, get_octocrab_error, is_retryable};
 use crate::github::client::GithubClient;
 use crate::utils::repo::get_repo_info_from_url;
 use chrono::{DateTime, Duration, Utc};
@@ -33,7 +33,7 @@ static CVE_REGEX: OnceLock<Regex> = OnceLock::new();
 static ODP_REGEX: OnceLock<Regex> = OnceLock::new();
 
 impl GithubClient {
-    /// Generate release notes for a particular releaese. It grabs all the commits present in `tag`
+    /// Generate release notes for a particular release. It grabs all the commits present in `tag`
     /// that are newer than the latest commit in `previous_tag`.
     /// This needs to be cleaned up, it is a bit of a mess right now.
     #[allow(clippy::too_many_lines)]
@@ -43,12 +43,17 @@ impl GithubClient {
         tag: &str,
         previous_tag: &str,
     ) -> Result<ReleaseNotes, GitError> {
+        // If previous_tag is empty, we can immediately return from here
+        if previous_tag.is_empty() {
+            return Err(GitError::NoSuchTag(previous_tag.to_string()));
+        }
+
         let info = get_repo_info_from_url(url)?;
         let (owner, repo) = (info.owner, info.repo_name);
 
         let octocrab = self.octocrab.clone();
 
-        let tag_info = async_retry!(
+        let previous_tag_info = async_retry!(
             ms = 100,
             timeout = 5000,
             retries = 3,
@@ -60,7 +65,16 @@ impl GithubClient {
                     .get_ref(&Reference::Tag(previous_tag.to_string()))
                     .await
             },
-        )?;
+        );
+        let tag_info = match previous_tag_info {
+            Ok(info) => info,
+            Err(e) => {
+                let msg = get_octocrab_error(&e);
+                eprintln!("Unable to fetch tag '{previous_tag}' from {owner}/{repo}");
+                eprintln!("\t{msg}");
+                return Err(GitError::NoSuchTag(previous_tag.to_string()));
+            }
+        };
         let tag_sha = match tag_info.object {
             octocrab::models::repos::Object::Commit { sha, .. }
             | octocrab::models::repos::Object::Tag { sha, .. } => sha,
@@ -70,6 +84,7 @@ impl GithubClient {
         let per_page = 100;
         let mut date: DateTime<Utc> = Utc::now();
 
+        // This refers to the commits in the previous tag
         let newest_commit = async_retry!(
             ms = 100,
             timeout = 5000,
@@ -85,9 +100,11 @@ impl GithubClient {
                     .send()
                     .await
             },
-        )?;
+        );
 
-        if let Some(commit) = newest_commit.items.first() {
+        if let Ok(old_commits) = newest_commit
+            && let Some(commit) = old_commits.items.first()
+        {
             commit.commit.committer.as_ref().map_or_else(
                 || eprintln!("No commit found"),
                 |c| {
@@ -98,9 +115,10 @@ impl GithubClient {
                     } else {
                         eprintln!("Can't get date of commit, assume things are broken");
                     }
-                    println!("Last commit date: {}", date.to_rfc3339());
                 },
             );
+        } else {
+            return Err(GitError::NoSuchTag(previous_tag.to_string()));
         }
 
         // This is an arbitrary pre-allocation that should speed up pushing to the vec. Most of the
@@ -152,7 +170,6 @@ impl GithubClient {
         let mut component_match = Vec::new();
         let mut other = Vec::new();
 
-        println!("Upper case: {}", repo.to_ascii_uppercase());
         let re = Regex::new(&format!("{}-[0-9]+", repo.to_ascii_uppercase()))?;
         let cve =
             CVE_REGEX.get_or_init(|| Regex::new(r"OSV|CVE").expect("Failed to compile CVE regex"));
@@ -223,13 +240,31 @@ impl GithubClient {
         current_tag: &str,
         previous_tag: &str,
         release_name: Option<&str>,
+        ignore_previous_tag: bool,
     ) -> Result<(), GitError> {
         let info = get_repo_info_from_url(url)?;
         let (owner, repo) = (info.owner, info.repo_name);
 
+        // This can fail if the previous tag doesn't exist. So instead of failing here,
+        // check to see if we should ignore a missing previous tag and still create the new
+        // release.
         let release_notes = self
             .generate_release_notes(url, current_tag, previous_tag)
-            .await?;
+            .await;
+
+        let release_notes = match release_notes {
+            Ok(notes) => notes,
+            Err(GitError::NoSuchTag(_)) if ignore_previous_tag => {
+                eprintln!(
+                    "Previous tag does not exist for '{owner}/{repo}'. Attempting to create a release for '{owner}/{repo}' without release notes."
+                );
+                ReleaseNotes {
+                    name: current_tag.to_string(),
+                    body: String::new(),
+                }
+            }
+            Err(e) => return Err(e),
+        };
 
         let name = if let Some(release_name) = release_name {
             release_name.to_string()
@@ -274,7 +309,7 @@ impl GithubClient {
                 ))
                 .await;
                 eprintln!(
-                    "Verify that there isn't an existing release using {current_tag} for {owner}/{repo}"
+                    "Verify that there isn't an existing release using '{current_tag}' for {owner}/{repo}"
                 );
                 Err(GitError::GithubApiError(e))
             }
@@ -287,12 +322,19 @@ impl GithubClient {
         previous_tag: &str,
         release_name: Option<&str>,
         repositories: Vec<String>,
+        ignore_previous_tag: bool,
     ) -> Result<(), GitError> {
         let mut futures = FuturesUnordered::new();
         for repo in &repositories {
             futures.push(async move {
                 let result = self
-                    .create_release(repo, current_tag, previous_tag, release_name)
+                    .create_release(
+                        repo,
+                        current_tag,
+                        previous_tag,
+                        release_name,
+                        ignore_previous_tag,
+                    )
                     .await;
                 (repo, result)
             });
@@ -300,7 +342,7 @@ impl GithubClient {
         let mut errors: Vec<(String, GitError)> = Vec::new();
         while let Some((repo, result)) = futures.next().await {
             if let Err(e) = result {
-                errors.push((repo.to_string(), e));
+                errors.push((repo.clone(), e));
             }
         }
         if !errors.is_empty() {
