@@ -521,7 +521,7 @@ pub fn is_retryable(e: &octocrab::Error) -> bool {
 }
 
 /// Helper function to extract errors from an `octocrab::Error`
-pub fn octocrab_error_info(e: &octocrab::Error) -> (Option<http::StatusCode>, String) {
+fn octocrab_error_info(e: &octocrab::Error) -> (Option<http::StatusCode>, String) {
     match e {
         octocrab::Error::GitHub { source, .. } => {
             let status = source.status_code;
@@ -554,6 +554,14 @@ pub fn octocrab_error_info(e: &octocrab::Error) -> (Option<http::StatusCode>, St
             (None, source.to_string())
         }
         _ => (None, "Unknown error".to_string()),
+    }
+}
+pub fn get_octocrab_error(e: &octocrab::Error) -> String {
+    let (code, msg) = octocrab_error_info(e);
+    if let Some(code) = code {
+        format!("HTTP error ({code:?}): {msg}")
+    } else {
+        format!("Error: {msg}")
     }
 }
 

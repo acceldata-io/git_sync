@@ -18,7 +18,7 @@ under the License.
 */
 
 use crate::async_retry;
-use crate::error::{GitError, is_retryable};
+use crate::error::{GitError, get_octocrab_error, is_retryable};
 use crate::github::client::GithubClient;
 use crate::utils::repo::get_repo_info_from_url;
 use chrono::{DateTime, Duration, Utc};
@@ -33,7 +33,7 @@ static CVE_REGEX: OnceLock<Regex> = OnceLock::new();
 static ODP_REGEX: OnceLock<Regex> = OnceLock::new();
 
 impl GithubClient {
-    /// Generate release notes for a particular releaese. It grabs all the commits present in `tag`
+    /// Generate release notes for a particular release. It grabs all the commits present in `tag`
     /// that are newer than the latest commit in `previous_tag`.
     /// This needs to be cleaned up, it is a bit of a mess right now.
     #[allow(clippy::too_many_lines)]
@@ -43,12 +43,17 @@ impl GithubClient {
         tag: &str,
         previous_tag: &str,
     ) -> Result<ReleaseNotes, GitError> {
+        // If previous_tag is empty, we can immediatley return from here
+        if previous_tag.is_empty() {
+            return Err(GitError::NoSuchTag(previous_tag.to_string()));
+        }
+
         let info = get_repo_info_from_url(url)?;
         let (owner, repo) = (info.owner, info.repo_name);
 
         let octocrab = self.octocrab.clone();
 
-        let tag_info = async_retry!(
+        let previous_tag_info = async_retry!(
             ms = 100,
             timeout = 5000,
             retries = 3,
@@ -60,7 +65,16 @@ impl GithubClient {
                     .get_ref(&Reference::Tag(previous_tag.to_string()))
                     .await
             },
-        )?;
+        );
+        let tag_info = match previous_tag_info {
+            Ok(info) => info,
+            Err(e) => {
+                let msg = get_octocrab_error(&e);
+                eprintln!("Unable to fetch tag '{previous_tag}' from {owner}/{repo}");
+                eprintln!("\t{msg}");
+                return Err(GitError::NoSuchTag(previous_tag.to_string()));
+            }
+        };
         let tag_sha = match tag_info.object {
             octocrab::models::repos::Object::Commit { sha, .. }
             | octocrab::models::repos::Object::Tag { sha, .. } => sha,
@@ -238,18 +252,18 @@ impl GithubClient {
             .generate_release_notes(url, current_tag, previous_tag)
             .await;
 
-        let release_notes = if let Ok(notes) = release_notes {
-            notes
-        } else if ignore_previous_tag {
-            eprintln!(
-                "The previous tag '{previous_tag}' does not exist. Attempting to create a release for '{owner}/{repo}' without release notes."
-            );
-            ReleaseNotes {
-                name: current_tag.to_string(),
-                body: String::new(),
+        let release_notes = match release_notes {
+            Ok(notes) => notes,
+            Err(GitError::NoSuchTag(_)) if ignore_previous_tag => {
+                eprintln!(
+                    "Previous tag does not exist for '{owner}/{repo}'. Attempting to create a release for '{owner}/{repo}' without release notes."
+                );
+                ReleaseNotes {
+                    name: current_tag.to_string(),
+                    body: String::new(),
+                }
             }
-        } else {
-            return Err(GitError::NoSuchTag(previous_tag.to_string()));
+            Err(e) => return Err(e),
         };
 
         let name = if let Some(release_name) = release_name {
