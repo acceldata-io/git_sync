@@ -388,7 +388,7 @@ When using `--skip-missing-tag`, you do not need to provide the `--previous-rele
 $ git_sync release create --current-release v1.0.1 --all --skip-missing-tag
 ```
 
-You will still get an error if the current tag does not exist, but whether your repository has the `previous-release` tag will no longer matter.
+You will still get an error if the current tag does not exist, but whether your repository has the previous release tag will no longer matter.
 ### Creating and merging pull requests
 You can create and merge pull requests using the `pr open` command. There are many optional flags that can be used to customize the pull request, and if you would like to see all of them, run `git_sync pr open --help`. 
 
