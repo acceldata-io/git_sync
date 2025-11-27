@@ -709,10 +709,10 @@ impl GithubClient {
         let mut errors: Vec<(String, GitError)> = Vec::new();
         while let Some((repo, result)) = futures.next().await {
             match result {
-                Ok(tags) if !tags.is_empty() => {
-                    filtered_map.insert(repo, tags);
+                Ok(branches) if !branches.is_empty() => {
+                    filtered_map.insert(repo, branches);
                 }
-                // Don't add to the vector if no matching tags are returned
+                // Don't add to the vector if no matching branches are returned
                 Ok(_) => {}
                 Err(e) => {
                     eprintln!("Failed to filter branches for {repo}: {e}");
