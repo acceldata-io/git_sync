@@ -381,9 +381,7 @@ async fn match_branch_cmds(
             let repository = show_cmd.repository.as_ref();
 
             if let Some(repository) = repository {
-                let mut output = client
-                    .filter_branches(repository, show_cmd.filter.clone())
-                    .await?;
+                let mut output = client.filter_branches(repository, &show_cmd.filter).await?;
                 output.sort();
                 if !output.is_empty() && client.is_tty {
                     println!("Repository '{repository}'");
