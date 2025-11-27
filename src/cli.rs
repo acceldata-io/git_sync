@@ -583,7 +583,7 @@ pub struct CreateBranchCommand {
     #[arg(short, long, default_value_t = false)]
     pub all: bool,
 }
-///Show branches. Optional regex filter
+/// Show branches. Optional regex filter
 #[derive(Args, Clone, Debug)]
 #[command(group(
     ArgGroup::new("target")
