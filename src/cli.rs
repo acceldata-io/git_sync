@@ -234,7 +234,7 @@ pub struct SyncTagCommand {
     #[arg(short, long, default_value_t = false)]
     pub with_annotated: bool,
 }
-/// Show all tags
+/// Show tags for a single repository or all repositories, with optional filtering by regex.
 #[derive(Args, Clone, Debug)]
 #[command(group(
     ArgGroup::new("target")
