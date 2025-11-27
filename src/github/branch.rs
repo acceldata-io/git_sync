@@ -687,7 +687,7 @@ impl GithubClient {
 
         Ok(filter_ref(&all_branches, &filter))
     }
-    ///Get a `HashMap` of of Repository names -> Vec<branch names> for all repositories
+    ///Get a `HashMap` of Repository names -> Vec<branch names> for all repositories
     /// Optionally filtered by a regex
     pub async fn filter_all_branches<T, U>(
         &self,
