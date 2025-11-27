@@ -715,7 +715,7 @@ impl GithubClient {
                 // Don't add to the vector if no matching tags are returned
                 Ok(_) => {}
                 Err(e) => {
-                    eprintln!("Failed to filter tags for {repo}: {e}");
+                    eprintln!("Failed to filter branches for {repo}: {e}");
                     errors.push((repo.clone(), e));
                 }
             }
