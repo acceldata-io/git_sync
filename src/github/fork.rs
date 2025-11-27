@@ -136,7 +136,7 @@ impl GithubClient {
         Ok(())
     }
     /// Fetch all branches for a single repository
-    async fn fetch_branches<T: AsRef<str> + Serialize, U: AsRef<str> + Serialize>(
+    pub async fn fetch_branches<T: AsRef<str> + Serialize, U: AsRef<str> + Serialize>(
         &self,
         owner: T,
         repository: U,
