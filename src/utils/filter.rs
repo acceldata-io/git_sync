@@ -78,7 +78,7 @@ mod tests {
         assert_eq!(result.len(), 2);
     }
     #[test]
-    fn test_string_hashset() {
+    fn test_filter_hashset() {
         let mut hs: HashSet<String> = HashSet::new();
         hs.insert("Alice".to_string());
         hs.insert("Amy".to_string());
