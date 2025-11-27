@@ -248,6 +248,7 @@ pub struct ShowTagCommand {
     /// The regex filter to apply to tag names
     #[arg(short = 'l', long, default_value = "")]
     pub filter: String,
+    /// Show tags for all configured repositories. Not valid if '--repository' is set
     #[arg(short, long, default_value_t = false)]
     pub all: bool,
 }
