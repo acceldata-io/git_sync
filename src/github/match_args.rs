@@ -402,21 +402,19 @@ async fn match_branch_cmds(
                     .collect();
                 if !sorted.is_empty() {
                     for (repository, branches) in sorted {
-                        if !branches.is_empty() {
-                            if client.is_tty {
-                                println!("Repository '{repository}'");
-                            }
-                            for branch in branches {
-                                // Give some extra context to non-interactive use
-                                // This could come up if piping the output or redirecting stdout to a
-                                // file.
-                                let prefix = if client.is_tty {
-                                    String::from("Branch")
-                                } else {
-                                    repository.clone()
-                                };
-                                println!("\t{prefix}: '{branch}'");
-                            }
+                        if client.is_tty {
+                            println!("Repository '{repository}'");
+                        }
+                        for branch in branches {
+                            // Give some extra context to non-interactive use
+                            // This could come up if piping the output or redirecting stdout to a
+                            // file.
+                            let prefix = if client.is_tty {
+                                String::from("Branch")
+                            } else {
+                                repository.clone()
+                            };
+                            println!("\t{prefix}: '{branch}'");
                         }
                     }
                 }
