@@ -27,7 +27,6 @@ use crate::init::generate_config;
 use crate::utils::pr::{CreatePrOptions, MergePrOptions};
 use crate::utils::repo::Checks;
 use crate::utils::repo::RepoChecks;
-
 use clap_complete::{
     generate_to,
     shells::{Bash, Fish, Zsh},
@@ -244,6 +243,40 @@ async fn match_tag_cmds(
                     return Err(GitError::MissingRepositoryName);
                 }
             }
+            TagCommand::Show(show_cmd) => {
+                let repository = show_cmd.repository.as_ref();
+
+                if let Some(repository) = repository {
+                    let mut output = client.filter_tags(repository, &show_cmd.filter).await?;
+                    output.sort();
+                    if !output.is_empty() && client.is_tty {
+                        println!("Repository '{repository}'");
+                    }
+                    for tag in output {
+                        println!("\tTag: '{tag}'");
+                    }
+                } else if show_cmd.all {
+                    let output = client.filter_all_tags(&repos[..], &show_cmd.filter).await?;
+                    let sorted: Vec<(String, Vec<String>)> = output
+                        .into_iter()
+                        .map(|(repo, mut tags)| {
+                            tags.sort();
+                            (repo, tags)
+                        })
+                        .collect();
+                    if !sorted.is_empty() && client.is_tty {
+                        for (repository, tags) in sorted {
+                            if !tags.is_empty() {
+                                println!("Repository '{repository}'");
+                                for tag in tags {
+                                    println!("\tTag: '{tag}'");
+                                }
+                                println!();
+                            }
+                        }
+                    }
+                }
+            }
         }
         Ok(())
     }
@@ -335,6 +368,53 @@ async fn match_branch_cmds(
                         is_version,
                     )
                     .await?;
+            }
+        }
+        BranchCommand::Show(show_cmd) => {
+            let repository = show_cmd.repository.as_ref();
+
+            if let Some(repository) = repository {
+                let mut output = client
+                    .filter_branches(repository, show_cmd.filter.clone())
+                    .await?;
+                output.sort();
+                if !output.is_empty() && client.is_tty {
+                    println!("Repository '{repository}'");
+                }
+                for branch in output {
+                    println!("\tBranch: '{branch}'");
+                }
+            } else if show_cmd.all {
+                let output = client
+                    .filter_all_branches(&repos[..], &show_cmd.filter)
+                    .await?;
+                let sorted: Vec<(String, Vec<String>)> = output
+                    .into_iter()
+                    .map(|(repo, mut branches)| {
+                        branches.sort();
+                        (repo, branches)
+                    })
+                    .collect();
+                if !sorted.is_empty() {
+                    for (repository, branches) in sorted {
+                        if !branches.is_empty() {
+                            if client.is_tty {
+                                println!("Repository '{repository}'");
+                            }
+                            for branch in branches {
+                                // Give some extra context to non-interactive use
+                                // This could come up if piping the output or redirecting stdout to a
+                                // file.
+                                let prefix = if client.is_tty {
+                                    String::from("Branch")
+                                } else {
+                                    repository.clone()
+                                };
+                                println!("\t{prefix}: '{branch}'");
+                            }
+                        }
+                    }
+                }
             }
         }
     }

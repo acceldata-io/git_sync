@@ -19,6 +19,7 @@ under the License.
 
 use crate::error::{GitError, is_retryable};
 use crate::github::client::Comparison;
+use crate::utils::filter::filter_ref;
 use crate::utils::repo::{RepoInfo, TagInfo, TagType, get_repo_info_from_url, http_to_ssh_repo};
 use crate::{async_retry, handle_api_response, handle_futures_unordered};
 use futures::stream::FuturesUnordered;
@@ -875,5 +876,51 @@ impl GithubClient {
             return Err(GitError::MultipleErrors(errors));
         }
         Ok(())
+    }
+    pub async fn filter_tags<T, U>(&self, url: T, filter: U) -> Result<Vec<String>, GitError>
+    where
+        T: AsRef<str> + Copy,
+        U: AsRef<str>,
+    {
+        let (all_tags, _) = self.get_tags(url).await?;
+        let tag_names_only: Vec<String> = all_tags.into_iter().map(|t| t.name.clone()).collect();
+        let filtered: Vec<String> = filter_ref(&tag_names_only, filter);
+        Ok(filtered)
+    }
+    pub async fn filter_all_tags<T, U>(
+        &self,
+        repositories: &[T],
+        filter: U,
+    ) -> Result<HashMap<String, Vec<String>>, GitError>
+    where
+        T: AsRef<str> + ToString + Display + Eq + Hash,
+        U: AsRef<str> + Copy,
+    {
+        let mut futures = FuturesUnordered::new();
+        for repo in repositories {
+            futures.push(async move {
+                let result = self.filter_tags(repo, filter).await;
+                (repo.to_string(), result)
+            });
+        }
+        let mut filtered_map: HashMap<String, Vec<String>> = HashMap::new();
+        let mut errors: Vec<(String, GitError)> = Vec::new();
+        while let Some((repo, result)) = futures.next().await {
+            match result {
+                Ok(tags) if !tags.is_empty() => {
+                    filtered_map.insert(repo, tags);
+                }
+                // Don't add to the vector if no matching tags are returned
+                Ok(_) => {}
+                Err(e) => {
+                    eprintln!("Failed to filter tags for {repo}: {e}");
+                    errors.push((repo.clone(), e));
+                }
+            }
+        }
+        if !errors.is_empty() {
+            return Err(GitError::MultipleErrors(errors));
+        }
+        Ok(filtered_map)
     }
 }

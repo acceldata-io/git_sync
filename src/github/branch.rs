@@ -21,6 +21,7 @@ use crate::async_retry;
 use crate::error::{GitError, is_retryable};
 use crate::github::client::GithubClient;
 use crate::utils::file_utils::replace_all_in_directory;
+use crate::utils::filter::filter_ref;
 use crate::utils::repo::{get_repo_info_from_url, http_to_ssh_repo};
 use fancy_regex::Regex;
 use futures::{StreamExt, stream::FuturesUnordered};
@@ -33,6 +34,8 @@ use std::process::Command;
 use temp_dir::TempDir;
 use walkdir::WalkDir;
 
+use std::collections::HashMap;
+use std::hash::Hash;
 use std::sync::OnceLock;
 
 /// Initialized once, then it becomes available
@@ -665,5 +668,61 @@ impl GithubClient {
             return Err(GitError::MultipleErrors(errors));
         }
         Ok(())
+    }
+
+    /// Get the name of all branches in a repository, optionally filtered by a regex
+    pub async fn filter_branches<T, U>(&self, url: T, filter: U) -> Result<Vec<String>, GitError>
+    where
+        U: AsRef<str>,
+        T: AsRef<str> + ToString + Display,
+    {
+        let info = get_repo_info_from_url(url.as_ref())?;
+        let (owner, repo) = (info.owner, info.repo_name);
+        let all_branches: Vec<String> = self
+            .fetch_branches(owner, repo)
+            .await?
+            .keys()
+            .cloned()
+            .collect();
+
+        Ok(filter_ref(&all_branches, &filter))
+    }
+    ///Get a `HashMap` of of Repository names -> Vec<branch names> for all repositories
+    /// Optionally filtered by a regex
+    pub async fn filter_all_branches<T, U>(
+        &self,
+        repositories: &[T],
+        filter: U,
+    ) -> Result<HashMap<String, Vec<String>>, GitError>
+    where
+        T: AsRef<str> + ToString + Display + Eq + Hash,
+        U: AsRef<str> + Copy,
+    {
+        let mut futures = FuturesUnordered::new();
+        for repo in repositories {
+            futures.push(async move {
+                let result = self.filter_branches(repo, filter).await;
+                (repo.to_string(), result)
+            });
+        }
+        let mut filtered_map: HashMap<String, Vec<String>> = HashMap::new();
+        let mut errors: Vec<(String, GitError)> = Vec::new();
+        while let Some((repo, result)) = futures.next().await {
+            match result {
+                Ok(tags) if !tags.is_empty() => {
+                    filtered_map.insert(repo, tags);
+                }
+                // Don't add to the vector if no matching tags are returned
+                Ok(_) => {}
+                Err(e) => {
+                    eprintln!("Failed to filter tags for {repo}: {e}");
+                    errors.push((repo.clone(), e));
+                }
+            }
+        }
+        if !errors.is_empty() {
+            return Err(GitError::MultipleErrors(errors));
+        }
+        Ok(filtered_map)
     }
 }

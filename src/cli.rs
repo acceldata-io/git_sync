@@ -234,6 +234,23 @@ pub struct SyncTagCommand {
     #[arg(short, long, default_value_t = false)]
     pub with_annotated: bool,
 }
+/// Show all tags
+#[derive(Args, Clone, Debug)]
+#[command(group(
+    ArgGroup::new("target")
+    .required(true)
+    .args(&["all", "repository"])
+))]
+pub struct ShowTagCommand {
+    /// The repository to show tags for. Not valid if '--all' is set
+    #[arg(short, long)]
+    pub repository: Option<String>,
+    /// The regex filter to apply to tag names
+    #[arg(short = 'l', long, default_value = "")]
+    pub filter: String,
+    #[arg(short, long, default_value_t = false)]
+    pub all: bool,
+}
 
 // --- Repo Commands ---
 
@@ -566,6 +583,24 @@ pub struct CreateBranchCommand {
     #[arg(short, long, default_value_t = false)]
     pub all: bool,
 }
+///Show branches. Optional regex filter
+#[derive(Args, Clone, Debug)]
+#[command(group(
+    ArgGroup::new("target")
+    .required(true)
+    .args(&["all", "repository"])
+))]
+pub struct ShowBranchCommand {
+    /// The repository to show Branches for. Not valid if '--all' is set
+    #[arg(short, long)]
+    pub repository: Option<String>,
+    /// The regex filter to apply to branch names
+    #[arg(short = 'l', long, default_value = "")]
+    pub filter: String,
+    /// Show branches for all configured repositories
+    #[arg(short, long, default_value_t = false)]
+    pub all: bool,
+}
 
 // --- Release Commands ---
 
@@ -716,6 +751,8 @@ pub enum TagCommand {
     Delete(DeleteTagCommand),
     /// Sync tags
     Sync(SyncTagCommand),
+    ///Show Tags for a repository
+    Show(ShowTagCommand),
 }
 
 /// Define all the valid commands for acting on repositories
@@ -736,6 +773,8 @@ pub enum BranchCommand {
     Delete(DeleteBranchCommand),
     /// Modify text in a branch for repositories
     Modify(ChangeBranchTextCommand),
+    /// Show branches for repositories
+    Show(ShowBranchCommand),
 }
 
 /// The top-level command enum for the CLI
