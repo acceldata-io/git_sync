@@ -264,14 +264,21 @@ async fn match_tag_cmds(
                             (repo, tags)
                         })
                         .collect();
-                    if !sorted.is_empty() && client.is_tty {
+                    if !sorted.is_empty() {
                         for (repository, tags) in sorted {
-                            if !tags.is_empty() {
+                            if client.is_tty {
                                 println!("Repository '{repository}'");
-                                for tag in tags {
-                                    println!("\tTag: '{tag}'");
-                                }
-                                println!();
+                            }
+                            for tag in tags {
+                                // Give some extra context to non-interactive use
+                                // This could come up if piping the output or redirecting stdout to a
+                                // file.
+                                let prefix = if client.is_tty {
+                                    String::from("Tag")
+                                } else {
+                                    repository.clone()
+                                };
+                                println!("\t{prefix}: '{tag}'");
                             }
                         }
                     }
