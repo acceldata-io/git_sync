@@ -29,7 +29,7 @@ use std::collections::{HashMap, HashSet};
 use std::fmt::{Display, Write};
 use std::process::Command;
 use std::sync::Arc;
-use temp_dir::TempDir;
+use tempdir::TempDir;
 
 /// Graphql query to fetch branches and their commit dates
 static GRAPHQL_QUERY: &str = r#"
@@ -316,7 +316,7 @@ impl GithubClient {
         let _lock = Arc::clone(&self.semaphore).acquire_owned().await?;
 
         let task: Result<(usize, usize), GitError> = tokio::task::spawn_blocking(move || {
-            let tmp_dir = TempDir::new()
+            let tmp_dir = TempDir::new("")
                 .map_err(|e| GitError::Other(format!("Failed to create temp dir: {e}")))?;
             let tmp = tmp_dir.path();
             let tmp_str_base = tmp

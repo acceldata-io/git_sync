@@ -361,6 +361,7 @@ async fn match_branch_cmds(
                         message,
                         dry_run,
                         is_version,
+                        quiet,
                     )
                     .await?;
             } else if let Some(repository) = &repository {
@@ -373,6 +374,7 @@ async fn match_branch_cmds(
                         message,
                         dry_run,
                         is_version,
+                        quiet,
                     )
                     .await?;
             }

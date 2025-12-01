@@ -58,7 +58,7 @@ pub struct AppArgs {
     #[command(subcommand)]
     pub command: Command,
 
-    /// Make output quiet. This is useful when not running in interactive mode. If Slack is
+    /// Hides some output. This is useful when not running in interactive mode. If Slack is
     /// enabled, this will silence some success messages to slack.
     #[arg(short, long, default_value_t = false, global = true)]
     pub quiet: bool,
@@ -94,7 +94,8 @@ pub struct AppArgs {
 
 /// Validate that the maximum number of parallel jobs is between 1 and 64.
 /// Strictly speaking, there isn't a reason that this couldn't be higher, but
-/// there isn't much point in allowing more jobs than cpu cores available
+/// there isn't much point in allowing more jobs than cpu cores available, nor
+/// is there much point in running more than 64 parallel jobs at the same time.
 fn validate_jobs(s: &str) -> Result<usize, String> {
     let parsed: usize = s
         .parse()

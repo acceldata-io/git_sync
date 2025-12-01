@@ -16,43 +16,71 @@ KIND, either express or implied.  See the License for the
 specific language governing permissions and limitations
 under the License.
 */
+use crate::error::GitError;
 use fancy_regex::Regex;
+use std::collections::HashMap;
+use std::sync::Arc;
 use std::sync::OnceLock;
+use std::sync::RwLock;
 
-static FILTER_REGEX: OnceLock<Regex> = OnceLock::new();
-static REGEX_STRING: OnceLock<String> = OnceLock::new();
+// Thread-safe cache for compiled regexes
+// Wrapping it in a OnceLock ensures that we only initialize the RwLock<HashMap...> once
+static REGEX_CACHE: OnceLock<RwLock<HashMap<String, Arc<Regex>>>> = OnceLock::new();
+
+fn cache() -> &'static RwLock<HashMap<String, Arc<Regex>>> {
+    REGEX_CACHE.get_or_init(|| RwLock::new(HashMap::new()))
+}
+
+/// Gets or compiles a regex pattern, saving it to a Hashmap cache for future use.
+/// If something is wrong with the `RwLock`, this function will panic since that
+/// means we have no way to recover.
+pub fn get_or_compile(pattern: &str) -> Result<Arc<Regex>, Box<fancy_regex::Error>> {
+    let read_lock = cache().read().expect("Regex cache mutex poisoned");
+    if let Some(regex) = read_lock.get(pattern) {
+        return Ok(Arc::clone(regex));
+    }
+    // Intenionally drop the read lock before acquiring the write lock
+    drop(read_lock);
+
+    let mut write_lock = cache().write().expect("Regex cache mutex poisoned");
+    let regex_result = Regex::new(pattern);
+    match regex_result {
+        Ok(re) => {
+            let regex = Arc::new(re);
+            write_lock.insert(pattern.to_string(), Arc::clone(&regex));
+            Ok(regex.clone())
+        }
+        Err(e) => Err(std::boxed::Box::new(e)),
+    }
+}
 
 /// Generic function to filter some collection of a particular regex filter
 /// The regex gets compiled only the first time this function is called,
 /// so it's relatively cheap to call multiple times with the same regex.
-pub fn filter_ref<'a, I, A, S, T>(collection: I, regex: S) -> T
+pub fn filter_ref<'a, I, A, S, T>(collection: I, regex: S) -> Result<T, GitError>
 where
     I: IntoIterator<Item = &'a A>,
     A: AsRef<str> + 'a + ?Sized,
-    S: AsRef<str>,
+    S: AsRef<str> + std::fmt::Display,
     T: FromIterator<String>,
 {
     // There isn't much reason to actually call this with an empty regex,
-    // but just in case simply return the original collection as strings.
+    // but just in case simply return the original collection as owned strings.
     if regex.as_ref().is_empty() {
-        return collection
+        return Ok(collection
             .into_iter()
             .map(|item| item.as_ref().to_string())
-            .collect();
+            .collect());
     }
 
-    REGEX_STRING.get_or_init(|| regex.as_ref().to_string());
-    assert!(
-        REGEX_STRING.get().unwrap().as_str() == regex.as_ref(),
-        "filter_ref must be called with the same regex each time"
-    );
+    let filter = match get_or_compile(regex.as_ref()) {
+        Ok(re) => re,
+        Err(e) => {
+            return Err(GitError::RegexError(e));
+        }
+    };
 
-    let filter = FILTER_REGEX.get_or_init(|| {
-        let msg = format!("Invalid regex: {:?}", regex.as_ref());
-        Regex::new(regex.as_ref()).expect(&msg)
-    });
-
-    collection
+    Ok(collection
         .into_iter()
         .filter_map(|item| {
             let item_str = item.as_ref();
@@ -61,7 +89,7 @@ where
                 Ok(false) | Err(_) => None,
             }
         })
-        .collect()
+        .collect())
 }
 
 #[cfg(test)]
@@ -71,7 +99,7 @@ mod tests {
     #[test]
     fn test_filter_vec() {
         let v = vec!["Alice", "Bob", "Carey", "Zelda"];
-        let result: Vec<String> = filter_ref(&v, "^A|^Z");
+        let result: Vec<String> = filter_ref(&v, "^A|^Z").expect("Failed to compile test regex");
 
         assert!(result.contains(&String::from("Alice")));
         assert!(result.contains(&String::from("Zelda")));
@@ -85,11 +113,12 @@ mod tests {
         hs.insert("Bob".to_string());
         hs.insert("Carey".to_string());
         hs.insert("Zelda".to_string());
-        let result: HashSet<String> = filter_ref(&hs, "^A|^Z");
+        let result: HashSet<String> =
+            filter_ref(&hs, "^C|^Z").expect("Failed to compile test regex");
 
-        assert!(result.contains("Alice"));
-        assert!(result.contains("Amy"));
+        assert!(result.contains("Carey"));
+        assert!(!result.contains("Amy"));
         assert!(result.contains("Zelda"));
-        assert_eq!(result.len(), 3);
+        assert_eq!(result.len(), 2);
     }
 }

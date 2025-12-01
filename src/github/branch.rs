@@ -16,32 +16,25 @@ KIND, either express or implied.  See the License for the
 specific language governing permissions and limitations
 under the License.
 */
-
 use crate::async_retry;
 use crate::error::{GitError, is_retryable};
 use crate::github::client::GithubClient;
-use crate::utils::file_utils::replace_all_in_directory;
-use crate::utils::filter::filter_ref;
+use crate::utils::file_utils::{replace_all_in_directory, replace_all_in_directory_with};
+use crate::utils::filter::{filter_ref, get_or_compile};
 use crate::utils::repo::{get_repo_info_from_url, http_to_ssh_repo};
-use fancy_regex::Regex;
+use fancy_regex::Captures;
 use futures::{StreamExt, stream::FuturesUnordered};
 use octocrab::models::repos::Object;
 use octocrab::params::repos::Reference;
 use std::fmt::Display;
 use std::fs;
-use std::path::PathBuf;
 use std::process::Command;
-use temp_dir::TempDir;
+use tempdir::TempDir;
 use walkdir::WalkDir;
 
 use std::collections::HashMap;
 use std::hash::Hash;
-use std::sync::OnceLock;
-
-/// Initialized once, then it becomes available
-/// from then on so we don't have to compile our regex every
-/// single time `change_release_version` is called
-static REPO_REGEX: OnceLock<Regex> = OnceLock::new();
+use std::path::PathBuf;
 
 /// This is used to deserialize the response from the GitHub API when fetching a tag. This is
 /// needed when we fetch an annotated tag.
@@ -54,10 +47,12 @@ struct GitTagObject {
 struct GitTagTarget {
     sha: String,
 }
-
-enum TmpDirHolder {
+/// An enum to get typed results from modifying a branch instead of using strings.
+#[derive(Debug)]
+enum ModificationResult {
     DryRun(PathBuf),
-    Temp(TempDir),
+    NoChanges,
+    Success,
 }
 
 impl GithubClient {
@@ -341,14 +336,11 @@ impl GithubClient {
         Ok(())
     }
     /// Delete a branch from a repository
-    pub async fn delete_branch<
+    pub async fn delete_branch<T, U>(&self, url: T, branch: U) -> Result<(), GitError>
+    where
         T: AsRef<str> + ToString + Display,
         U: AsRef<str> + ToString + Display,
-    >(
-        &self,
-        url: T,
-        branch: U,
-    ) -> Result<(), GitError> {
+    {
         let info = get_repo_info_from_url(url)?;
         let (owner, repo) = (info.owner, info.repo_name);
         // Acquire a lock on the semaphore
@@ -440,6 +432,7 @@ impl GithubClient {
         message: Option<String>,
         dry_run: bool,
         is_version: bool,
+        quiet: bool,
     ) -> Result<(), GitError> {
         let info = get_repo_info_from_url(url)?;
         let (repo, owner, url) = (info.repo_name, info.owner, info.url);
@@ -456,25 +449,20 @@ impl GithubClient {
 
         let result = tokio::task::spawn_blocking(move || {
             let _lock = permit;
-            let tmp_holder = if dry_run {
-                let tmp_dir = PathBuf::from(format!("/tmp/{branch}"));
-                fs::create_dir_all(&tmp_dir)?;
-                TmpDirHolder::DryRun(tmp_dir)
+            let tmp_dir = TempDir::new("")
+                .map_err(|e| GitError::Other(format!("Failed to create temp dir: {e}")))?;
+
+            let tmp = if dry_run {
+                tmp_dir.into_path()
             } else {
-                let tmp_dir = TempDir::new()
-                    .map_err(|e| GitError::Other(format!("Failed to create temp dir: {e}")))?;
-                TmpDirHolder::Temp(tmp_dir)
-            };
-            let tmp = match &tmp_holder {
-                TmpDirHolder::DryRun(p) => p.as_path(),
-                TmpDirHolder::Temp(t) => t.path(),
+                tmp_dir.path().into()
             };
 
             let repo_dir = tmp.join(&repo);
-                println!(
-                    "Starting to clone {repo}'s branch {branch} into {}",
-                    tmp.display()
-                );
+            println!(
+                "Starting to clone {repo}'s branch {branch} into {}",
+                tmp.display()
+            );
 
             // Clone the specified branch into a temporary directory
             // We use --depth 1 to only get the latest commit
@@ -488,19 +476,23 @@ impl GithubClient {
                 .arg("--depth")
                 .arg("1")
                 .arg(&url) // takes &String fine
-                .current_dir(tmp)
+                .current_dir(&tmp)
                 .status()?;
 
             if git_status.success() {
                 println!("Cloned {repo}'s branch {branch} into {}", tmp.display());
             } else {
-                return Err(GitError::GitCloneError{repository:repo, branch})}
+                return Err(GitError::GitCloneError {
+                    repository: repo,
+                    branch,
+                });
+            }
 
-            let re = REPO_REGEX.get_or_init(|| {
-                let msg = format!("Invalid regex for changing version '{old_text}'");
-                Regex::new(&fancy_regex::escape(old_text.as_ref())).expect(&msg)
-            });
-            replace_all_in_directory(&repo_dir, re, new_text.as_str());
+            // We can't recover from a failed regex compilation, so panic lazily (ie don't allocate
+            // unless there's an error).
+            let re = get_or_compile(&old_text)
+                .unwrap_or_else(|_| panic!("Unable to compile regex using '{old_text}'"));
+            replace_all_in_directory(&repo_dir, &re, new_text.as_str(), quiet);
             // If we're working with the odp-bigtop repo, we also need to rename package files
             // in bigtop-packages/src/deb
             if repo == "odp-bigtop" && is_version {
@@ -509,15 +501,19 @@ impl GithubClient {
                     .next_back()
                     .ok_or_else(|| GitError::InvalidBigtopVersion(new_text.clone()))?;
 
-                replace_all_in_directory(
+                let bn_regex_string = r#"(odp_bn|ODP_BN)\s*=\s*"\d+";"#;
+                let bn_regex = get_or_compile(bn_regex_string).unwrap_or_else(|_| {
+                    panic!("Unable to compile ODP build number regex '{bn_regex_string}'")
+                });
+
+                // This grabs the capture group, which will be either ODP_BN or odp_bn, then uses
+                // a closure to correctly format the replacement string.
+
+                replace_all_in_directory_with(
                     &repo_dir,
-                    &Regex::new(r#"odp_bn\s*=\s*"\d+";"#).expect("Invalid odp_bn regex"),
-                    &format!(r#"odp_bn = "{build_number}";"#),
-                );
-                replace_all_in_directory(
-                    &repo_dir,
-                    &Regex::new(r#"ODP_BN\s*=\s*"\d+";"#).expect("Invalid ODP_BN regex"),
-                    &format!(r#"ODP_BN = "{build_number}";"#),
+                    &bn_regex,
+                    &|caps: &Captures| format!(r#"{} = "{}";"#, &caps[1], build_number),
+                    quiet,
                 );
 
                 let dir = format!("{}/bigtop-packages/src/deb", repo_dir.display());
@@ -525,37 +521,37 @@ impl GithubClient {
                 let old_text_dash = old_text.replace('.', "-");
                 let new_text_dash = new_text.replace('.', "-");
 
-                let bigtop_re = Regex::new(&format!(
+                let bigtop_re_text = r"^(.*)-{}([.-].*)(.*)$";
+                let bigtop_re = get_or_compile(&format!(
                     r"^(.*)-{}([.-].*)(.*)$",
                     fancy_regex::escape(&old_text_dash)
                 ))
-                .expect("Failed to compile old version regex");
+                .unwrap_or_else(|_| {
+                    panic!("Failed to compile old version regex '{bigtop_re_text}'")
+                });
 
-                for entry in WalkDir::new(&dir)
-                    .into_iter()
-                    .filter_map(Result::ok)
-                {
+                for entry in WalkDir::new(&dir).into_iter().filter_map(Result::ok) {
                     let path = entry.path();
                     if path.is_dir() {
                         continue;
                     }
-                    if let Some(file_name) = path.file_name().and_then(|n| n.to_str()) &&
-                        let Some(caps) = bigtop_re.captures(file_name)?
-                        {
-                            let prefix = &caps[1];
-                            let suffix = &caps[2];
-                            let new_file_name = format!("{prefix}-{new_text_dash}{suffix}");
-                            let new_path = path.with_file_name(new_file_name);
-                            fs::rename(path, &new_path)?;
+                    if let Some(file_name) = path.file_name().and_then(|n| n.to_str())
+                        && let Some(caps) = bigtop_re.captures(file_name)?
+                    {
+                        let prefix = &caps[1];
+                        let suffix = &caps[2];
+                        let new_file_name = format!("{prefix}-{new_text_dash}{suffix}");
+                        let new_path = path.with_file_name(new_file_name);
+                        fs::rename(path, &new_path)?;
                     }
                 }
             }
             let commit_message = if let Some(msg) = message {
                 msg.clone()
             } else if is_version {
-                    format!("[Automated] Changed version from '{old_text}' to '{new_text}'")
+                format!("[Automated] Changed version from '{old_text}' to '{new_text}'")
             } else {
-                    format!("[Automated] Changed '{old_text}' to '{new_text}'")
+                format!("[Automated] Changed '{old_text}' to '{new_text}'")
             };
 
             // Commit and push the changes
@@ -573,40 +569,53 @@ impl GithubClient {
                 .current_dir(&repo_dir)
                 .status()?;
 
-            if !dry_run {
-                let output = Command::new("git")
-                    .arg("push")
-                    .current_dir(&repo_dir)
-                    .output()?;
-                let stdout = String::from_utf8_lossy(&output.stdout);
-                let stderr = String::from_utf8_lossy(&output.stderr);
-
-                let message = format!("No changes to push in {owner}/{repo} for old version '{old_text}' on branch {branch}");
-
-                if stdout.contains("Everything up-to-date") || stderr.contains("Everything up-to-date") {
-                    return Ok(message);
-                } else if !output.status.success() {
-                    return Err(GitError::GitPushError(format!(
-                        "{repo}/{branch} '{}'",
-                        stderr.trim()
-                    )));
-                }
+            if dry_run {
+                // Bit of an ugly hack, but it works. Better would be passing a message or custom
+                // enum back instead of this
+                return Ok(ModificationResult::DryRun(repo_dir));
             }
 
-            Ok(String::new())
+            let output = Command::new("git")
+                .arg("push")
+                .current_dir(&repo_dir)
+                .output()?;
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            let stderr = String::from_utf8_lossy(&output.stderr);
+
+            if stdout.contains("Everything up-to-date") || stderr.contains("Everything up-to-date")
+            {
+                return Ok(ModificationResult::NoChanges);
+            } else if !output.status.success() {
+                return Err(GitError::GitPushError(format!(
+                    "{repo}/{branch} '{}'",
+                    stderr.trim()
+                )));
+            }
+
+            Ok(ModificationResult::Success)
         })
         .await?;
         match result {
             Ok(m) => {
-                if m.is_empty() {
-                    let message = format!(
-                        "{owner_slack}/{repo_slack}: Successfully changed {old_text_slack} to {new_text_slack} for branch {branch_slack}"
-                    );
-                    println!("✅ {message}");
-                    self.append_slack_message(message).await;
-                } else {
-                    println!("✅ {m}");
-                    self.append_slack_message(m).await;
+                match m {
+                    ModificationResult::DryRun(p) => println!(
+                        "ℹ️ {owner_slack}/{repo_slack}: Dry run - changes from '{old_text_slack}' to '{new_text_slack}' for branch '{branch_slack}' prepared in '{}' but not pushed",
+                        p.display()
+                    ),
+                    ModificationResult::Success => {
+                        let message = format!(
+                            "{owner_slack}/{repo_slack}: Successfully changed {old_text_slack} to {new_text_slack} for branch {branch_slack}"
+                        );
+                        println!("✅ {message}");
+                        self.append_slack_message(message).await;
+                    }
+                    ModificationResult::NoChanges => {
+                        let message = format!(
+                            "No changes to push in {owner_slack}/{repo_slack} for old text '{old_text_slack}' on branch '{branch_slack}'"
+                        );
+                        println!("{message}",);
+                        self.append_slack_message(message).await;
+                    }
                 }
                 Ok(())
             }
@@ -634,6 +643,7 @@ impl GithubClient {
         message: Option<String>,
         dry_run: bool,
         is_version: bool,
+        quiet: bool,
     ) -> Result<(), GitError> {
         let mut futures = FuturesUnordered::new();
         for repo in repositories {
@@ -651,6 +661,7 @@ impl GithubClient {
                         message,
                         dry_run,
                         is_version,
+                        quiet,
                     )
                     .await;
                 (repo, result)
@@ -673,7 +684,7 @@ impl GithubClient {
     /// Get the name of all branches in a repository, optionally filtered by a regex
     pub async fn filter_branches<T, U>(&self, url: T, filter: U) -> Result<Vec<String>, GitError>
     where
-        U: AsRef<str>,
+        U: AsRef<str> + Display,
         T: AsRef<str> + ToString + Display,
     {
         let info = get_repo_info_from_url(url.as_ref())?;
@@ -684,8 +695,7 @@ impl GithubClient {
             .keys()
             .cloned()
             .collect();
-
-        Ok(filter_ref(&all_branches, &filter))
+        filter_ref(&all_branches, &filter)
     }
     ///Get a `HashMap` of Repository names -> Vec<branch names> for all repositories
     /// Optionally filtered by a regex
@@ -696,7 +706,7 @@ impl GithubClient {
     ) -> Result<HashMap<String, Vec<String>>, GitError>
     where
         T: AsRef<str> + ToString + Display + Eq + Hash,
-        U: AsRef<str> + Copy,
+        U: AsRef<str> + Copy + Display,
     {
         let mut futures = FuturesUnordered::new();
         for repo in repositories {

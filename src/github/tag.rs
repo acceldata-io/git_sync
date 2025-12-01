@@ -31,7 +31,7 @@ use std::collections::{HashMap, HashSet};
 use std::error::Error;
 use std::hash::Hash;
 use std::process::Command;
-use temp_dir::TempDir;
+use tempdir::TempDir;
 
 use indexmap::IndexSet;
 use serde_json::json;
@@ -571,7 +571,7 @@ impl GithubClient {
             let parent_urls: Vec<String> = parent_urls.into_iter().collect();
 
             // Use a temp directory for the git repository so it's cleaned up automatically
-            let tmp_dir = TempDir::new()
+            let tmp_dir = TempDir::new("")
                 .map_err(|e| GitError::Other(format!("Failed to create temp dir: {e}")))?;
             let tmp = tmp_dir.path();
             let tmp_str = tmp
@@ -880,11 +880,11 @@ impl GithubClient {
     pub async fn filter_tags<T, U>(&self, url: T, filter: U) -> Result<Vec<String>, GitError>
     where
         T: AsRef<str> + Copy,
-        U: AsRef<str>,
+        U: AsRef<str> + Display,
     {
         let (all_tags, _) = self.get_tags(url).await?;
         let tag_names_only: Vec<String> = all_tags.into_iter().map(|t| t.name.clone()).collect();
-        let filtered: Vec<String> = filter_ref(&tag_names_only, filter);
+        let filtered: Vec<String> = filter_ref(&tag_names_only, filter)?;
         Ok(filtered)
     }
     pub async fn filter_all_tags<T, U>(
@@ -894,7 +894,7 @@ impl GithubClient {
     ) -> Result<HashMap<String, Vec<String>>, GitError>
     where
         T: AsRef<str> + ToString + Display + Eq + Hash,
-        U: AsRef<str> + Copy,
+        U: AsRef<str> + Copy + Display,
     {
         let mut futures = FuturesUnordered::new();
         for repo in repositories {

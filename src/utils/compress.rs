@@ -23,7 +23,7 @@ use flate2::write::GzEncoder;
 use std::fs::File;
 use std::path::{Path, PathBuf};
 use tar::Archive;
-use temp_dir::TempDir;
+use tempdir::TempDir;
 
 use crate::error::GitError;
 
@@ -71,7 +71,7 @@ fn decode_tar_gz(path: &Path, dest: &Path) -> Result<PathBuf, GitError> {
 
     let mut archive = Archive::new(gz);
 
-    let tmp_dir = TempDir::new()?;
+    let tmp_dir = TempDir::new("")?;
     archive.unpack(tmp_dir.path())?;
     if !dest.exists() {
         std::fs::create_dir(dest)?;
@@ -103,11 +103,11 @@ mod tests {
     use crate::utils::compress::{compress_directory, decode_tar_gz};
     use std::path::PathBuf;
     use std::{fs::File, io::Write};
-    use temp_dir::TempDir;
+    use tempdir::TempDir;
 
     #[test]
     fn test_compress_directory() {
-        let tmp_dir = TempDir::new().unwrap();
+        let tmp_dir = TempDir::new("").unwrap();
         let tmp = tmp_dir.path();
         let tmp_str = tmp.to_str().unwrap();
 

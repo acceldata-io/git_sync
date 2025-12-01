@@ -20,17 +20,12 @@ under the License.
 use crate::async_retry;
 use crate::error::{GitError, get_octocrab_error, is_retryable};
 use crate::github::client::GithubClient;
+use crate::utils::filter::get_or_compile;
 use crate::utils::repo::get_repo_info_from_url;
 use chrono::{DateTime, Duration, Utc};
-use fancy_regex::Regex;
 use futures::{StreamExt, stream::FuturesUnordered};
 use octocrab::models::repos::ReleaseNotes;
 use octocrab::params::repos::Reference;
-use std::sync::OnceLock;
-
-// Static, compiled on first use, to prevent recompiling them each time we use them
-static CVE_REGEX: OnceLock<Regex> = OnceLock::new();
-static ODP_REGEX: OnceLock<Regex> = OnceLock::new();
 
 impl GithubClient {
     /// Generate release notes for a particular release. It grabs all the commits present in `tag`
@@ -170,11 +165,11 @@ impl GithubClient {
         let mut component_match = Vec::new();
         let mut other = Vec::new();
 
-        let re = Regex::new(&format!("{}-[0-9]+", repo.to_ascii_uppercase()))?;
-        let cve =
-            CVE_REGEX.get_or_init(|| Regex::new(r"OSV|CVE").expect("Failed to compile CVE regex"));
-        let odp = ODP_REGEX
-            .get_or_init(|| Regex::new(r"ODP-[0-9]*").expect("Failed to compile ODP regex"));
+        // There's probably not much point in caching `re` since it will be different for each
+        // component/repo, but who knows, that might change at some point.
+        let re = get_or_compile(&format!("{}-[0-9]+", repo.to_ascii_uppercase()))?;
+        let cve = get_or_compile(r"OSV|CVE")?;
+        let odp = get_or_compile(r"ODP-[0-9].*")?;
 
         for s in &new_commits {
             let s_upper = s.to_ascii_uppercase();

@@ -17,17 +17,12 @@ specific language governing permissions and limitations
 under the License.
 */
 use crate::error::GitError;
+use crate::utils::filter::get_or_compile;
 use fancy_regex::Regex;
 use serde::Deserialize;
 use std::fmt;
 use std::fmt::Write as _;
 use std::hash::{Hash, Hasher};
-use std::sync::OnceLock;
-
-/// Initialized once, then it becomes available
-/// from then on so we don't have to compile our regex every
-/// single time `test_get_repo_info_from_url` is called
-static REPO_REGEX: OnceLock<Regex> = OnceLock::new();
 
 /// Hold basic information about a github url
 #[derive(Debug)]
@@ -189,21 +184,10 @@ pub struct RepoChecks {
 
 /// Parse the owner and repository name from a github repository url.
 pub fn get_repo_info_from_url<T: AsRef<str>>(url: T) -> Result<RepoInfo, GitError> {
-    // Named capture groups for the owner and the repo
-    // Use the OnceLock to ensure we only compile the regex once, improving performance greatly
-    // compared to compiling the regex each time
-    let repo_regex = REPO_REGEX.get_or_init(|| {
-        // This has an optional prefix for github, and a required owner and repo.
-        // We don't need the .git suffix at the end, so while we do optionally check for it,
-        // we don't need to capture it.
-        //
-        // "The repository name can only contain ASCII letters, digits, and the characters ., -, and _."
-        let msg = format!("Invalid regex for {}", url.as_ref());
-        Regex::new(
-            r"^(?:https://github.com/)?(?P<owner>[A-Za-z0-9._-]+)/(?P<repo>[A-Za-z0-9._-]+)(?:\.git)?/?$",
-        )
-        .expect(&msg)
-    });
+    let repo_regex = get_or_compile(
+        r"^(?:https://github.com/)?(?P<owner>[A-Za-z0-9._-]+)/(?P<repo>[A-Za-z0-9._-]+)(?:\.git)?/?$",
+    )?;
+
     let url = url.as_ref().trim();
     if let Some(captures) = repo_regex.captures(url)? {
         let owner = match captures.name("owner") {
