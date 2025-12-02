@@ -753,7 +753,7 @@ pub enum TagCommand {
     Delete(DeleteTagCommand),
     /// Sync tags
     Sync(SyncTagCommand),
-    ///Show Tags for a repository
+    /// Show Tags for a repository
     Show(ShowTagCommand),
 }
 
