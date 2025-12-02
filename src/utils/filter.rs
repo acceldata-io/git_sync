@@ -57,7 +57,7 @@ where
         Ok(re) => {
             let regex = Arc::new(re);
             write_lock.insert(pattern.as_ref().to_string(), Arc::clone(&regex));
-            Ok(regex.clone())
+            Ok(regex)
         }
         Err(e) => Err(std::boxed::Box::new(e)),
     }
