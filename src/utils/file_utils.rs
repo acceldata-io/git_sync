@@ -19,23 +19,54 @@ under the License.
 
 use fancy_regex::Captures;
 use fancy_regex::Regex;
+use std::collections::HashSet;
+use std::ffi::OsStr;
 use std::fs;
 use std::io;
 use std::path::Path;
+use std::sync::OnceLock;
 use walkdir::WalkDir;
+
+/// A `HashSet` of file extensions that should be skipped when replacing text in files.
+/// Reallocating the `HashSet` for every file is relatively expensive,
+static EXTENSIONS_TO_SKIP: OnceLock<HashSet<&'static str>> = OnceLock::new();
+
+pub enum FileStatus {
+    Skipped,
+    NoChanges,
+    Modified,
+}
+
+fn skip_file(path: &std::path::Path) -> bool {
+    let extensions = EXTENSIONS_TO_SKIP.get_or_init(|| {
+        // Obvious image types have been included here, as well as a few others that were found in
+        // bigtop
+        HashSet::from([
+            "png", "jpg", "jpeg", "gif", "bmp", "tiff", "svg", "webp", "ico", "heic", "zip", "gz",
+            "tgz", "snappy", "jar", "ai",
+        ])
+    });
+    let ext = path.extension().and_then(OsStr::to_str).unwrap_or("");
+    extensions.contains(ext)
+}
+
 /// Replace all occurrences of the regex `re` with `replacement`
 pub fn replace_in_file<T: AsRef<str>>(
     path: &std::path::Path,
     re: &Regex,
     replacement: T,
-) -> io::Result<bool> {
+) -> io::Result<FileStatus> {
+    if skip_file(path) {
+        println!("Skipping file {}", path.display());
+        return Ok(FileStatus::Skipped);
+    }
     let content = fs::read_to_string(path)?;
     let new_content = re.replace_all(&content, replacement.as_ref());
     if new_content == content {
-        Ok(false)
+        Ok(FileStatus::NoChanges)
     } else {
         fs::write(path, new_content.as_ref())?;
-        Ok(true)
+        Ok(FileStatus::Modified)
     }
 }
 /// Replace all occurrences of the regex `re` with the result of calling the `replacement` function
@@ -43,17 +74,21 @@ pub fn replace_in_file_with<F>(
     path: &std::path::Path,
     re: &Regex,
     replacement: &F,
-) -> io::Result<bool>
+) -> io::Result<FileStatus>
 where
     F: Fn(&Captures) -> String,
 {
+    if skip_file(path) {
+        return Ok(FileStatus::Skipped);
+    }
+
     let content = fs::read_to_string(path)?;
     let new_content = re.replace_all(&content, |captures: &Captures| replacement(captures));
     if new_content == content {
-        Ok(false)
+        Ok(FileStatus::NoChanges)
     } else {
         fs::write(path, new_content.as_ref())?;
-        Ok(true)
+        Ok(FileStatus::Modified)
     }
 }
 
@@ -73,15 +108,20 @@ pub fn replace_all_in_directory<T: AsRef<str> + Copy>(
         if entry.file_type().is_file() {
             let file_path = entry.path();
             match replace_in_file(file_path, re, replacement) {
-                Ok(true) => {
+                Ok(FileStatus::Modified) => {
                     if !quiet {
                         println!("Modified file: {}", file_path.display());
                     }
                 }
-                Ok(false) => (),
+                Ok(FileStatus::Skipped) => {
+                    if !quiet {
+                        println!("Skipping file: {}", file_path.display());
+                    }
+                }
+                Ok(FileStatus::NoChanges) => (),
                 Err(e) => {
                     if !quiet {
-                        eprintln!("Skipping file {}: {e}", file_path.display());
+                        eprintln!("Can't open file {}: {e}", file_path.display());
                     }
                 }
             }
@@ -105,15 +145,20 @@ pub fn replace_all_in_directory_with<F>(
         if entry.file_type().is_file() {
             let file_path = entry.path();
             match replace_in_file_with(file_path, re, replacement) {
-                Ok(true) => {
+                Ok(FileStatus::Modified) => {
                     if !quiet {
                         println!("Modified file: {}", file_path.display());
                     }
                 }
-                Ok(false) => (),
+                Ok(FileStatus::Skipped) => {
+                    if !quiet {
+                        println!("Skipping file: {}", file_path.display());
+                    }
+                }
+                Ok(FileStatus::NoChanges) => (),
                 Err(e) => {
                     if !quiet {
-                        eprintln!("Skipping file {}: {e}", file_path.display());
+                        eprintln!("Can't open file {}: {e}", file_path.display());
                     }
                 }
             }
