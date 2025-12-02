@@ -28,7 +28,7 @@ use std::sync::OnceLock;
 use walkdir::WalkDir;
 
 /// A `HashSet` of file extensions that should be skipped when replacing text in files.
-/// Reallocating the `HashSet` for every file is relatively expensive,
+/// Reallocating the `HashSet` for every file is relatively expensive, so we initialize it once and reuse it using `OnceLock`.
 static EXTENSIONS_TO_SKIP: OnceLock<HashSet<&'static str>> = OnceLock::new();
 
 pub enum FileStatus {
