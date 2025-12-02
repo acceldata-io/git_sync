@@ -522,7 +522,6 @@ impl GithubClient {
                     .ok_or_else(|| GitError::InvalidBigtopVersion(new_text.clone()))?;
 
                 let bn_regex_string = r#"(odp_bn|ODP_BN)\s*=\s*"\d+";"#;
-                println!("BN = {build_number}");
                 let bn_regex = get_or_compile(bn_regex_string).unwrap_or_else(|_| {
                     panic!("Unable to compile ODP build number regex '{bn_regex_string}'")
                 });
