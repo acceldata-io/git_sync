@@ -42,7 +42,7 @@ where
     if let Some(regex) = read_lock.get(pattern.as_ref()) {
         return Ok(Arc::clone(regex));
     }
-    // Intenionally drop the read lock before acquiring the write lock
+    // Intentionally drop the read lock before acquiring the write lock
     drop(read_lock);
 
     let mut write_lock = cache().write().expect("Regex cache mutex poisoned");

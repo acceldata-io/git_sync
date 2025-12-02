@@ -164,7 +164,7 @@ To use `cargo-audit`, simply run `cargo audit` in the root of the source code tr
 cargo-audit bin target/release/git_sync
 ```
 
-This will tell you how many CVEs effect the dependencies the binary is actually using, rather than everything listed in Cargo.toml.
+This will tell you how many CVEs affect the dependencies the binary is actually using, rather than everything listed in Cargo.toml.
 ### Configuration
 Run `git_sync config` to create an initial configuration in `$XDG_CONFIG_HOME`, or pass `--file path/to/file` to create it elsewhere. If you do set a custom configuration path, you will need to specify the path with `-f` or `--file` for every command you run. This file, by default, is called 'git-manage.toml'. The generated configuration file has comments in it to aid you in setting everything up.
 

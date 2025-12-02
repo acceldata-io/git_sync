@@ -489,7 +489,7 @@ impl GithubClient {
 
             // We can't recover from a failed regex compilation, so panic lazily (ie don't allocate
             // unless there's an error).
-            let re = get_or_compile(&old_text)
+            let re = get_or_compile(fancy_regex::escape(&old_text))
                 .unwrap_or_else(|_| panic!("Unable to compile regex using '{old_text}'"));
             replace_all_in_directory(&repo_dir, &re, new_text.as_str(), quiet);
             // If we're working with the odp-bigtop repo, we also need to rename package files

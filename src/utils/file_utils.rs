@@ -57,7 +57,6 @@ pub fn replace_in_file<T: AsRef<str>>(
     replacement: T,
 ) -> io::Result<FileStatus> {
     if skip_file(path) {
-        println!("Skipping file {}", path.display());
         return Ok(FileStatus::Skipped);
     }
     let content = fs::read_to_string(path)?;
@@ -121,7 +120,7 @@ pub fn replace_all_in_directory<T: AsRef<str> + Copy>(
                 Ok(FileStatus::NoChanges) => (),
                 Err(e) => {
                     if !quiet {
-                        eprintln!("Can't open file {}: {e}", file_path.display());
+                        eprintln!("Can't open file: '{}' because {e}", file_path.display());
                     }
                 }
             }
@@ -158,7 +157,7 @@ pub fn replace_all_in_directory_with<F>(
                 Ok(FileStatus::NoChanges) => (),
                 Err(e) => {
                     if !quiet {
-                        eprintln!("Can't open file {}: {e}", file_path.display());
+                        eprintln!("Can't open file: '{}' because {e}", file_path.display());
                     }
                 }
             }
@@ -195,7 +194,7 @@ mod tests {
         (dir, file_path)
     }
     #[test]
-    fn replace_text_using_clojure() {
+    fn replace_text_using_closure() {
         let input = "ODP_BN=\"3001\"\nodp_bn=\"3001\"";
         // Hold onto the dir reference so that the temp dir isn't deleted
         let (_dir, file) = create_test_file("test.txt", input);

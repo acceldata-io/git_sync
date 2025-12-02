@@ -593,7 +593,7 @@ pub struct CreateBranchCommand {
     .args(&["all", "repository"])
 ))]
 pub struct ShowBranchCommand {
-    /// The repository to show Branches for. Not valid if '--all' is set
+    /// The repository to show branches for. Not valid if '--all' is set
     #[arg(short, long)]
     pub repository: Option<String>,
     /// The regex filter to apply to branch names
