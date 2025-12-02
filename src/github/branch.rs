@@ -504,7 +504,7 @@ impl GithubClient {
                         None => return Err(GitError::Other("Some error occurred while determining the ODP VERSION".to_string())),
                     };
 
-                    let odp_regex_text = format!(r#"^\s*(version|VERSION|ODP_VERSION|ODP_VERSION)\s*=\s*\"?{odp_version}?""#);
+                    let odp_regex_text = format!(r#"^\s*(version|VERSION|ODP_VERSION|odp_version)\s*=\s*\"?{odp_version}?""#);
                     let odp_version_re = get_or_compile(odp_regex_text)?;
                     let new_odp_version = new_text.split('-').next().ok_or_else(|| GitError::Other("Some error occurred while determining the ODP version".to_string()))?;
 
