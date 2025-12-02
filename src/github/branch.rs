@@ -501,12 +501,12 @@ impl GithubClient {
                 if let Some(captures) = is_odp.captures(&fancy_regex::escape(&old_text))? {
                     let odp_version = match captures.name("odp") {
                         Some(m) => m.as_str().to_string(),
-                        None => return Err(GitError::Other("Some error occured while determining the ODP VERSION".to_string())),
+                        None => return Err(GitError::Other("Some error occurred while determining the ODP VERSION".to_string())),
                     };
 
                     let odp_regex_text = format!(r#"^\s*(version|VERSION|ODP_VERSION|ODP_VERSION)\s*=\s*\"?{odp_version}?""#);
                     let odp_version_re = get_or_compile(odp_regex_text)?;
-                    let new_odp_version = new_text.split('-').next().ok_or_else(|| GitError::Other("Some error occured while determining the ODP version".to_string()))?;
+                    let new_odp_version = new_text.split('-').next().ok_or_else(|| GitError::Other("Some error occurred while determining the ODP version".to_string()))?;
 
                     let replacement = |captures: &Captures| format!(r#"{} = "{}"#, &captures[1], new_odp_version);
                     replace_all_in_directory_with(
