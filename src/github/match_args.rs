@@ -121,10 +121,18 @@ pub async fn match_arguments(app: &AppArgs, config: Config) -> Result<(), GitErr
 
     let result = match &app.command {
         Command::Tag { cmd } => {
-            match_tag_cmds(&client, repos, cmd, fork_workaround_repositories).await
+            match_tag_cmds(&client, repos, cmd, fork_workaround_repositories, dry_run).await
         }
         Command::Repo { cmd } => {
-            match_repo_cmds(&client, repos, config, cmd, fork_workaround_repositories).await
+            match_repo_cmds(
+                &client,
+                repos,
+                config,
+                cmd,
+                fork_workaround_repositories,
+                dry_run,
+            )
+            .await
         }
         Command::Branch { cmd } => match_branch_cmds(&client, repos, cmd, quiet, dry_run).await,
         Command::Release { cmd } => match_release_cmds(&client, repos, config, cmd).await,
@@ -179,6 +187,7 @@ async fn match_tag_cmds(
     repos: Vec<String>,
     cmd: &TagCommand,
     fork_workaround: HashMap<String, String>,
+    dry_run: bool,
 ) -> Result<(), GitError> {
     let result = async {
         match cmd {
@@ -227,16 +236,16 @@ async fn match_tag_cmds(
 
                 if sync_cmd.all {
                     client
-                        .sync_all_tags(process_annotated_tags, &repos[..], fork_workaround)
+                        .sync_all_tags(process_annotated_tags, &repos[..], fork_workaround, dry_run)
                         .await?;
                 } else if let Some(repository) = repository {
                     if let Some(parent) = fork_workaround.get(repository) {
                         client
-                            .sync_tags(repository, Some(parent), process_annotated_tags)
+                            .sync_tags(repository, Some(parent), process_annotated_tags, dry_run)
                             .await?;
                     } else {
                         client
-                            .sync_tags(repository, None, process_annotated_tags)
+                            .sync_tags(repository, None, process_annotated_tags, dry_run)
                             .await?;
                     }
                 } else {
@@ -433,6 +442,7 @@ async fn match_repo_cmds(
     config: Config,
     cmd: &RepoCommand,
     fork_workaround: HashMap<String, String>,
+    dry_run: bool,
 ) -> Result<(), GitError> {
     match cmd {
         RepoCommand::Sync(sync_cmd) => {
@@ -443,11 +453,13 @@ async fn match_repo_cmds(
 
             if sync_cmd.all {
                 if fork_workaround.is_empty() {
-                    client.sync_all_forks(&repos[..], recursive).await?;
+                    client
+                        .sync_all_forks(&repos[..], recursive, dry_run)
+                        .await?;
                 } else {
                     let (task1, task2) = tokio::join!(
-                        client.sync_all_forks_workaround(fork_workaround.clone()),
-                        client.sync_all_forks(&repos[..], recursive),
+                        client.sync_all_forks_workaround(fork_workaround.clone(), dry_run),
+                        client.sync_all_forks(&repos[..], recursive, dry_run),
                     );
                     task1?;
                     task2?;
@@ -455,13 +467,15 @@ async fn match_repo_cmds(
             } else if let Some(repository) = repository {
                 // Process repositories using git
                 if let Some(parent) = fork_workaround.get(repository) {
-                    client.sync_with_upstream(repository, parent).await?;
+                    client
+                        .sync_with_upstream(repository, parent, dry_run)
+                        .await?;
                 } else if forks_with_workaround.contains_key(repository) {
                     return Err(GitError::NoUpstreamRepo(repository.clone()));
                 } else if recursive {
-                    client.sync_fork_recursive(repository).await?;
+                    client.sync_fork_recursive(repository, dry_run).await?;
                 } else {
-                    client.sync_fork(repository, branch).await?;
+                    client.sync_fork(repository, branch, dry_run).await?;
                 }
             } else {
                 return Err(GitError::MissingRepositoryName);

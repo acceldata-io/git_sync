@@ -34,20 +34,29 @@ fn cache() -> &'static RwLock<HashMap<String, Arc<Regex>>> {
 /// Gets or compiles a regex pattern, saving it to a Hashmap cache for future use.
 /// If something is wrong with the `RwLock`, this function will panic since that
 /// means we have no way to recover.
-pub fn get_or_compile(pattern: &str) -> Result<Arc<Regex>, Box<fancy_regex::Error>> {
+pub fn get_or_compile<T>(pattern: T) -> Result<Arc<Regex>, Box<fancy_regex::Error>>
+where
+    T: AsRef<str>,
+{
     let read_lock = cache().read().expect("Regex cache mutex poisoned");
-    if let Some(regex) = read_lock.get(pattern) {
+    if let Some(regex) = read_lock.get(pattern.as_ref()) {
         return Ok(Arc::clone(regex));
     }
     // Intenionally drop the read lock before acquiring the write lock
     drop(read_lock);
 
     let mut write_lock = cache().write().expect("Regex cache mutex poisoned");
-    let regex_result = Regex::new(pattern);
+    // If some other thread has already compiled this regex between when we got the read_lock and
+    // the write_lock, return the result instead of recompiling it. This should only be able to
+    // happen on the first couple of calls
+    if let Some(regex) = write_lock.get(pattern.as_ref()) {
+        return Ok(Arc::clone(regex));
+    }
+    let regex_result = Regex::new(pattern.as_ref());
     match regex_result {
         Ok(re) => {
             let regex = Arc::new(re);
-            write_lock.insert(pattern.to_string(), Arc::clone(&regex));
+            write_lock.insert(pattern.as_ref().to_string(), Arc::clone(&regex));
             Ok(regex.clone())
         }
         Err(e) => Err(std::boxed::Box::new(e)),

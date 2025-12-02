@@ -29,7 +29,7 @@ use octocrab::params::repos::Reference;
 use std::fmt::Display;
 use std::fs;
 use std::process::Command;
-use tempdir::TempDir;
+use tempfile::TempDir;
 use walkdir::WalkDir;
 
 use std::collections::HashMap;
@@ -449,11 +449,10 @@ impl GithubClient {
 
         let result = tokio::task::spawn_blocking(move || {
             let _lock = permit;
-            let tmp_dir = TempDir::new("")
-                .map_err(|e| GitError::Other(format!("Failed to create temp dir: {e}")))?;
+            let tmp_dir = TempDir::new()?;
 
             let tmp = if dry_run {
-                tmp_dir.into_path()
+                tmp_dir.keep()
             } else {
                 tmp_dir.path().into()
             };
@@ -521,12 +520,9 @@ impl GithubClient {
                 let old_text_dash = old_text.replace('.', "-");
                 let new_text_dash = new_text.replace('.', "-");
 
-                let bigtop_re_text = r"^(.*)-{}([.-].*)(.*)$";
-                let bigtop_re = get_or_compile(&format!(
-                    r"^(.*)-{}([.-].*)(.*)$",
-                    fancy_regex::escape(&old_text_dash)
-                ))
-                .unwrap_or_else(|_| {
+                let bigtop_re_text =
+                    format!("^(.*)-{}([.-].*)(.*)", fancy_regex::escape(&old_text_dash));
+                let bigtop_re = get_or_compile(&bigtop_re_text).unwrap_or_else(|_| {
                     panic!("Failed to compile old version regex '{bigtop_re_text}'")
                 });
 
@@ -630,6 +626,7 @@ impl GithubClient {
             }
         }
     }
+
     /// Change the release version for a specified branch across all configured repositories.
     /// This function clones each repository, updates the version, commits, and pushes the changes.
     /// Errors from each repository are collected and returned as a single error if any occur.
@@ -697,6 +694,7 @@ impl GithubClient {
             .collect();
         filter_ref(&all_branches, &filter)
     }
+
     ///Get a `HashMap` of Repository names -> Vec<branch names> for all repositories
     /// Optionally filtered by a regex
     pub async fn filter_all_branches<T, U>(

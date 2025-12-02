@@ -167,7 +167,7 @@ impl GithubClient {
 
         // There's probably not much point in caching `re` since it will be different for each
         // component/repo, but who knows, that might change at some point.
-        let re = get_or_compile(&format!("{}-[0-9]+", repo.to_ascii_uppercase()))?;
+        let re = get_or_compile(format!("{}-[0-9]+", repo.to_ascii_uppercase()))?;
         let cve = get_or_compile(r"OSV|CVE")?;
         let odp = get_or_compile(r"ODP-[0-9].*")?;
 

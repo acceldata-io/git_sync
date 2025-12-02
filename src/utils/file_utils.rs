@@ -140,11 +140,11 @@ pub fn copy_recursive(src: impl AsRef<Path>, dst: impl AsRef<Path>) -> io::Resul
 mod tests {
     use super::*;
     use crate::utils::filter::get_or_compile;
-    use tempdir::TempDir;
+    use tempfile::TempDir;
     /// If using this function, make sure to hold onto the `TempDir` reference
     /// because once it goes out of scope, that temp directory is deleted.
     fn create_test_file(filename: &str, content: &str) -> (TempDir, std::path::PathBuf) {
-        let dir = TempDir::new("test").unwrap();
+        let dir = TempDir::new().unwrap();
         let file_path = dir.path().join(filename);
         fs::write(&file_path, content).unwrap();
         (dir, file_path)
