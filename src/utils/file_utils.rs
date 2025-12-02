@@ -216,7 +216,6 @@ mod tests {
         let replacement = |captures: &Captures| format!(r#"{}="{}"#, &captures[1], "3002");
         replace_in_file_with(&file, &re, &replacement).unwrap();
         let got = fs::read_to_string(&file).unwrap();
-        eprintln!("{got}");
         assert!(got.contains(r#"ODPA_BN="3001"#));
         assert!(got.contains(r#"odpB_bn="3001"#));
     }
