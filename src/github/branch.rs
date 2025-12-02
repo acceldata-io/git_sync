@@ -492,22 +492,43 @@ impl GithubClient {
             let re = get_or_compile(fancy_regex::escape(&old_text))
                 .unwrap_or_else(|_| panic!("Unable to compile regex using '{old_text}'"));
             replace_all_in_directory(&repo_dir, &re, new_text.as_str(), quiet);
+
             // If we're working with the odp-bigtop repo, we also need to rename package files
             // in bigtop-packages/src/deb
             if repo == "odp-bigtop" && is_version {
+                let is_odp = get_or_compile(r"(?P<odp>[0-9][.][0-9][.][0-9][.][0-9])-([0-9]+)")
+                    .unwrap_or_else(|_| panic!("Unable to compile ODP regex"));
+                if let Some(captures) = is_odp.captures(&fancy_regex::escape(&old_text))? {
+                    let odp_version = match captures.name("odp") {
+                        Some(m) => m.as_str().to_string(),
+                        None => return Err(GitError::Other("Some error occured while determining the ODP VERSION".to_string())),
+                    };
+
+                    let odp_regex_text = format!(r#"^\s*(version|VERSION|ODP_VERSION|ODP_VERSION)\s*=\s*\"?{odp_version}?""#);
+                    let odp_version_re = get_or_compile(odp_regex_text)?;
+                    let new_odp_version = new_text.split('-').next().ok_or_else(|| GitError::Other("Some error occured while determining the ODP version".to_string()))?;
+
+                    let replacement = |captures: &Captures| format!(r#"{} = "{}"#, &captures[1], new_odp_version);
+                    replace_all_in_directory_with(
+                        &repo_dir,
+                        &odp_version_re,
+                        &replacement,
+                        quiet,
+                    );
+                }
                 let build_number = new_text
                     .split('-')
                     .next_back()
                     .ok_or_else(|| GitError::InvalidBigtopVersion(new_text.clone()))?;
 
                 let bn_regex_string = r#"(odp_bn|ODP_BN)\s*=\s*"\d+";"#;
+                println!("BN = {build_number}");
                 let bn_regex = get_or_compile(bn_regex_string).unwrap_or_else(|_| {
                     panic!("Unable to compile ODP build number regex '{bn_regex_string}'")
                 });
 
                 // This grabs the capture group, which will be either ODP_BN or odp_bn, then uses
                 // a closure to correctly format the replacement string.
-
                 replace_all_in_directory_with(
                     &repo_dir,
                     &bn_regex,
@@ -520,11 +541,27 @@ impl GithubClient {
                 let old_text_dash = old_text.replace('.', "-");
                 let new_text_dash = new_text.replace('.', "-");
 
+                let odp_version_dashes_re = get_or_compile(fancy_regex::escape(&old_text_dash))
+                    .unwrap_or_else(|_| {
+                        panic!(
+                            "Unable to compile ODP version with dashes regex using '{old_text_dash}'"
+                        )
+                    });
+
+                replace_all_in_directory(
+                    &repo_dir,
+                    &odp_version_dashes_re,
+                    &new_text_dash,
+                    quiet,
+                );
+
                 let bigtop_re_text =
                     format!("^(.*)-{}([.-].*)(.*)", fancy_regex::escape(&old_text_dash));
+
                 let bigtop_re = get_or_compile(&bigtop_re_text).unwrap_or_else(|_| {
                     panic!("Failed to compile old version regex '{bigtop_re_text}'")
                 });
+
 
                 for entry in WalkDir::new(&dir).into_iter().filter_map(Result::ok) {
                     let path = entry.path();
@@ -566,8 +603,6 @@ impl GithubClient {
                 .status()?;
 
             if dry_run {
-                // Bit of an ugly hack, but it works. Better would be passing a message or custom
-                // enum back instead of this
                 return Ok(ModificationResult::DryRun(repo_dir));
             }
 
