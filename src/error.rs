@@ -466,7 +466,7 @@ impl GitError {
         false
     }
     /// Get what exit code should be used based on the error type.
-    /// If fewer errors are reported than the number of repositories proccessed,
+    /// If fewer errors are reported than the number of repositories processed,
     /// then don't exit with an error code.
     pub fn get_exit_code(self) -> i32 {
         match self {
