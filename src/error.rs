@@ -31,6 +31,15 @@ pub enum GitError {
     /// Generic holder for multiple errors
     #[error("Multiple errors: {0:?}")]
     MultipleErrors(Vec<(String, GitError)>),
+    /// A container for returning errors *and* the number of repositories processed before the
+    /// error. This should really only be used with `GitError::MultipleErrors`
+    #[error("Exited with errors. Error: {0:?}")]
+    ErrorWithRepoInfo(
+        /// The actual `GitError`
+        Box<GitError>,
+        /// The number of repositories that were supposed to be processed
+        usize,
+    ),
     /// Convert octocrab errors into our own error type
     #[error("Github API error: {0}")]
     GithubApiError(#[from] octocrab::Error),
@@ -55,7 +64,7 @@ pub enum GitError {
     #[error("Date parse error: {0}")]
     DateParseError(#[from] chrono::ParseError),
     /// URL is not a vaild repository
-    #[error("Invalid repository URL: {0}")]
+    #[error("Invalid repository URL '{0}'")]
     InvalidRepository(String),
     /// Generic sync failure
     #[error("Could not sync {ref_type} for {repository}")]
@@ -418,7 +427,11 @@ impl GitError {
                     let mut message = "Multiple errors: ".to_string();
                     for (context, err) in errors {
                         let e = err.to_user_error();
-                        let _ = writeln!(message, "\n\t- {context}: {}", e.message);
+                        if let Some(code) = e.code {
+                            let _ = writeln!(message, "\n\t For '{context}' - HTTP {code}" );
+                        } else {
+                            let _ = writeln!(message, "\n\t For '{context}' - {}", e.message);
+                        }
                     }
                     UserError {
                         code: None,
@@ -426,7 +439,17 @@ impl GitError {
                         suggestion: None,
                     }
                 }
-            }
+            },
+            // Add just a bit of additional context
+            GitError::ErrorWithRepoInfo(boxed_error, repo_count) => {
+                let user_error = boxed_error.to_user_error();
+                let message = format!("{repo_count} repositories were supposed to be processed\n{}", user_error.message);
+                UserError {
+                    code: None,
+                    message,
+                    suggestion: None,
+                }
+            },
         }
     }
     /// Walk through the error chain to find out if it's a broken pipe
@@ -441,6 +464,38 @@ impl GitError {
             source = err.source();
         }
         false
+    }
+    /// Get what exit code should be used based on the error type.
+    /// If fewer errors are reported than the number of repositories proccessed,
+    /// then don't exit with an error code.
+    pub fn get_exit_code(self) -> i32 {
+        match self {
+            GitError::MultipleErrors(v) => {
+                // Using an exit code over 255 can sometimes break things,
+                // especially depending on the shell being used.
+                // $ echo 'm4exit(255)' | strace -e exit_group m4
+                // exit_group(255)                         = ?
+                // +++ exited with 255 +++
+                // $ echo 'm4exit(256)' | strace -e exit_group m4
+                // m4:stdin:1: exit status out of range: `256'
+                // exit_group(1)                           = ?
+                // +++ exited with 1 +++
+                i32::try_from(v.len().min(255)).unwrap_or(1)
+            }
+            GitError::ErrorWithRepoInfo(e, n) => {
+                let error = *e;
+                match error {
+                    GitError::MultipleErrors(v) => {
+                        if v.len() >= n {
+                            return i32::try_from(v.len().min(255)).unwrap_or(1);
+                        }
+                        0
+                    }
+                    _ => 1,
+                }
+            }
+            _ => 1,
+        }
     }
 }
 
