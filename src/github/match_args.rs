@@ -91,7 +91,7 @@ pub async fn match_arguments(app: &AppArgs, config: Config) -> Result<(), GitErr
         .collect::<HashSet<_>>()
         .into_iter()
         .collect::<Vec<_>>();
-
+    let number_of_repos = repos.len();
     // If for some reason we cannot get the number of threads and the user doesn't try to define it,
     // default to 4, which seems like a reasonable minimum expectation for most systems.
     let default_jobs = std::thread::available_parallelism()
@@ -171,7 +171,16 @@ pub async fn match_arguments(app: &AppArgs, config: Config) -> Result<(), GitErr
     if app.slack {
         client.slack_message().await;
     }
-    if let Err(e) = result { Err(e) } else { Ok(()) }
+    if let Err(e) = result {
+        match e {
+            GitError::MultipleErrors(_) => {
+                Err(GitError::ErrorWithRepoInfo(Box::new(e), number_of_repos))
+            }
+            _ => Err(e),
+        }
+    } else {
+        Ok(())
+    }
 }
 
 /// Process all Tag commands
@@ -181,77 +190,68 @@ async fn match_tag_cmds(
     cmd: &TagCommand,
     fork_workaround: HashMap<String, String>,
 ) -> Result<(), GitError> {
-    let result = async {
-        match cmd {
-            TagCommand::Compare(compare_cmd) => {
-                let repository = compare_cmd.repository.as_ref();
-                if compare_cmd.all && !repos.is_empty() {
-                    client.diff_all_tags(repos).await?;
-                } else if compare_cmd.all && repos.is_empty() {
-                    return Err(GitError::NoReposConfigured);
-                } else if let Some(repository) = repository {
-                    let _diffs = client.diff_tags(repository).await?;
-                } else {
-                    return Err(GitError::MissingRepositoryName);
-                }
-            }
-            TagCommand::Create(create_cmd) => {
-                let tag = &create_cmd.tag;
-                let branch = &create_cmd.branch;
-                let repository = create_cmd.repository.as_ref();
-
-                if create_cmd.all {
-                    client.create_all_tags(tag, branch, &repos[..]).await?;
-                } else if let Some(repository) = repository {
-                    client
-                        .create_tag(repository, &create_cmd.tag, &create_cmd.branch)
-                        .await?;
-                } else {
-                    return Err(GitError::MissingRepositoryName);
-                }
-            }
-            TagCommand::Delete(delete_cmd) => {
-                let repository = delete_cmd.repository.as_ref();
-
-                if delete_cmd.all {
-                    client.delete_all_tags(&delete_cmd.tag, &repos).await?;
-                } else if let Some(repository) = repository {
-                    client.delete_tag(repository, &delete_cmd.tag).await?;
-                } else {
-                    return Err(GitError::MissingRepositoryName);
-                }
-            }
-            TagCommand::Sync(sync_cmd) => {
-                let repository = sync_cmd.repository.as_ref();
-                // By default, this is false
-                let process_annotated_tags = sync_cmd.with_annotated;
-
-                if sync_cmd.all {
-                    client
-                        .sync_all_tags(process_annotated_tags, &repos[..], fork_workaround)
-                        .await?;
-                } else if let Some(repository) = repository {
-                    if let Some(parent) = fork_workaround.get(repository) {
-                        client
-                            .sync_tags(repository, Some(parent), process_annotated_tags)
-                            .await?;
-                    } else {
-                        client
-                            .sync_tags(repository, None, process_annotated_tags)
-                            .await?;
-                    }
-                } else {
-                    return Err(GitError::MissingRepositoryName);
-                }
+    match cmd {
+        TagCommand::Compare(compare_cmd) => {
+            let repository = compare_cmd.repository.as_ref();
+            if compare_cmd.all && !repos.is_empty() {
+                client.diff_all_tags(repos).await?;
+            } else if compare_cmd.all && repos.is_empty() {
+                return Err(GitError::NoReposConfigured);
+            } else if let Some(repository) = repository {
+                let _diffs = client.diff_tags(repository).await?;
+            } else {
+                return Err(GitError::MissingRepositoryName);
             }
         }
-        Ok(())
-    }
-    .await;
+        TagCommand::Create(create_cmd) => {
+            let tag = &create_cmd.tag;
+            let branch = &create_cmd.branch;
+            let repository = create_cmd.repository.as_ref();
 
-    if let Err(e) = result {
-        client.slack_message().await;
-        return Err(e);
+            if create_cmd.all {
+                client.create_all_tags(tag, branch, &repos[..]).await?;
+            } else if let Some(repository) = repository {
+                client
+                    .create_tag(repository, &create_cmd.tag, &create_cmd.branch)
+                    .await?;
+            } else {
+                return Err(GitError::MissingRepositoryName);
+            }
+        }
+        TagCommand::Delete(delete_cmd) => {
+            let repository = delete_cmd.repository.as_ref();
+
+            if delete_cmd.all {
+                client.delete_all_tags(&delete_cmd.tag, &repos).await?;
+            } else if let Some(repository) = repository {
+                client.delete_tag(repository, &delete_cmd.tag).await?;
+            } else {
+                return Err(GitError::MissingRepositoryName);
+            }
+        }
+        TagCommand::Sync(sync_cmd) => {
+            let repository = sync_cmd.repository.as_ref();
+            // By default, this is false
+            let process_annotated_tags = sync_cmd.with_annotated;
+
+            if sync_cmd.all {
+                client
+                    .sync_all_tags(process_annotated_tags, &repos[..], fork_workaround)
+                    .await?;
+            } else if let Some(repository) = repository {
+                if let Some(parent) = fork_workaround.get(repository) {
+                    client
+                        .sync_tags(repository, Some(parent), process_annotated_tags)
+                        .await?;
+                } else {
+                    client
+                        .sync_tags(repository, None, process_annotated_tags)
+                        .await?;
+                }
+            } else {
+                return Err(GitError::MissingRepositoryName);
+            }
+        }
     }
     Ok(())
 }
