@@ -428,7 +428,7 @@ impl GitError {
                     for (context, err) in errors {
                         let e = err.to_user_error();
                         if let Some(code) = e.code {
-                            let _ = writeln!(message, "\n\t For '{context}' - HTTP {code}" );
+                            let _ = writeln!(message, "\n\t For '{context}' - HTTP {code}");
                         } else {
                             let _ = writeln!(message, "\n\t For '{context}' - {}", e.message);
                         }

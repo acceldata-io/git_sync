@@ -83,7 +83,6 @@ pub async fn match_arguments(app: &AppArgs, config: Config) -> Result<(), GitErr
             }
         }
     };
-    let number_of_repos = repos.len();
     // Remove any duplicate repositories. This shouldn't have any meaningful performance impact
     // since there won't ever be thousands of repositories configured.
     // Collect it into a Vec so that we have a consistent ordered collection
@@ -92,7 +91,7 @@ pub async fn match_arguments(app: &AppArgs, config: Config) -> Result<(), GitErr
         .collect::<HashSet<_>>()
         .into_iter()
         .collect::<Vec<_>>();
-
+    let number_of_repos = repos.len();
     // If for some reason we cannot get the number of threads and the user doesn't try to define it,
     // default to 4, which seems like a reasonable minimum expectation for most systems.
     let default_jobs = std::thread::available_parallelism()
