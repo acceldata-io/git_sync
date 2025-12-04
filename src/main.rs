@@ -102,7 +102,8 @@ async fn main() -> Result<(), GitError> {
         }
         let error = e.to_user_error();
         eprintln!("{error}");
-        std::process::exit(1);
+        let exit_code = e.get_exit_code();
+        std::process::exit(exit_code);
     }
 
     Ok(())
