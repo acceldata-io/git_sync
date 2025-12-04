@@ -58,7 +58,7 @@ pub struct AppArgs {
     #[command(subcommand)]
     pub command: Command,
 
-    /// Hides some output. This is useful when not running in interactive mode. If Slack is
+    /// Make output quiet. This is useful when not running in interactive mode. If Slack is
     /// enabled, this will silence some success messages to slack.
     #[arg(short, long, default_value_t = false, global = true)]
     pub quiet: bool,
@@ -94,8 +94,7 @@ pub struct AppArgs {
 
 /// Validate that the maximum number of parallel jobs is between 1 and 64.
 /// Strictly speaking, there isn't a reason that this couldn't be higher, but
-/// there isn't much point in allowing more jobs than cpu cores available, nor
-/// is there much point in running more than 64 parallel jobs at the same time.
+/// there isn't much point in allowing more jobs than cpu cores available
 fn validate_jobs(s: &str) -> Result<usize, String> {
     let parsed: usize = s
         .parse()
@@ -216,6 +215,38 @@ pub struct DeleteTagCommand {
     pub all: bool,
 }
 
+/// Download a tarball of selected tags
+#[derive(Args, Clone, Debug)]
+#[command(
+    group(
+        ArgGroup::new("target")
+        .required(true)
+        .args(&["all", "repository"])
+    ),
+    /*group(
+        ArgGroup::new("tags")
+        .required(true)
+        .args(&["tag", "filter"])
+    )*/
+)]
+pub struct DownloadTagCommand {
+    /// Specifiy the repository to download from
+    #[arg(short, long)]
+    pub repository: Option<String>,
+    /// Download a specific tag
+    #[arg(short, long)]
+    pub tag: Option<String>,
+    /// A regex to specify which tag(s) to download
+    #[arg(short = 'l', long)]
+    pub filter: Option<String>,
+    /// Output directory for downloaded tarballs. If not specified, the current directory will be
+    /// used
+    #[arg(short, long, default_value = ".")]
+    pub output_dir: PathBuf,
+    /// Download selected tags from all selected repositories
+    #[arg(short, long, default_value_t = false)]
+    pub all: bool,
+}
 /// Sync tags for a forked repository with its parent
 #[derive(Args, Clone, Debug)]
 #[command(group(
@@ -509,6 +540,34 @@ pub struct DeleteBranchCommand {
     pub all: bool,
 }
 
+/// Download a tarball of selected branches
+#[derive(Args, Clone, Debug)]
+#[command(
+    group(
+        ArgGroup::new("target")
+        .required(true)
+        .args(&["all", "repository"])
+    ),
+)]
+pub struct DownloadBranchCommand {
+    /// Specifiy the repository to download from
+    #[arg(short, long)]
+    pub repository: Option<String>,
+    /// The branch to download
+    #[arg(short, long)]
+    pub branch: Option<String>,
+    /// A regex to specify which branch(es) to download
+    #[arg(short = 'l', long)]
+    pub filter: Option<String>,
+    /// Output directory for downloaded tarballs. If not specified, the current directory will be
+    /// used
+    #[arg(short, long, default_value = ".")]
+    pub output_dir: PathBuf,
+    /// Download selected branches from all selected repositories
+    #[arg(short, long, default_value_t = false)]
+    pub all: bool,
+}
+
 /// Change the version of the contents of a branch
 #[derive(Args, Clone, Debug)]
 #[command(
@@ -585,6 +644,7 @@ pub struct CreateBranchCommand {
     #[arg(short, long, default_value_t = false)]
     pub all: bool,
 }
+
 /// Show branches. Optional regex filter
 #[derive(Args, Clone, Debug)]
 #[command(group(
@@ -751,6 +811,8 @@ pub enum TagCommand {
     Create(CreateTagCommand),
     /// Delete a tag
     Delete(DeleteTagCommand),
+    /// Download tags as tarballs
+    Download(DownloadTagCommand),
     /// Sync tags
     Sync(SyncTagCommand),
     /// Show Tags for a repository
@@ -773,6 +835,8 @@ pub enum BranchCommand {
     Create(CreateBranchCommand),
     /// Delete a branch in repositories
     Delete(DeleteBranchCommand),
+    /// Download branches as tarballs
+    Download(DownloadBranchCommand),
     /// Modify text in a branch for repositories
     Modify(ChangeBranchTextCommand),
     /// Show branches for repositories
