@@ -23,7 +23,7 @@ use flate2::write::GzEncoder;
 use std::fs::File;
 use std::path::{Path, PathBuf};
 use tar::Archive;
-use temp_dir::TempDir;
+use tempfile::TempDir;
 
 use crate::error::GitError;
 
@@ -103,7 +103,7 @@ mod tests {
     use crate::utils::compress::{compress_directory, decode_tar_gz};
     use std::path::PathBuf;
     use std::{fs::File, io::Write};
-    use temp_dir::TempDir;
+    use tempfile::TempDir;
 
     #[test]
     fn test_compress_directory() {

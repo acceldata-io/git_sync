@@ -58,7 +58,7 @@ pub struct AppArgs {
     #[command(subcommand)]
     pub command: Command,
 
-    /// Make output quiet. This is useful when not running in interactive mode. If Slack is
+    /// Hides some output. This is useful when not running in interactive mode. If Slack is
     /// enabled, this will silence some success messages to slack.
     #[arg(short, long, default_value_t = false, global = true)]
     pub quiet: bool,
@@ -94,7 +94,8 @@ pub struct AppArgs {
 
 /// Validate that the maximum number of parallel jobs is between 1 and 64.
 /// Strictly speaking, there isn't a reason that this couldn't be higher, but
-/// there isn't much point in allowing more jobs than cpu cores available
+/// there isn't much point in allowing more jobs than cpu cores available, nor
+/// is there much point in running more than 64 parallel jobs at the same time.
 fn validate_jobs(s: &str) -> Result<usize, String> {
     let parsed: usize = s
         .parse()
@@ -233,6 +234,24 @@ pub struct SyncTagCommand {
     /// read/write permissions for the repositories you are syncing.
     #[arg(short, long, default_value_t = false)]
     pub with_annotated: bool,
+}
+/// Show tags for a single repository or all repositories, with optional filtering by regex.
+#[derive(Args, Clone, Debug)]
+#[command(group(
+    ArgGroup::new("target")
+    .required(true)
+    .args(&["all", "repository"])
+))]
+pub struct ShowTagCommand {
+    /// The repository to show tags for. Not valid if '--all' is set
+    #[arg(short, long)]
+    pub repository: Option<String>,
+    /// The regex filter to apply to tag names
+    #[arg(short = 'l', long, default_value = "")]
+    pub filter: String,
+    /// Show tags for all configured repositories. Not valid if '--repository' is set
+    #[arg(short, long, default_value_t = false)]
+    pub all: bool,
 }
 
 // --- Repo Commands ---
@@ -566,6 +585,24 @@ pub struct CreateBranchCommand {
     #[arg(short, long, default_value_t = false)]
     pub all: bool,
 }
+/// Show branches. Optional regex filter
+#[derive(Args, Clone, Debug)]
+#[command(group(
+    ArgGroup::new("target")
+    .required(true)
+    .args(&["all", "repository"])
+))]
+pub struct ShowBranchCommand {
+    /// The repository to show branches for. Not valid if '--all' is set
+    #[arg(short, long)]
+    pub repository: Option<String>,
+    /// The regex filter to apply to branch names
+    #[arg(short = 'l', long, default_value = "")]
+    pub filter: String,
+    /// Show branches for all configured repositories
+    #[arg(short, long, default_value_t = false)]
+    pub all: bool,
+}
 
 // --- Release Commands ---
 
@@ -716,6 +753,8 @@ pub enum TagCommand {
     Delete(DeleteTagCommand),
     /// Sync tags
     Sync(SyncTagCommand),
+    /// Show Tags for a repository
+    Show(ShowTagCommand),
 }
 
 /// Define all the valid commands for acting on repositories
@@ -736,6 +775,8 @@ pub enum BranchCommand {
     Delete(DeleteBranchCommand),
     /// Modify text in a branch for repositories
     Modify(ChangeBranchTextCommand),
+    /// Show branches for repositories
+    Show(ShowBranchCommand),
 }
 
 /// The top-level command enum for the CLI

@@ -164,9 +164,11 @@ To use `cargo-audit`, simply run `cargo audit` in the root of the source code tr
 cargo-audit bin target/release/git_sync
 ```
 
-This will tell you how many CVEs effect the dependencies the binary is actually using, rather than everything listed in Cargo.toml.
+This will tell you how many CVEs affect the dependencies the binary is actually using, rather than everything listed in Cargo.toml.
 ### Configuration
 Run `git_sync config` to create an initial configuration in `$XDG_CONFIG_HOME`, or pass `--file path/to/file` to create it elsewhere. If you do set a custom configuration path, you will need to specify the path with `-f` or `--file` for every command you run. This file, by default, is called 'git-manage.toml'. The generated configuration file has comments in it to aid you in setting everything up.
+
+You can instead get the shared [configuration file](https://github.com/acceldata-io/git_sync_config) to skip part of this -- all the repositories and their groups will already be set up there. You will still need to include some of the below configuration options before you are able to use this tool. The easiest way to use it is to copy the `git-manage.toml` file to `~/.config/` in your home directory.
 
 The important things to add to this configuration file are as follows:
 
@@ -231,6 +233,27 @@ When using a `custom` group, you must also specify the `--group <group_name>` fl
 
 Be careful with `--repository-type all` as it will apply to every single repository within your configuration file, including custom groups. This is useful for querying information about all of your repositories or backing up all projects, but can cause issues if you try to create a release for all configured project, for example. It will generally fail gracefully in the case where some operation can't be run against a particular branch, repository, tag, or release.
 
+### Getting Branch/Tags
+
+You can use this tool to get a list of branches or tags with an optional filter. This can be useful if you want to search across repositories for certain refs, or can be used to grab a list of mpacks that have been released for a particular ODP version. When specifying the filter, it must be a valid regex or you will get an error at runtime.
+
+Example for getting tags from `acceldata-io/ambari-mpacks` for ODP 3.2.3.4-2:
+```bash
+$ git_sync tag show -r https://github.com/acceldata-io/ambari-mpacks --filter "[a-zA-Z].*3\.2\.3\.4-2-tag$"
+```
+This information can be used to quickly see what mpacks were released for different ODP versions.
+
+The same can be done for branches. In this example, we're searching for branches that might be related to older tickets, so we filter for only the branches matching tickets that start with a 3, 2, 1, or 0.
+```bash
+$ git_sync branch show --repository-type custom --group active-projects --all --filter "^ODP-[0-3][0-9]"
+```
+
+Both of the above can be used to query a single repository, or many. When piping/redirecting the output of either of these commands, only the branches will be output, along with their corresponding repository on the same line if you are running the command against more than one, so that you can do things like use `wc` to count the number of branches/tags.
+
+```bash
+$ git_sync tag show -r https://github.com/acceldata-io/ambari-mpacks --filter "[a-zA-Z].*3\.2\.3\.4-2-tag$" | wc -l
+17
+```
 
 ### Syncing a fork with its parent
 

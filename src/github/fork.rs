@@ -29,7 +29,7 @@ use std::collections::{HashMap, HashSet};
 use std::fmt::{Display, Write};
 use std::process::Command;
 use std::sync::Arc;
-use temp_dir::TempDir;
+use tempfile::TempDir;
 
 /// Graphql query to fetch branches and their commit dates
 static GRAPHQL_QUERY: &str = r#"
@@ -100,9 +100,16 @@ impl GithubClient {
         &self,
         url: T,
         branch: Option<&String>,
+        dry_run: bool,
     ) -> Result<(), GitError> {
         let info = get_repo_info_from_url(&url)?;
         let (owner, repo) = (info.owner, info.repo_name);
+        if dry_run {
+            println!(
+                "Dry run: normally we would sync the fork at '{owner}/{repo}' with its parent. Skipping..."
+            );
+            return Ok(());
+        }
         println!("Syncing {owner}/{repo} with its parent repository...");
 
         let parent = self.get_parent_repo(url).await?;
@@ -136,7 +143,7 @@ impl GithubClient {
         Ok(())
     }
     /// Fetch all branches for a single repository
-    async fn fetch_branches<T: AsRef<str> + Serialize, U: AsRef<str> + Serialize>(
+    pub async fn fetch_branches<T: AsRef<str> + Serialize, U: AsRef<str> + Serialize>(
         &self,
         owner: T,
         repository: U,
@@ -179,9 +186,19 @@ impl GithubClient {
     }
     /// Go through and try to sync every branch that's common between both the fork and its parent.
     /// This operation takes longer than only syncing one branch
-    pub async fn sync_fork_recursive<T: AsRef<str>>(&self, url: T) -> Result<(), GitError> {
+    pub async fn sync_fork_recursive<T: AsRef<str>>(
+        &self,
+        url: T,
+        dry_run: bool,
+    ) -> Result<(), GitError> {
         let info = get_repo_info_from_url(&url)?;
         let (owner, repo) = (info.owner, info.repo_name);
+        if dry_run {
+            println!(
+                "Dry run: normally we would sync all branches for fork at '{owner}/{repo}' with its parent. Skipping..."
+            );
+            return Ok(());
+        }
         println!("Syncing {owner}/{repo} with its parent repository...");
 
         let parent = self.get_parent_repo(url).await?;
@@ -270,14 +287,15 @@ impl GithubClient {
         &self,
         repositories: &[T],
         recursive: bool,
+        dry_run: bool,
     ) -> Result<(), GitError> {
         let mut futures = FuturesUnordered::new();
         for repo in repositories {
             futures.push(async move {
                 let result = if recursive {
-                    self.sync_fork_recursive(&repo).await
+                    self.sync_fork_recursive(&repo, dry_run).await
                 } else {
-                    self.sync_fork(repo, None).await
+                    self.sync_fork(repo, None, dry_run).await
                 };
                 (repo, result)
             });
@@ -302,11 +320,15 @@ impl GithubClient {
     /// This is for syncing repositories that have upstream repositories, but do not have them
     /// configured. We have to do it manually instead of using the Github API. This only supports
     /// fast forward merges, and will report errors for branches that cannot be fast-forwarded.
-    pub async fn sync_with_upstream<T: AsRef<str> + ToString + Display + Copy>(
+    pub async fn sync_with_upstream<T>(
         &self,
         url: T,
         upstream: T,
-    ) -> Result<(), GitError> {
+        dry_run: bool,
+    ) -> Result<(), GitError>
+    where
+        T: AsRef<str> + Display + Copy,
+    {
         let ssh_url = http_to_ssh_repo(url)?;
         let info = get_repo_info_from_url(url)?;
         let last_part = info.repo_name;
@@ -316,8 +338,7 @@ impl GithubClient {
         let _lock = Arc::clone(&self.semaphore).acquire_owned().await?;
 
         let task: Result<(usize, usize), GitError> = tokio::task::spawn_blocking(move || {
-            let tmp_dir = TempDir::new()
-                .map_err(|e| GitError::Other(format!("Failed to create temp dir: {e}")))?;
+            let tmp_dir = TempDir::new()?;
             let tmp = tmp_dir.path();
             let tmp_str_base = tmp
                 .to_str()
@@ -412,10 +433,11 @@ impl GithubClient {
             if successful == 0 && !errors.is_empty() {
                 return Err(GitError::GitPushError(ssh_url.clone()));
             }
-
-            Command::new("git")
-                .args(["-C", tmp_str.as_str(), "push", "origin", "--all"])
-                .status()?;
+            if !dry_run {
+                Command::new("git")
+                    .args(["-C", tmp_str.as_str(), "push", "origin", "--all"])
+                    .status()?;
+            }
 
             Ok((successful, no_update))
         })
@@ -436,7 +458,7 @@ impl GithubClient {
                     .await;
                     return Ok(());
                 }
-                if self.is_tty {
+                if self.is_tty && !dry_run {
                     println!("Successfully synced {url} with {upstream_url}");
                 }
 
@@ -449,15 +471,19 @@ impl GithubClient {
     }
     /// Sync all configured repositories. Only repositories that have a parent repository
     /// should be passed to this function
-    pub async fn sync_all_forks_workaround<T: AsRef<str> + Display>(
+    pub async fn sync_all_forks_workaround<T>(
         &self,
         repositories: HashMap<T, T>,
-    ) -> Result<(), GitError> {
+        dry_run: bool,
+    ) -> Result<(), GitError>
+    where
+        T: AsRef<str> + Display,
+    {
         let mut futures = FuturesUnordered::new();
         for (repo, upstream) in repositories {
             futures.push(async move {
                 let result = self
-                    .sync_with_upstream(repo.as_ref(), upstream.as_ref())
+                    .sync_with_upstream(repo.as_ref(), upstream.as_ref(), dry_run)
                     .await;
                 (repo, upstream, result)
             });
@@ -466,7 +492,9 @@ impl GithubClient {
         while let Some((repo, upstream, result)) = futures.next().await {
             match result {
                 Ok(()) => {
-                    println!("✅ Successfully synced {repo} with {upstream}");
+                    if !dry_run {
+                        println!("✅ Successfully synced {repo} with {upstream}");
+                    }
                 }
                 Err(e) => {
                     println!("❌ Failed to sync {repo} with {upstream}: {e}");

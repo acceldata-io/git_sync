@@ -19,6 +19,7 @@ under the License.
 
 use crate::error::{GitError, is_retryable};
 use crate::github::client::Comparison;
+use crate::utils::filter::filter_ref;
 use crate::utils::repo::{RepoInfo, TagInfo, TagType, get_repo_info_from_url, http_to_ssh_repo};
 use crate::{async_retry, handle_api_response, handle_futures_unordered};
 use futures::stream::FuturesUnordered;
@@ -30,7 +31,7 @@ use std::collections::{HashMap, HashSet};
 use std::error::Error;
 use std::hash::Hash;
 use std::process::Command;
-use temp_dir::TempDir;
+use tempfile::TempDir;
 
 use indexmap::IndexSet;
 use serde_json::json;
@@ -325,6 +326,7 @@ impl GithubClient {
         url: T,
         parent_url: Option<T>,
         process_annotated: bool,
+        dry_run: bool,
     ) -> Result<(), GitError> {
         let info = get_repo_info_from_url(url)?;
 
@@ -368,7 +370,7 @@ impl GithubClient {
                     let name = tag.name.clone();
                     (repo, name, owner, tag)
                 }),
-                |repo, name, owner, tag| self.sync_lightweight_tag(&owner, &repo.clone(), tag).map(|result|(repo, name, result)),
+                |repo, name, owner, tag| self.sync_lightweight_tag(&owner, &repo.clone(), tag, dry_run).map(|result|(repo, name, result)),
                 (repo, name, result) {
                     match result {
                         Ok(()) => {
@@ -390,7 +392,7 @@ impl GithubClient {
         if process_annotated {
             let ssh_url = http_to_ssh_repo(url)?;
             let (annotated, lightweight) = tokio::join!(
-                self.sync_annotated_tags(&annotated, &ssh_url, parent_urls),
+                self.sync_annotated_tags(&annotated, &ssh_url, parent_urls, dry_run),
                 lightweight_fut,
             );
             let tag_results = [("annotated", annotated), ("lightweight", lightweight)];
@@ -462,17 +464,23 @@ impl GithubClient {
         Ok(())
     }
     /// Sync tags for all configured repositories
-    pub async fn sync_all_tags<T: AsRef<str> + ToString + Display + Eq + Hash>(
+    pub async fn sync_all_tags<T>(
         &self,
         process_annotated: bool,
         repositories: &[T],
         fork_workaround: HashMap<T, T>,
-    ) -> Result<(), GitError> {
+        dry_run: bool,
+    ) -> Result<(), GitError>
+    where
+        T: AsRef<str> + Display + Eq + Hash,
+    {
         let mut futures = FuturesUnordered::new();
         for url in repositories {
             let parent_url = fork_workaround.get(url);
             futures.push(async move {
-                let result = self.sync_tags(url, parent_url, process_annotated).await;
+                let result = self
+                    .sync_tags(url, parent_url, process_annotated, dry_run)
+                    .await;
                 (url, result)
             });
         }
@@ -480,7 +488,7 @@ impl GithubClient {
         while let Some((repo, result)) = futures.next().await {
             match result {
                 Ok(()) => {
-                    if self.is_tty {
+                    if self.is_tty && !dry_run {
                         println!("✅ Successfully synced tags for {repo}");
                     }
                 }
@@ -500,12 +508,23 @@ impl GithubClient {
     }
     /// Sync lightweight tags from the parent repo to the forked repo. This can be trivially done
     /// using the github api, so we don't need to call out to
-    pub async fn sync_lightweight_tag(
+    pub async fn sync_lightweight_tag<T>(
         &self,
-        owner: impl AsRef<str> + Display,
-        repo: impl AsRef<str> + Display,
+        owner: T,
+        repo: T,
         tag: &TagInfo,
-    ) -> Result<(), GitError> {
+        dry_run: bool,
+    ) -> Result<(), GitError>
+    where
+        T: AsRef<str> + Display,
+    {
+        if dry_run {
+            println!(
+                "Dry run: normally, we would sync '{}' here for {owner}/{repo}. Skipping...",
+                tag.name
+            );
+            return Ok(());
+        }
         let body = json!({
             "ref": format!("refs/tags/{}", tag.name),
             "sha": tag.sha,
@@ -551,31 +570,39 @@ impl GithubClient {
     ///
     /// We use `tokio::task::spawn_blocking` to make sure we don't make any other async functions
     /// hang. `Command::new` can end up blocking other threads.
-    pub async fn sync_annotated_tags(
+    pub async fn sync_annotated_tags<T>(
         &self,
         tags: &IndexSet<TagInfo>,
-        ssh_url: impl AsRef<str> + ToString,
+        ssh_url: T,
         parent_urls: HashSet<String>,
-    ) -> Result<(), GitError> {
+        dry_run: bool,
+    ) -> Result<(), GitError>
+    where
+        T: AsRef<str>,
+    {
         if tags.is_empty() {
             return Ok(());
         }
         let lock = self.semaphore.clone().acquire_owned().await?;
         let tags = tags.clone();
         let tag_len = tags.len();
-        let ssh_url = ssh_url.to_string();
+        let ssh_url = ssh_url.as_ref().to_string();
         let output_url = ssh_url.clone();
         let result = tokio::task::spawn_blocking(move || {
             let _lock = lock;
             let parent_urls: Vec<String> = parent_urls.into_iter().collect();
 
             // Use a temp directory for the git repository so it's cleaned up automatically
-            let tmp_dir = TempDir::new()
-                .map_err(|e| GitError::Other(format!("Failed to create temp dir: {e}")))?;
-            let tmp = tmp_dir.path();
+            // If dry run is specified, keep the temp directory for inspection
+            let tmp_dir = TempDir::new()?;
+            let tmp = if dry_run {
+                tmp_dir.keep()
+            } else {
+                tmp_dir.path().into()
+            };
             let tmp_str = tmp
                 .to_str()
-                .ok_or_else(|| GitError::Other("Temp dir not valid UTF-8".to_string()))?;
+                .ok_or_else(|| GitError::Other("Temp dir is not valid UTF-8".to_string()))?;
 
             // Clone with the bare minimum information to reduce the amount we download
             Command::new("git")
@@ -668,11 +695,13 @@ impl GithubClient {
             // Only push the newly added annotated tags
             let mut push_args = vec!["-C", tmp_str, "push", "origin"];
             push_args.extend(tags.iter().map(|tag| tag.name.as_str()));
-
-            let status = Command::new("git").args(&push_args).status()?;
-            if !status.success() {
-                              return Err(GitError::GitPushError(ssh_url.clone()
-                ));
+            if dry_run {
+                println!("Dry run: would normally push annotated tags for '{ssh_url}' here. You can find the directory in '{tmp_str}'");
+            } else {
+                let status = Command::new("git").args(&push_args).status()?;
+                if !status.success() {
+                    return Err(GitError::GitPushError(ssh_url.clone()));
+                }
             }
             if slack_error.is_empty() {
                 Ok(None)
@@ -875,5 +904,55 @@ impl GithubClient {
             return Err(GitError::MultipleErrors(errors));
         }
         Ok(())
+    }
+
+    /// Filter tags for a single repository
+    pub async fn filter_tags<T, U>(&self, url: T, filter: U) -> Result<Vec<String>, GitError>
+    where
+        T: AsRef<str> + Copy,
+        U: AsRef<str> + Display,
+    {
+        let (all_tags, _) = self.get_tags(url).await?;
+        let tag_names_only: Vec<String> = all_tags.into_iter().map(|t| t.name.clone()).collect();
+        let filtered: Vec<String> = filter_ref(&tag_names_only, filter)?;
+        Ok(filtered)
+    }
+
+    /// Filter tags for all configured repositories
+    pub async fn filter_all_tags<T, U>(
+        &self,
+        repositories: &[T],
+        filter: U,
+    ) -> Result<HashMap<String, Vec<String>>, GitError>
+    where
+        T: AsRef<str> + ToString + Display + Eq + Hash,
+        U: AsRef<str> + Copy + Display,
+    {
+        let mut futures = FuturesUnordered::new();
+        for repo in repositories {
+            futures.push(async move {
+                let result = self.filter_tags(repo, filter).await;
+                (repo.to_string(), result)
+            });
+        }
+        let mut filtered_map: HashMap<String, Vec<String>> = HashMap::new();
+        let mut errors: Vec<(String, GitError)> = Vec::new();
+        while let Some((repo, result)) = futures.next().await {
+            match result {
+                Ok(tags) if !tags.is_empty() => {
+                    filtered_map.insert(repo, tags);
+                }
+                // Don't add to the vector if no matching tags are returned
+                Ok(_) => {}
+                Err(e) => {
+                    eprintln!("Failed to filter tags for {repo}: {e}");
+                    errors.push((repo.clone(), e));
+                }
+            }
+        }
+        if !errors.is_empty() {
+            return Err(GitError::MultipleErrors(errors));
+        }
+        Ok(filtered_map)
     }
 }

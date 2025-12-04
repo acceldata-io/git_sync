@@ -27,7 +27,6 @@ use crate::init::generate_config;
 use crate::utils::pr::{CreatePrOptions, MergePrOptions};
 use crate::utils::repo::Checks;
 use crate::utils::repo::RepoChecks;
-
 use clap_complete::{
     generate_to,
     shells::{Bash, Fish, Zsh},
@@ -122,10 +121,18 @@ pub async fn match_arguments(app: &AppArgs, config: Config) -> Result<(), GitErr
 
     let result = match &app.command {
         Command::Tag { cmd } => {
-            match_tag_cmds(&client, repos, cmd, fork_workaround_repositories).await
+            match_tag_cmds(&client, repos, cmd, fork_workaround_repositories, dry_run).await
         }
         Command::Repo { cmd } => {
-            match_repo_cmds(&client, repos, config, cmd, fork_workaround_repositories).await
+            match_repo_cmds(
+                &client,
+                repos,
+                config,
+                cmd,
+                fork_workaround_repositories,
+                dry_run,
+            )
+            .await
         }
         Command::Branch { cmd } => match_branch_cmds(&client, repos, cmd, quiet, dry_run).await,
         Command::Release { cmd } => match_release_cmds(&client, repos, config, cmd).await,
@@ -189,6 +196,7 @@ async fn match_tag_cmds(
     repos: Vec<String>,
     cmd: &TagCommand,
     fork_workaround: HashMap<String, String>,
+    dry_run: bool,
 ) -> Result<(), GitError> {
     match cmd {
         TagCommand::Compare(compare_cmd) => {
@@ -201,6 +209,47 @@ async fn match_tag_cmds(
                 let _diffs = client.diff_tags(repository).await?;
             } else {
                 return Err(GitError::MissingRepositoryName);
+            }
+        }
+        TagCommand::Show(show_cmd) => {
+            let repository = show_cmd.repository.as_ref();
+
+            if let Some(repository) = repository {
+                let mut output = client.filter_tags(repository, &show_cmd.filter).await?;
+                output.sort();
+                if !output.is_empty() && client.is_tty {
+                    println!("Repository '{repository}'");
+                }
+                for tag in output {
+                    println!("\tTag: '{tag}'");
+                }
+            } else if show_cmd.all {
+                let output = client.filter_all_tags(&repos[..], &show_cmd.filter).await?;
+                let sorted: Vec<(String, Vec<String>)> = output
+                    .into_iter()
+                    .map(|(repo, mut tags)| {
+                        tags.sort();
+                        (repo, tags)
+                    })
+                    .collect();
+                if !sorted.is_empty() {
+                    for (repository, tags) in sorted {
+                        if client.is_tty {
+                            println!("Repository '{repository}'");
+                        }
+                        for tag in tags {
+                            // Give some extra context to non-interactive use
+                            // This could come up if piping the output or redirecting stdout to a
+                            // file.
+                            let prefix = if client.is_tty {
+                                String::from("Tag")
+                            } else {
+                                repository.clone()
+                            };
+                            println!("\t{prefix}: '{tag}'");
+                        }
+                    }
+                }
             }
         }
         TagCommand::Create(create_cmd) => {
@@ -236,16 +285,16 @@ async fn match_tag_cmds(
 
             if sync_cmd.all {
                 client
-                    .sync_all_tags(process_annotated_tags, &repos[..], fork_workaround)
+                    .sync_all_tags(process_annotated_tags, &repos[..], fork_workaround, dry_run)
                     .await?;
             } else if let Some(repository) = repository {
                 if let Some(parent) = fork_workaround.get(repository) {
                     client
-                        .sync_tags(repository, Some(parent), process_annotated_tags)
+                        .sync_tags(repository, Some(parent), process_annotated_tags, dry_run)
                         .await?;
                 } else {
                     client
-                        .sync_tags(repository, None, process_annotated_tags)
+                        .sync_tags(repository, None, process_annotated_tags, dry_run)
                         .await?;
                 }
             } else {
@@ -321,6 +370,7 @@ async fn match_branch_cmds(
                         message,
                         dry_run,
                         is_version,
+                        quiet,
                     )
                     .await?;
             } else if let Some(repository) = &repository {
@@ -333,8 +383,52 @@ async fn match_branch_cmds(
                         message,
                         dry_run,
                         is_version,
+                        quiet,
                     )
                     .await?;
+            }
+        }
+        BranchCommand::Show(show_cmd) => {
+            let repository = show_cmd.repository.as_ref();
+
+            if let Some(repository) = repository {
+                let mut output = client.filter_branches(repository, &show_cmd.filter).await?;
+                output.sort();
+                if !output.is_empty() && client.is_tty {
+                    println!("Repository '{repository}'");
+                }
+                for branch in output {
+                    println!("\tBranch: '{branch}'");
+                }
+            } else if show_cmd.all {
+                let output = client
+                    .filter_all_branches(&repos[..], &show_cmd.filter)
+                    .await?;
+                let sorted: Vec<(String, Vec<String>)> = output
+                    .into_iter()
+                    .map(|(repo, mut branches)| {
+                        branches.sort();
+                        (repo, branches)
+                    })
+                    .collect();
+                if !sorted.is_empty() {
+                    for (repository, branches) in sorted {
+                        if client.is_tty {
+                            println!("Repository '{repository}'");
+                        }
+                        for branch in branches {
+                            // Give some extra context to non-interactive use
+                            // This could come up if piping the output or redirecting stdout to a
+                            // file.
+                            let prefix = if client.is_tty {
+                                String::from("Branch")
+                            } else {
+                                repository.clone()
+                            };
+                            println!("\t{prefix}: '{branch}'");
+                        }
+                    }
+                }
             }
         }
     }
@@ -348,6 +442,7 @@ async fn match_repo_cmds(
     config: Config,
     cmd: &RepoCommand,
     fork_workaround: HashMap<String, String>,
+    dry_run: bool,
 ) -> Result<(), GitError> {
     match cmd {
         RepoCommand::Sync(sync_cmd) => {
@@ -358,11 +453,13 @@ async fn match_repo_cmds(
 
             if sync_cmd.all {
                 if fork_workaround.is_empty() {
-                    client.sync_all_forks(&repos[..], recursive).await?;
+                    client
+                        .sync_all_forks(&repos[..], recursive, dry_run)
+                        .await?;
                 } else {
                     let (task1, task2) = tokio::join!(
-                        client.sync_all_forks_workaround(fork_workaround.clone()),
-                        client.sync_all_forks(&repos[..], recursive),
+                        client.sync_all_forks_workaround(fork_workaround.clone(), dry_run),
+                        client.sync_all_forks(&repos[..], recursive, dry_run),
                     );
                     task1?;
                     task2?;
@@ -370,13 +467,15 @@ async fn match_repo_cmds(
             } else if let Some(repository) = repository {
                 // Process repositories using git
                 if let Some(parent) = fork_workaround.get(repository) {
-                    client.sync_with_upstream(repository, parent).await?;
+                    client
+                        .sync_with_upstream(repository, parent, dry_run)
+                        .await?;
                 } else if forks_with_workaround.contains_key(repository) {
                     return Err(GitError::NoUpstreamRepo(repository.clone()));
                 } else if recursive {
-                    client.sync_fork_recursive(repository).await?;
+                    client.sync_fork_recursive(repository, dry_run).await?;
                 } else {
-                    client.sync_fork(repository, branch).await?;
+                    client.sync_fork(repository, branch, dry_run).await?;
                 }
             } else {
                 return Err(GitError::MissingRepositoryName);

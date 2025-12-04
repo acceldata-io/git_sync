@@ -18,6 +18,7 @@ under the License.
 */
 pub mod compress;
 pub mod file_utils;
+pub mod filter;
 pub mod macros;
 pub mod pr;
 pub mod repo;
