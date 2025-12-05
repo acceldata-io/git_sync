@@ -724,6 +724,7 @@ impl GithubClient {
     {
         let info = get_repo_info_from_url(url.as_ref())?;
         let (owner, repo) = (info.owner, info.repo_name);
+        let _permit = self.semaphore.clone().acquire_owned().await?;
         let all_branches: Vec<String> = self
             .fetch_branches(owner, repo)
             .await?
@@ -791,8 +792,6 @@ impl GithubClient {
         let info = get_repo_info_from_url(&url)?;
         let (owner, repo) = (info.owner, info.repo_name);
 
-        let _permit = self.semaphore.clone().acquire_owned().await?;
-
         let mut refs: Vec<String> = Vec::new();
         if !regex_filter.as_ref().is_empty() {
             self.filter_branches(url, regex_filter)
@@ -805,6 +804,7 @@ impl GithubClient {
         }
         let octocrab = self.octocrab.clone();
         for branch in refs {
+            let permit = self.semaphore.clone().acquire_owned().await?;
             let mut tarball_name = format!("{branch}.tar.gz");
             // This might do for now, but there must be a better way to do this
             if tarball_name.starts_with("ODP-") {
@@ -825,6 +825,7 @@ impl GithubClient {
                     file.write_all(chunk)?;
                 }
             }
+            drop(permit);
         }
         Ok(())
     }
@@ -848,7 +849,7 @@ impl GithubClient {
             let regex_filter = regex_filter.as_ref();
             futures.push(async move {
                 let result = self
-                    .download_branches(repo, branch.as_ref(), regex_filter, output_dir)
+                    .download_branches(repo, branch, regex_filter, output_dir)
                     .await;
                 (repo.to_string(), result)
             });
