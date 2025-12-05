@@ -223,11 +223,6 @@ pub struct DeleteTagCommand {
         .required(true)
         .args(&["all", "repository"])
     ),
-    /*group(
-        ArgGroup::new("tags")
-        .required(true)
-        .args(&["tag", "filter"])
-    )*/
 )]
 pub struct DownloadTagCommand {
     /// Specifiy the repository to download from
@@ -239,6 +234,10 @@ pub struct DownloadTagCommand {
     /// A regex to specify which tag(s) to download
     #[arg(short = 'l', long)]
     pub filter: Option<String>,
+    /// If the tarball filename has this prefix, the repo name will be added to the front of the
+    /// filename to avoid collisions
+    #[arg(short, long, default_value = "ODP")]
+    pub prefix: String,
     /// Output directory for downloaded tarballs. If not specified, the current directory will be
     /// used
     #[arg(short, long, default_value = ".")]
@@ -563,6 +562,10 @@ pub struct DownloadBranchCommand {
     /// used
     #[arg(short, long, default_value = ".")]
     pub output_dir: PathBuf,
+    /// If the tarball filename has this prefix, the repo name will be added to the front of the
+    /// filename to avoid collisions
+    #[arg(short, long, default_value = "ODP")]
+    pub prefix: String,
     /// Download selected branches from all selected repositories
     #[arg(short, long, default_value_t = false)]
     pub all: bool,

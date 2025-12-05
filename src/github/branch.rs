@@ -773,17 +773,19 @@ impl GithubClient {
         Ok(filtered_map)
     }
     /// Download branches for a single repository, based off of a specified branch and/or a regex filter.
-    pub async fn download_branches<T, U, V>(
+    pub async fn download_branches<T, U, V, W>(
         &self,
         url: T,
         branch: Option<U>,
         regex_filter: V,
         output_dir: &Path,
+        prefix: W,
     ) -> Result<(), GitError>
     where
         T: AsRef<str> + Display,
         U: AsRef<str> + Display,
         V: AsRef<str> + Display,
+        W: AsRef<str> + Display,
     {
         if !Path::new(output_dir).exists() {
             fs::create_dir_all(output_dir)?;
@@ -806,8 +808,8 @@ impl GithubClient {
         for branch in refs {
             let permit = self.semaphore.clone().acquire_owned().await?;
             let mut tarball_name = format!("{branch}.tar.gz");
-            // This might do for now, but there must be a better way to do this
-            if tarball_name.starts_with("ODP-") {
+            // This helps prevent collisions between tarball names from different repositories
+            if tarball_name.starts_with(prefix.as_ref()) && !prefix.as_ref().is_empty() {
                 tarball_name = format!("{repo}-{tarball_name}");
             }
 
@@ -837,6 +839,7 @@ impl GithubClient {
         branch: Option<U>,
         regex_filter: V,
         output_dir: &Path,
+        prefix: String,
     ) -> Result<(), GitError>
     where
         T: AsRef<str> + Display,
@@ -847,9 +850,10 @@ impl GithubClient {
         for repo in repositories {
             let branch = branch.as_ref();
             let regex_filter = regex_filter.as_ref();
+            let prefix = prefix.clone();
             futures.push(async move {
                 let result = self
-                    .download_branches(repo, branch, regex_filter, output_dir)
+                    .download_branches(repo, branch, regex_filter, output_dir, &prefix)
                     .await;
                 (repo.to_string(), result)
             });

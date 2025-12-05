@@ -282,14 +282,27 @@ async fn match_tag_cmds(
             let repository = download_cmd.repository.as_ref();
             let output_folder = download_cmd.output_dir.clone();
             let filter = download_cmd.filter.clone().unwrap_or(String::new());
+            let prefix = download_cmd.prefix.clone();
 
             if download_cmd.all {
                 client
-                    .download_all_tags(&repos[..], download_cmd.tag.clone(), filter, &output_folder)
+                    .download_all_tags(
+                        &repos[..],
+                        download_cmd.tag.clone(),
+                        filter,
+                        &output_folder,
+                        prefix,
+                    )
                     .await?;
             } else if let Some(repository) = repository {
                 client
-                    .download_tags(repository, download_cmd.tag.clone(), filter, &output_folder)
+                    .download_tags(
+                        repository,
+                        download_cmd.tag.clone(),
+                        filter,
+                        &output_folder,
+                        prefix,
+                    )
                     .await?;
             } else {
                 return Err(GitError::MissingRepositoryName);
@@ -371,6 +384,7 @@ async fn match_branch_cmds(
             let repository = download_cmd.repository.as_ref();
             let output_folder = download_cmd.output_dir.clone();
             let filter = download_cmd.filter.clone().unwrap_or(String::new());
+            let prefix = download_cmd.prefix.clone();
 
             if download_cmd.all {
                 client
@@ -379,6 +393,7 @@ async fn match_branch_cmds(
                         download_cmd.branch.clone(),
                         filter,
                         &output_folder,
+                        prefix,
                     )
                     .await?;
             } else if let Some(repository) = repository {
@@ -388,6 +403,7 @@ async fn match_branch_cmds(
                         download_cmd.branch.clone(),
                         filter,
                         &output_folder,
+                        prefix,
                     )
                     .await?;
             } else {

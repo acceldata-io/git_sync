@@ -961,17 +961,19 @@ impl GithubClient {
         Ok(filtered_map)
     }
     /// Download tags for a single repository, based off of a specified tag and/or a regex filter.
-    pub async fn download_tags<T, U, V>(
+    pub async fn download_tags<T, U, V, W>(
         &self,
         url: T,
         tag: Option<U>,
         regex_filter: V,
         output_dir: &Path,
+        prefix: W,
     ) -> Result<(), GitError>
     where
         T: AsRef<str> + Display,
         U: AsRef<str> + Display,
         V: AsRef<str> + Display,
+        W: AsRef<str> + Display,
     {
         if !Path::new(output_dir).exists() {
             fs::create_dir_all(output_dir)?;
@@ -1000,9 +1002,9 @@ impl GithubClient {
                 format!("{tag}.tar.gz")
             };
 
-            // This might do for now, but there must be a better way to do this
-            if let Some(s) = tarball_name.strip_prefix("ODP-") {
-                tarball_name = format!("{repo}-{s}");
+            // This helps prevent collisions between tarball names from different repositories
+            if tarball_name.starts_with(prefix.as_ref()) && !prefix.as_ref().is_empty() {
+                tarball_name = format!("{repo}-{tarball_name}");
             }
 
             let mut resp = octocrab
@@ -1032,6 +1034,7 @@ impl GithubClient {
         tag: Option<U>,
         regex_filter: V,
         output_dir: &Path,
+        prefix: String,
     ) -> Result<(), GitError>
     where
         T: AsRef<str> + Display,
@@ -1042,9 +1045,10 @@ impl GithubClient {
         for repo in repositories {
             let tag = tag.as_ref();
             let regex_filter = regex_filter.as_ref();
+            let prefix = prefix.clone();
             futures.push(async move {
                 let result = self
-                    .download_tags(repo, tag, regex_filter, output_dir)
+                    .download_tags(repo, tag, regex_filter, output_dir, &prefix)
                     .await;
                 (repo.to_string(), result)
             });
