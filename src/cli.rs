@@ -225,7 +225,7 @@ pub struct DeleteTagCommand {
     ),
 )]
 pub struct DownloadTagCommand {
-    /// Specifiy the repository to download from
+    /// Specify the repository to download from
     #[arg(short, long)]
     pub repository: Option<String>,
     /// Download a specific tag
