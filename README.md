@@ -266,7 +266,14 @@ $ git_sync tag download -r https://github.com/acceldata-io/ambari-mpacks --tag k
 $ git_sync branch download --all --branch ODP-main --output-dir ~/odp-main-branches
 ```
 
-When downloading multiple branches or tags that begin with `ODP-`, the `ODP-` will either be stripped, or the repository name will be added as a prefix. Additionally, if the tag you're downloading ends with `-tag`, that will be removed from the final file.
+By default, when downloading multiple branches or tags that begin with `ODP-`, the tarball will have the repository name appended to the beginning as a prefix to prevent name collision. This can be configured using the `--prefix <your prefix>` flag to specify any arbitrary prefix.
+
+```bash
+# The --prefix `ODP` is the default value
+$ git_sync tag download --all --filter "3\.2\.3\.4-3-tag$" --prefix ODP
+```
+
+Additionally, if the tag you're downloading ends with `-tag`, `-tag` will be removed from the final file name.
 
 ### Syncing a fork with its parent
 
