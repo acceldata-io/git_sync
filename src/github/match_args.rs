@@ -278,6 +278,36 @@ async fn match_tag_cmds(
                 return Err(GitError::MissingRepositoryName);
             }
         }
+        TagCommand::Download(download_cmd) => {
+            let repository = download_cmd.repository.as_ref();
+            let output_folder = download_cmd.output_dir.clone();
+            let filter = download_cmd.filter.clone().unwrap_or(String::new());
+            let prefix = download_cmd.prefix.clone();
+
+            if download_cmd.all {
+                client
+                    .download_all_tags(
+                        &repos[..],
+                        download_cmd.tag.clone(),
+                        filter,
+                        &output_folder,
+                        prefix,
+                    )
+                    .await?;
+            } else if let Some(repository) = repository {
+                client
+                    .download_tags(
+                        repository,
+                        download_cmd.tag.clone(),
+                        filter,
+                        &output_folder,
+                        prefix,
+                    )
+                    .await?;
+            } else {
+                return Err(GitError::MissingRepositoryName);
+            }
+        }
         TagCommand::Sync(sync_cmd) => {
             let repository = sync_cmd.repository.as_ref();
             // By default, this is false
@@ -348,6 +378,36 @@ async fn match_branch_cmds(
                     .await?;
             } else if let Some(repository) = repository {
                 client.delete_branch(repository, &delete_cmd.branch).await?;
+            }
+        }
+        BranchCommand::Download(download_cmd) => {
+            let repository = download_cmd.repository.as_ref();
+            let output_folder = download_cmd.output_dir.clone();
+            let filter = download_cmd.filter.clone().unwrap_or(String::new());
+            let prefix = download_cmd.prefix.clone();
+
+            if download_cmd.all {
+                client
+                    .download_all_branches(
+                        &repos[..],
+                        download_cmd.branch.clone(),
+                        filter,
+                        &output_folder,
+                        prefix,
+                    )
+                    .await?;
+            } else if let Some(repository) = repository {
+                client
+                    .download_branches(
+                        repository,
+                        download_cmd.branch.clone(),
+                        filter,
+                        &output_folder,
+                        prefix,
+                    )
+                    .await?;
+            } else {
+                return Err(GitError::MissingRepositoryName);
             }
         }
         BranchCommand::Modify(modify_cmd) => {

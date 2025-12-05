@@ -16,6 +16,7 @@
 - Run various checks for a repository
 - Modify text in a branch
 - Backup a repository atomically, including backing up a tarball to AWS
+- Download branches or tags as tarballs
 - Send notifications to Slack, if Slack support is enabled (default feature)
 - Run all of the above for all configured repositories
 
@@ -254,6 +255,25 @@ Both of the above can be used to query a single repository, or many. When piping
 $ git_sync tag show -r https://github.com/acceldata-io/ambari-mpacks --filter "[a-zA-Z].*3\.2\.3\.4-2-tag$" | wc -l
 17
 ```
+
+### Downloading Branches or Tags as tarballs
+
+You can download branches or tags as tarballs using the 'download' command for both the branch and tag commands. You can specify a specific branch or tag using either `--branch` or `--tag` (respectively), or you can use a regex filter to download all branches/tags that match your regex.
+
+```bash
+$ git_sync tag download -r https://github.com/acceldata-io/ambari-mpacks --tag kudu-1.17.0.3.2.3.4-3-tag --output-dir ~/kudu-mpack
+
+$ git_sync branch download --all --branch ODP-main --output-dir ~/odp-main-branches
+```
+
+By default, when downloading multiple branches or tags that begin with `ODP-`, the tarball will have the repository name appended to the beginning as a prefix to prevent name collision. This can be configured using the `--prefix <your prefix>` flag to specify any arbitrary prefix.
+
+```bash
+# The --prefix `ODP` is the default value
+$ git_sync tag download --all --filter "3\.2\.3\.4-3-tag$" --prefix ODP
+```
+
+Additionally, if the tag you're downloading ends with `-tag`, `-tag` will be removed from the final file name.
 
 ### Syncing a fork with its parent
 

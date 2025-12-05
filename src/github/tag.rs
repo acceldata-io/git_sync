@@ -29,7 +29,11 @@ use octocrab::params::repos::Reference;
 use serde::Deserialize;
 use std::collections::{HashMap, HashSet};
 use std::error::Error;
+use std::fs;
+use std::fs::File;
 use std::hash::Hash;
+use std::io::Write;
+use std::path::Path;
 use std::process::Command;
 use tempfile::TempDir;
 
@@ -38,6 +42,7 @@ use serde_json::json;
 use std::fmt::{Display, Write as _};
 
 use crate::github::client::GithubClient;
+use http_body_util::BodyExt;
 
 /// The root level response from github
 #[derive(Deserialize)]
@@ -909,7 +914,7 @@ impl GithubClient {
     /// Filter tags for a single repository
     pub async fn filter_tags<T, U>(&self, url: T, filter: U) -> Result<Vec<String>, GitError>
     where
-        T: AsRef<str> + Copy,
+        T: AsRef<str>,
         U: AsRef<str> + Display,
     {
         let (all_tags, _) = self.get_tags(url).await?;
@@ -954,5 +959,120 @@ impl GithubClient {
             return Err(GitError::MultipleErrors(errors));
         }
         Ok(filtered_map)
+    }
+    /// Download tags for a single repository, based off of a specified tag and/or a regex filter.
+    pub async fn download_tags<T, U, V, W>(
+        &self,
+        url: T,
+        tag: Option<U>,
+        regex_filter: V,
+        output_dir: &Path,
+        prefix: W,
+    ) -> Result<(), GitError>
+    where
+        T: AsRef<str> + Display,
+        U: AsRef<str> + Display,
+        V: AsRef<str> + Display,
+        W: AsRef<str> + Display,
+    {
+        if !Path::new(output_dir).exists() {
+            fs::create_dir_all(output_dir)?;
+        }
+
+        let info = get_repo_info_from_url(&url)?;
+        let (owner, repo) = (info.owner, info.repo_name);
+
+        let mut refs: Vec<String> = Vec::new();
+        if !regex_filter.as_ref().is_empty() {
+            self.filter_tags(url, regex_filter)
+                .await?
+                .iter()
+                .for_each(|t| refs.push(t.clone()));
+        }
+        if let Some(t) = tag {
+            refs.push(t.as_ref().to_string());
+        }
+        let octocrab = self.octocrab.clone();
+        for tag in refs {
+            let permit = self.semaphore.clone().acquire_owned().await?;
+            let mut tarball_name = if tag.ends_with("-tag") {
+                let stripped = tag.strip_suffix("-tag").unwrap();
+                format!("{stripped}.tar.gz")
+            } else {
+                format!("{tag}.tar.gz")
+            };
+
+            // This helps prevent collisions between tarball names from different repositories
+            if tarball_name.starts_with(prefix.as_ref()) && !prefix.as_ref().is_empty() {
+                tarball_name = format!("{repo}-{tarball_name}");
+            }
+
+            let mut resp = octocrab
+                .repos(&owner, &repo)
+                .download_tarball(Reference::Tag(tag.clone()))
+                .await?;
+            let body = resp.body_mut();
+
+            let file_path = output_dir.join(tarball_name);
+            let mut file = File::create(&file_path)?;
+            while let Some(next) = body.frame().await {
+                let frame = next?;
+                if let Some(chunk) = frame.data_ref() {
+                    file.write_all(chunk)?;
+                }
+            }
+            drop(permit);
+            file.flush()?;
+        }
+        Ok(())
+    }
+    /// Download tags as tarballs for all configured repositories, based off of a specified tag and/or a regex
+    /// filter.
+    pub async fn download_all_tags<T, U, V>(
+        &self,
+        repositories: &[T],
+        tag: Option<U>,
+        regex_filter: V,
+        output_dir: &Path,
+        prefix: String,
+    ) -> Result<(), GitError>
+    where
+        T: AsRef<str> + Display,
+        U: AsRef<str> + Display,
+        V: AsRef<str> + Display,
+    {
+        let mut futures = FuturesUnordered::new();
+        for repo in repositories {
+            let tag = tag.as_ref();
+            let regex_filter = regex_filter.as_ref();
+            let prefix = prefix.clone();
+            futures.push(async move {
+                let result = self
+                    .download_tags(repo, tag, regex_filter, output_dir, &prefix)
+                    .await;
+                (repo.to_string(), result)
+            });
+        }
+        let mut errors: Vec<(String, GitError)> = Vec::new();
+        while let Some((repo, result)) = futures.next().await {
+            match result {
+                Ok(()) => {
+                    if self.is_tty {
+                        println!(
+                            "✅ Successfully downloaded tags for {repo} to '{}'",
+                            output_dir.display()
+                        );
+                    }
+                }
+                Err(e) => {
+                    eprintln!("❌ Failed to download tags for {repo}: {e}");
+                    errors.push((repo.clone(), e));
+                }
+            }
+        }
+        if !errors.is_empty() {
+            return Err(GitError::MultipleErrors(errors));
+        }
+        Ok(())
     }
 }
