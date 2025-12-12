@@ -5,7 +5,7 @@ edition     = "2024"
 homepage    = "https://github.com/acceldata-io/git_sync"
 license     = "Apache-2.0"
 name        = "git_sync"
-version     = "1.0.2"
+version     = "1.0.3"
 
 
 [dependencies]
