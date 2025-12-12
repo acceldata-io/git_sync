@@ -670,8 +670,9 @@ impl GithubClient {
                         .args([
                             "-C",
                             tmp_str,
+                            "branch",
                             "-r",
-                            "contains",
+                            "--contains",
                             sha,
                         ])
                         .output()?;
