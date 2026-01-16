@@ -987,7 +987,6 @@ impl GithubClient {
             let tag = tag.as_ref();
             futures.push(async move {
                 let result = self.is_tag_present(repo, tag).await;
-                println!("Checked tag presence for {repo}");
                 (repo.to_string(), result)
             });
         }
