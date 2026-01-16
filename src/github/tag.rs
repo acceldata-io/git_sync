@@ -924,7 +924,7 @@ impl GithubClient {
         Ok(filtered)
     }
 
-    /// Filter to find if a tag is *not* present in a repository
+    /// Check to see if a tag is present in a repository
     pub async fn is_tag_present<T, U>(&self, url: T, tag: U) -> Result<bool, GitError>
     where
         T: AsRef<str>,
