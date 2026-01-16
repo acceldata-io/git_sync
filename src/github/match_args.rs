@@ -255,7 +255,7 @@ async fn match_tag_cmds(
         }
         TagCommand::Missing(missing_cmd) => {
             let repository = missing_cmd.repository.as_ref();
-            let tag = &missing_cmd.tag.trim_ascii();
+            let tag = missing_cmd.tag.trim_ascii();
 
             if missing_cmd.all {
                 let mut no_missing_tags = true;
