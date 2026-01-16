@@ -191,6 +191,7 @@ pub async fn match_arguments(app: &AppArgs, config: Config) -> Result<(), GitErr
 }
 
 /// Process all Tag commands
+#[allow(clippy::too_many_lines)]
 async fn match_tag_cmds(
     client: &GithubClient,
     repos: Vec<String>,
@@ -250,6 +251,33 @@ async fn match_tag_cmds(
                         }
                     }
                 }
+            }
+        }
+        TagCommand::Missing(missing_cmd) => {
+            let repository = missing_cmd.repository.as_ref();
+            let tag = &missing_cmd.tag.trim_ascii();
+
+            if missing_cmd.all {
+                let mut no_missing_tags = true;
+                let present = client.is_tag_present_all(&repos[..], tag).await?;
+                for (repo, found) in present {
+                    if !found {
+                        println!("Tag '{tag}' is missing from {repo}");
+                        no_missing_tags = false;
+                    }
+                }
+                if no_missing_tags {
+                    println!("Tag '{tag}' is present in all checked repositories");
+                }
+            } else if let Some(repository) = repository {
+                let present = client.is_tag_present(repository, tag).await?;
+                if present {
+                    println!("'{tag}' is present in {repository}");
+                } else {
+                    println!("'{tag}' is missing from {repository}");
+                }
+            } else {
+                return Err(GitError::MissingRepositoryName);
             }
         }
         TagCommand::Create(create_cmd) => {
@@ -335,6 +363,7 @@ async fn match_tag_cmds(
     Ok(())
 }
 /// Process all Branch commands
+#[allow(clippy::too_many_lines)]
 async fn match_branch_cmds(
     client: &GithubClient,
     repos: Vec<String>,
@@ -489,6 +518,33 @@ async fn match_branch_cmds(
                         }
                     }
                 }
+            }
+        }
+        BranchCommand::Missing(missing_cmd) => {
+            let repository = missing_cmd.repository.as_ref();
+            let branch = missing_cmd.branch.trim_ascii();
+
+            if missing_cmd.all {
+                let mut no_missing_branches = true;
+                let present = client.is_branch_present_all(&repos[..], branch).await?;
+                for (repo, found) in present {
+                    if !found {
+                        println!("Branch '{branch}' is missing from {repo}");
+                        no_missing_branches = false;
+                    }
+                }
+                if no_missing_branches {
+                    println!("Branch '{branch}' is present in all checked repositories");
+                }
+            } else if let Some(repository) = repository {
+                let present = client.is_branch_present(repository, branch).await?;
+                if present {
+                    println!("'{branch}' is present in {repository}");
+                } else {
+                    println!("'{branch}' is missing from {repository}");
+                }
+            } else {
+                return Err(GitError::MissingRepositoryName);
             }
         }
     }

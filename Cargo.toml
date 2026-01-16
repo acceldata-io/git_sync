@@ -1,11 +1,11 @@
 [package]
-authors     = ["Jeffrey Smith <jeffrey.smith@acceldata.io>"]
+authors = ["Jeffrey Smith <jeffrey.smith@acceldata.io>"]
 description = "A tool for managing git repositories"
-edition     = "2024"
-homepage    = "https://github.com/acceldata-io/git_sync"
-license     = "Apache-2.0"
-name        = "git_sync"
-version     = "1.0.3"
+edition = "2024"
+homepage = "https://github.com/acceldata-io/git_sync"
+license = "Apache-2.0"
+name = "git_sync"
+version = "1.0.4"
 
 
 [dependencies]
@@ -69,7 +69,7 @@ toml = "0.9"
 walkdir = "2.5.0"
 
 [features]
-aws     = ["dep:aws-config", "dep:aws-sdk-s3"]
+aws = ["dep:aws-config", "dep:aws-sdk-s3"]
 default = ["aws", "slack"]
 #postgres = ["sql", "sqlx/postgres"]
 slack = []
@@ -77,7 +77,7 @@ slack = []
 #sqlite   = ["sql", "sqlx/sqlite"]
 
 [profile.release]
-lto   = "thin"
+lto = "thin"
 strip = true
 
 [package.metadata.generate-rpm]
