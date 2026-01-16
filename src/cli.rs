@@ -685,7 +685,7 @@ pub struct ShowBranchCommand {
     pub all: bool,
 }
 
-/// Show if a branhc is missing in a repository (or repositories)
+/// Show if a branch is missing in a repository (or repositories)
 #[derive(Args, Clone, Debug)]
 #[command(group(
     ArgGroup::new("target")
