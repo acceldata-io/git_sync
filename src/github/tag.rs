@@ -931,12 +931,8 @@ impl GithubClient {
         U: AsRef<str> + Display,
     {
         let (all_tags, _) = self.get_tags(url).await?;
-        for t in all_tags {
-            if t.name == tag.as_ref() {
-                return Ok(true);
-            }
-        }
-        Ok(false)
+        let is_present = all_tags.iter().any(|t| t.name == tag.as_ref());
+        Ok(is_present)
     }
 
     /// Filter tags for all configured repositories
