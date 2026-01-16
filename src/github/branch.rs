@@ -757,7 +757,7 @@ impl GithubClient {
     ) -> Result<HashMap<String, bool>, GitError>
     where
         T: AsRef<str> + ToString + Display + Eq + Hash,
-        U: AsRef<str> + Display + Copy,
+        U: AsRef<str> + Display,
     {
         let mut futures = FuturesUnordered::new();
         for repo in repositories {
