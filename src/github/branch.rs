@@ -747,12 +747,7 @@ impl GithubClient {
             .keys()
             .cloned()
             .collect();
-        for b in branches {
-            if b == branch.as_ref() {
-                return Ok(true);
-            }
-        }
-        Ok(false)
+        Ok(branches.iter().any(|b| b == branch.as_ref()))
     }
     /// Check to see if a branch is *not* present, in all passed repositories
     pub async fn is_branch_present_all<T, U>(
