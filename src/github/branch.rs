@@ -733,7 +733,7 @@ impl GithubClient {
             .collect();
         filter_ref(&all_branches, &filter)
     }
-    /// Check to see if a branch is *not* present in a repository
+    /// Check to see if a branch is present in a repository
     pub async fn is_branch_present<T, U>(&self, url: T, branch: U) -> Result<bool, GitError>
     where
         T: AsRef<str> + Display,
