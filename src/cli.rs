@@ -283,6 +283,24 @@ pub struct ShowTagCommand {
     #[arg(short, long, default_value_t = false)]
     pub all: bool,
 }
+/// Show if a repository (or multiple repositories) has a specific tag
+#[derive(Args, Clone, Debug)]
+#[command(group(
+    ArgGroup::new("target")
+    .required(true)
+    .args(&["all", "repository"])
+))]
+pub struct MissingTagCommand {
+    /// The repository to check for the tag. Not valid if '--all' is set
+    #[arg(short, long)]
+    pub repository: Option<String>,
+    /// The tag to check
+    #[arg(short, long)]
+    pub tag: String,
+    /// Check all configured repositories for the tag. Not valid if '--repository' is set
+    #[arg(short, long, default_value_t = false)]
+    pub all: bool,
+}
 
 // --- Repo Commands ---
 
@@ -667,6 +685,25 @@ pub struct ShowBranchCommand {
     pub all: bool,
 }
 
+/// Show if a branch is missing in a repository (or repositories)
+#[derive(Args, Clone, Debug)]
+#[command(group(
+    ArgGroup::new("target")
+    .required(true)
+    .args(&["all", "repository"])
+))]
+pub struct ShowMissingBranchCommand {
+    /// The repository to check for a missing branch. Not valid if '--all' is set
+    #[arg(short, long)]
+    pub repository: Option<String>,
+    /// The branch to check
+    #[arg(short, long)]
+    pub branch: String,
+    /// Show missing branches for all configured repositories
+    #[arg(short, long, default_value_t = false)]
+    pub all: bool,
+}
+
 // --- Release Commands ---
 
 /// Create a release for a repository.
@@ -820,6 +857,8 @@ pub enum TagCommand {
     Sync(SyncTagCommand),
     /// Show Tags for a repository
     Show(ShowTagCommand),
+    /// Verify if a tag is present in a repository
+    Missing(MissingTagCommand),
 }
 
 /// Define all the valid commands for acting on repositories
@@ -844,6 +883,8 @@ pub enum BranchCommand {
     Modify(ChangeBranchTextCommand),
     /// Show branches for repositories
     Show(ShowBranchCommand),
+    /// Verify if a branch is present in a repository
+    Missing(ShowMissingBranchCommand),
 }
 
 /// The top-level command enum for the CLI

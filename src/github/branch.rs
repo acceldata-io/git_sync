@@ -733,6 +733,58 @@ impl GithubClient {
             .collect();
         filter_ref(&all_branches, &filter)
     }
+    /// Check to see if a branch is present in a repository
+    pub async fn is_branch_present<T, U>(&self, url: T, branch: U) -> Result<bool, GitError>
+    where
+        T: AsRef<str> + Display,
+        U: AsRef<str> + Display,
+    {
+        let info = get_repo_info_from_url(&url)?;
+        let (owner, repository) = (info.owner, info.repo_name);
+        let branches: Vec<String> = self
+            .fetch_branches(owner, repository)
+            .await?
+            .keys()
+            .cloned()
+            .collect();
+        Ok(branches.iter().any(|b| b == branch.as_ref()))
+    }
+    /// Check to see if a branch is *not* present, in all passed repositories
+    pub async fn is_branch_present_all<T, U>(
+        &self,
+        repositories: &[T],
+        branch: U,
+    ) -> Result<HashMap<String, bool>, GitError>
+    where
+        T: AsRef<str> + ToString + Display + Eq + Hash,
+        U: AsRef<str> + Display,
+    {
+        let mut futures = FuturesUnordered::new();
+        for repo in repositories {
+            let branch = branch.as_ref();
+            futures.push(async move {
+                let result = self.is_branch_present(repo, branch).await;
+                (repo.to_string(), result)
+            });
+        }
+        let mut presence_map: HashMap<String, bool> = HashMap::new();
+        let mut errors: Vec<(String, GitError)> = Vec::new();
+        while let Some((repo, result)) = futures.next().await {
+            match result {
+                Ok(is_present) => {
+                    presence_map.insert(repo, is_present);
+                }
+                Err(e) => {
+                    eprintln!("Failed to check branch presence for {repo}: {e}");
+                    errors.push((repo.clone(), e));
+                }
+            }
+        }
+        if !errors.is_empty() {
+            return Err(GitError::MultipleErrors(errors));
+        }
+        Ok(presence_map)
+    }
 
     /// Get a `HashMap` of Repository names -> Vec<branch names> for all repositories
     /// Optionally filtered by a regex

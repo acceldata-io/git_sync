@@ -924,6 +924,17 @@ impl GithubClient {
         Ok(filtered)
     }
 
+    /// Check to see if a tag is present in a repository
+    pub async fn is_tag_present<T, U>(&self, url: T, tag: U) -> Result<bool, GitError>
+    where
+        T: AsRef<str>,
+        U: AsRef<str> + Display,
+    {
+        let (all_tags, _) = self.get_tags(url).await?;
+        let is_present = all_tags.iter().any(|t| t.name == tag.as_ref());
+        Ok(is_present)
+    }
+
     /// Filter tags for all configured repositories
     pub async fn filter_all_tags<T, U>(
         &self,
@@ -961,6 +972,43 @@ impl GithubClient {
         }
         Ok(filtered_map)
     }
+
+    pub async fn is_tag_present_all<T, U>(
+        &self,
+        repositories: &[T],
+        tag: U,
+    ) -> Result<HashMap<String, bool>, GitError>
+    where
+        T: AsRef<str> + ToString + Display + Eq + Hash,
+        U: AsRef<str> + Display,
+    {
+        let mut futures = FuturesUnordered::new();
+        for repo in repositories {
+            let tag = tag.as_ref();
+            futures.push(async move {
+                let result = self.is_tag_present(repo, tag).await;
+                (repo.to_string(), result)
+            });
+        }
+        let mut presence_map: HashMap<String, bool> = HashMap::new();
+        let mut errors: Vec<(String, GitError)> = Vec::new();
+        while let Some((repo, result)) = futures.next().await {
+            match result {
+                Ok(is_present) => {
+                    presence_map.insert(repo, is_present);
+                }
+                Err(e) => {
+                    eprintln!("Failed to check tag presence for {repo}: {e}");
+                    errors.push((repo.clone(), e));
+                }
+            }
+        }
+        if !errors.is_empty() {
+            return Err(GitError::MultipleErrors(errors));
+        }
+        Ok(presence_map)
+    }
+
     /// Download tags for a single repository, based off of a specified tag and/or a regex filter.
     pub async fn download_tags<T, U, V, W>(
         &self,

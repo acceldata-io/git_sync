@@ -46,9 +46,9 @@ brew install git_sync
 ### Build from Source
 
 ```bash
-$ git clone https://github.com/acceldata-io/git_sync.git
-$ cd git_sync
-$ cargo build --release
+git clone https://github.com/acceldata-io/git_sync.git
+cd git_sync
+cargo build --release
 ```
 
 The compiled binary can be found at `target/release/git_sync`.
@@ -56,6 +56,7 @@ The compiled binary can be found at `target/release/git_sync`.
 Make sure to build with `--release`; this will drastically speed up the binary. Link time optimization is automatically enabled for all release builds which will mean the final binary takes a while to build (about 2-3 minutes), but it does drastically improve performance when deserializing JSON, particularly for larger repositories.
 
 #### Build with optional features
+
 There are a few optional features that can be enabled or disabled at build time. These features can be found under the "[features]" header in Cargo.toml. The default features are "aws" and "slack", which respectively add support for backing up to S3, and sending messages over slack.
 
 You can disable default features by adding `--no-default-features` to the cargo build command; you can enable specific features by adding `--features feature1,feature2` etc to the build command. If you want all optional features enabled, you can also add `--all-features` to the cargo build command. Adding all features will increase the number of libraries that are pulled in and also increase build time slightly.
@@ -63,35 +64,45 @@ You can disable default features by adding `--no-default-features` to the cargo 
 If optional features are disabled at build time, they will not be available at runtime.
 
 #### Setting up the build environment with [Nix](https://github.com/NixOS/nix) (Optional)
+
 In this repository there is a file, `flake.nix`, which can be used to automatically set up an environment with all of the prerequisites installed. You must already have nix [installed](https://nix.dev/install-nix) on your machine, and then enable an 'experimental' feature to enable nix flakes. This can be done by running:
+
 ```bash
-$ mkdir -p ~/.config/nix/
-$ echo "experimental-features = nix-command flakes" >> ~/.config/nix/nix.conf
+mkdir -p ~/.config/nix/
+echo "experimental-features = nix-command flakes" >> ~/.config/nix/nix.conf
 
 ```
-Then, from the root of the repository, run `nix develop` and all required tools will be downloaded. If you running this on Linux, this will also setup cross-compilation for musl to build a completely static binary. 
+
+Then, from the root of the repository, run `nix develop` and all required tools will be downloaded. If you running this on Linux, this will also setup cross-compilation for musl to build a completely static binary.
+
 #### Build a static Linux compatible binary
 
 ##### Prerequisites
+
 - The `x86_64-unknown-linux-musl` target, which can be installed by running `rustup target add x86_64-unknown-linux-musl`
-- A compiler for `x86_64-unknown-linux-musl`. 
-  - On MacOS, this can be installed through homebrew: `brew install filosottile/musl-cross/musl-cross` 
+- A compiler for `x86_64-unknown-linux-musl`.
+  - On MacOS, this can be installed through homebrew: `brew install filosottile/musl-cross/musl-cross`
   - On Linux, if the toolchain isn't available in your package manager, you can download `x86_64-linux-musl-cross.tgz` from [musl.cc](https://musl.cc/) (unofficial) or build your own using [musl-cross-make](https://github.com/richfelker/musl-cross-make/)
 
 #### Building with Musl for a completely static binary
-With both the rust and the musl c toolchain installed, you can run `cargo build --release --target x86_64-unknown-linux-musl`. This will produce a completely static binary with no external dependencies. 
+
+With both the rust and the musl c toolchain installed, you can run `cargo build --release --target x86_64-unknown-linux-musl`. This will produce a completely static binary with no external dependencies.
 
 This can be verified by running ldd on the binary:
+
 ```bash
 $ ldd git_sync
         statically linked
 ```
+
 When building this statically using the above toolchain, you will find the binary at `target/x86_64-unknown-linux-musl/release/git_sync`. This binary can only be run on Linux.
 
 #### Building RPM and DEB packages
 
 ##### RPM
+
 This tool can be built automatically into an RPM package by using the [cargo-generate-rpm](https://github.com/cat-in-136/cargo-generate-rpm) project. In order to do this, run the following commands:
+
 ```bash
 cargo install cargo-generate-rpm
 cargo build --release
@@ -102,18 +113,22 @@ cargo generate-rpm
 You will then find the resulting RPM package in `target/generate-rpm/`
 
 ##### DEB package
+
 You can also automatically build a .deb package using [cargo-deb](https://github.com/kornelski/cargo-deb).
 
 You need to install a few packages first: `sudo apt install dpkg-dev dpkg liblzma-dev`
 
 In order to build the package, run the following commands:
+
 ```bash
 cargo install cargo-deb
 cargo deb
 ```
 
 You will find the resulting deb package in `target/debian/`
+
 #### Security and CVE notes
+
 There are two things that can be done to ensure there are no known CVEs in the resulting binary:
 
 1. Use `cargo-audit` to check for known vulnerabilities in the rust dependencies. This can be installed by running `cargo install cargo-audit` and then run by executing `cargo audit` in the root of the git_sync repository.
@@ -126,6 +141,7 @@ There are two things that can be done to ensure there are no known CVEs in the r
 Using `cargo auditable build --release` is the recommended way of building this application.
 
 To check for CVEs in the source code locally with Trivy, you can run the following command at the root of the source code:
+
 ```bash
 trivy fs --scanners vuln,secret,misconfig,license --license-full --skip-dirs target/doc,target/debug,target/release/build,target/release/build/deps .
 ```
@@ -133,6 +149,7 @@ trivy fs --scanners vuln,secret,misconfig,license --license-full --skip-dirs tar
 This command will also scan to make sure that there aren't any issues with licenses, or secrets being stored in the source code.
 
 You can scan the binary with Trivy if it's in a docker image:
+
 ```bash
 $ docker build -t audit-git-sync -f - . <<EOF
 FROM scratch
@@ -160,13 +177,16 @@ The above example was taken (and modified slightly) from Trivy [release notes fo
 
 You can also check the Github repo for CVEs by running `trivy repo --branch main https://github.com/acceldata-io/git_sync`.
 
-To use `cargo-audit`, simply run `cargo audit` in the root of the source code tree. If instead you want to check the binary if it's been compiled with `cargo-auditable`, you can run: 
+To use `cargo-audit`, simply run `cargo audit` in the root of the source code tree. If instead you want to check the binary if it's been compiled with `cargo-auditable`, you can run:
+
 ```bash
 cargo-audit bin target/release/git_sync
 ```
 
 This will tell you how many CVEs affect the dependencies the binary is actually using, rather than everything listed in Cargo.toml.
+
 ### Configuration
+
 Run `git_sync config` to create an initial configuration in `$XDG_CONFIG_HOME`, or pass `--file path/to/file` to create it elsewhere. If you do set a custom configuration path, you will need to specify the path with `-f` or `--file` for every command you run. This file, by default, is called 'git-manage.toml'. The generated configuration file has comments in it to aid you in setting everything up.
 
 You can instead get the shared [configuration file](https://github.com/acceldata-io/git_sync_config) to skip part of this -- all the repositories and their groups will already be set up there. You will still need to include some of the below configuration options before you are able to use this tool. The easiest way to use it is to copy the `git-manage.toml` file to `~/.config/` in your home directory.
@@ -179,6 +199,7 @@ The important things to add to this configuration file are as follows:
 - Optionally, a list of licenses in their spdx id format that you wish to blacklist.
 
 Example of a valid repo section in the configuration file:
+
 ```toml
 [repo]
 # These should be repositories that have a defined upstream project
@@ -198,15 +219,18 @@ If you use `--repository-type all` to run some command against every single repo
 
 Certain commands require that you have git installed and available in your PATH.
 That includes the following:
+
 1. `git_sync backup`
 2. `git_sync tag sync --with-annotated`
 
 You can set the number of parallel jobs to run at a time by specifying the --jobs flag. By default, this is set to the total number of CPU threads the machine has, but it can be manually set to any positive integer between 1 and 64. If this is unspecified, and it can't be determined automatically, it will default to 4.
 
-If you have a forked repository on Github that does not have a configured parent repository, you can put it into the fork_with_workaround map, where "forked repo" = "actual upstream repo". Ex: `fork_with_workaround = {"https://github.com/my-org/livy" = "https://github.com/apache/incubator-livy"}`. This will require that you have write access to your forked repository, and git set up correctly on your machine. 
+If you have a forked repository on Github that does not have a configured parent repository, you can put it into the fork_with_workaround map, where "forked repo" = "actual upstream repo". Ex: `fork_with_workaround = {"https://github.com/my-org/livy" = "https://github.com/apache/incubator-livy"}`. This will require that you have write access to your forked repository, and git set up correctly on your machine.
 
 #### ENV variables
+
 A few options can be set through environment variables instead of the configuration file. These are:
+
 1. GITHUB_TOKEN - Your Github api key
 2. SLACK_WEBHOOK - Your slack webhook url, for Slack notifications
 3. CONFIG_FILE - The path to your configuration file. This is only needed if you do not want to use the default path of `$XDG_CONFIG_HOME/git-manage.toml` or `~/.config/git-manage.toml` if `$XDG_CONFIG_HOME` is not set.
@@ -219,9 +243,10 @@ There are a few tests for some of the helper functions, and they can be executed
 
 Before trying to commit any changes, ensure that you run `cargo fmt` to make sure that there are no formatting inconsistencies. There is API reference [hosted on Github](https://jeffreysmith.github.io/git_sync/git_sync/) should you need to lookup information about any of the functions, types, macros, or enums.
 
-The above hosted API reference is likely to drift from reality over time as this project develops. You can build the API docs locally by runnning 
+The above hosted API reference is likely to drift from reality over time as this project develops. You can build the API docs locally by runnning
+
 ```bash
-$ cargo doc --no-deps --open
+cargo doc --no-deps --open
 ```
 
 This will open the API documentation in your default web browser.
@@ -239,14 +264,17 @@ Be careful with `--repository-type all` as it will apply to every single reposit
 You can use this tool to get a list of branches or tags with an optional filter. This can be useful if you want to search across repositories for certain refs, or can be used to grab a list of mpacks that have been released for a particular ODP version. When specifying the filter, it must be a valid regex or you will get an error at runtime.
 
 Example for getting tags from `acceldata-io/ambari-mpacks` for ODP 3.2.3.4-2:
+
 ```bash
-$ git_sync tag show -r https://github.com/acceldata-io/ambari-mpacks --filter "[a-zA-Z].*3\.2\.3\.4-2-tag$"
+git_sync tag show -r https://github.com/acceldata-io/ambari-mpacks --filter "[a-zA-Z].*3\.2\.3\.4-2-tag$"
 ```
+
 This information can be used to quickly see what mpacks were released for different ODP versions.
 
 The same can be done for branches. In this example, we're searching for branches that might be related to older tickets, so we filter for only the branches matching tickets that start with a 3, 2, 1, or 0.
+
 ```bash
-$ git_sync branch show --repository-type custom --group active-projects --all --filter "^ODP-[0-3][0-9]"
+git_sync branch show --repository-type custom --group active-projects --all --filter "^ODP-[0-3][0-9]"
 ```
 
 Both of the above can be used to query a single repository, or many. When piping/redirecting the output of either of these commands, only the branches will be output, along with their corresponding repository on the same line if you are running the command against more than one, so that you can do things like use `wc` to count the number of branches/tags.
@@ -256,14 +284,27 @@ $ git_sync tag show -r https://github.com/acceldata-io/ambari-mpacks --filter "[
 17
 ```
 
+#### Checking if a Branch or Tag Exists in a Repository
+
+You can use this tool to check if a branch or tag is missing in a single repository or across all your repositories. This can be done using the following commands:
+
+```bash
+$ git_sync tag missing -r https://github.com/acceldata-io/kudu -t rel/ODP-3.2.3.4-99-tag
+'ODP-3.2.3.4-99-tag' is missing from https://github.com/acceldata-io/kudu
+$ git_sync branch missing --all --branch rel/ODP-3.1.2.4-5
+# list of repositories missing the specified branch
+```
+
+This command can be useful after a release, or when cutting new branches for a future release, to ensure that all repositories have all the required branches and/or tags.
+
 ### Downloading Branches or Tags as tarballs
 
 You can download branches or tags as tarballs using the 'download' command for both the branch and tag commands. You can specify a specific branch or tag using either `--branch` or `--tag` (respectively), or you can use a regex filter to download all branches/tags that match your regex.
 
 ```bash
-$ git_sync tag download -r https://github.com/acceldata-io/ambari-mpacks --tag kudu-1.17.0.3.2.3.4-3-tag --output-dir ~/kudu-mpack
+git_sync tag download -r https://github.com/acceldata-io/ambari-mpacks --tag kudu-1.17.0.3.2.3.4-3-tag --output-dir ~/kudu-mpack
 
-$ git_sync branch download --all --branch ODP-main --output-dir ~/odp-main-branches
+git_sync branch download --all --branch ODP-main --output-dir ~/odp-main-branches
 ```
 
 By default, when downloading multiple branches or tags that begin with `ODP-`, the tarball will have the repository name appended to the beginning as a prefix to prevent name collision. This can be configured using the `--prefix <your prefix>` flag to specify any arbitrary prefix.
@@ -286,54 +327,57 @@ The `--recursive` option is important when tags in your parent repositories don'
 Make sure you only run this for repositories that are actually forks of another repository and that Github detects as having an upstream project. It will not work otherwise.
 
 ```bash
-$ git_sync repo sync --repository https://github.com/my-org/my-forked-repo # Sync a specific repository
-$ git_sync repo sync --all --slack # Sync all configured repositories and send a slack notification
-$ git_sync --repository-type custom --group my-group repo sync --all --slack # Sync all repositories in the "my-group" custom group
+git_sync repo sync --repository https://github.com/my-org/my-forked-repo # Sync a specific repository
+git_sync repo sync --all --slack # Sync all configured repositories and send a slack notification
+git_sync --repository-type custom --group my-group repo sync --all --slack # Sync all repositories in the "my-group" custom group
 
-$ git_sync repo sync --all --recursive --force --slack # Go through all branches and sync those that aren't up to date.
-$ git_sync repo sync -r https://github.com/my-org/my-forked-repo --branch my_branch_to_update 
+git_sync repo sync --all --recursive --force --slack # Go through all branches and sync those that aren't up to date.
+git_sync repo sync -r https://github.com/my-org/my-forked-repo --branch my_branch_to_update 
 ```
 
 If you want to sync a repository that does not have a parent configured in Github, you must place it in the `fork_with_workaround` group in the configuration file. Once you have done that, you can add the global `--with-fork-workaround` flag to sync all of the common branches between the two repositories. NOTE: this only support merges that can be fast forwarded. If it cannot, you will need to sync that branch manually.
 
 ### Syncing tags
-Before syncing tags, you should sync your fork with its parent repository to ensure that all references that a new tag may point to exist in your fork. At the very least, sync with the repository's main branch, which is the default for `repo sync`. Some repositories' tags point to a specific commit branch, and if you add a tag that does that without having the commits already, the tag may not sync correctly.
 
+Before syncing tags, you should sync your fork with its parent repository to ensure that all references that a new tag may point to exist in your fork. At the very least, sync with the repository's main branch, which is the default for `repo sync`. Some repositories' tags point to a specific commit branch, and if you add a tag that does that without having the commits already, the tag may not sync correctly.
 
 The `--with-annotated` flag will ensure that annotated tags are synced. To do this, git must be installed and available in your PATH, and you must have read and write access to the repository you are syncing. This is because you cannot sync annotated tags correctly with the Github API alone. Since it requires additional setup, it is not enabled by default. When it does clone the repository, it will pull in the least amount of references possible to minimize the amount of data being transferred, which helps speed the process up. No cleanup is required since it uses a temporary directory that is automatically deleted at the end of the process. This also alleviates any permissions issues that could occur since the git repository will be stored in a folder the user will be able to read.
 
 ```bash
-$ git_sync tag sync -r https://github.com/my-org/my-forked-repo --slack
-$ git_sync tag sync --all --with-annotated -j4 # With a maximum of 4 parallel jobs
+git_sync tag sync -r https://github.com/my-org/my-forked-repo --slack
+git_sync tag sync --all --with-annotated -j4 # With a maximum of 4 parallel jobs
 ```
 
-Like when syncing a fork, you can use `--with-fork-workaround` to enable syncing tags for repositories that do not have a parent repository configured in Github. 
+Like when syncing a fork, you can use `--with-fork-workaround` to enable syncing tags for repositories that do not have a parent repository configured in Github.
 
-**Note**: 
+**Note**:
   Syncing tags can still fail to work the way you expect if an upstream tag exists that points to a commit that is not present in your fork. This situation could occur if your repository is missing some commits or if it's missing branches that the tags point to.
+
 ### Backing up a repository
 
-Creating a backup of a repository is one of the slowest operations that this tool can do, particularly for larger repositories. This is because it has to do a `git clone --mirror` for each repository, in order to preserve all files and metadata. 
+Creating a backup of a repository is one of the slowest operations that this tool can do, particularly for larger repositories. This is because it has to do a `git clone --mirror` for each repository, in order to preserve all files and metadata.
 
 When running the backup with `--all`, if you run it from an interactive terminal, you will be presented with a progress bar to show you how many of your repositories have been backed up so far. When this is used to backup many repositories (the largest number tested so far has been 40 at once), it can easily take 10 to 20+ minutes.
 
 If you want to include your `fork_with_workaround` repositories in the backup, you must specify the `--with-fork-workaround` flag. This is not enabled by default since these repositories are handled differently than normal repositories.
 
-
 #### Local backup
+
 Ensure you have enough space on your local filesystem to house all of your backups since these can be surprisingly large. For example, a `git clone --mirror` of [ClickHouse](https://github.com/ClickHouse/ClickHouse) is around 1.8GB on its own. You must have read write access to this folder; if you do not, any backup operation will fail.
 
+You can also optionally enable a repository blacklist, if there are repositories you do not wish to be included in a particular backup. This can be enabled by adding
 
-You can also optionally enable a repository blacklist, if there are repositories you do not wish to be included in a particular backup. This can be enabled by adding 
 ```toml
 [misc]
 backup_blacklist = ["https://github.com/my-org/repository"]
 ```
+
 to your configuration file.  
 
-To then enable your blacklist, pass `--blacklist` to any backup operation. This option can be useful when you have very large repositories that you don't need to backup every time, but may wish to sometimes backup since you can remove the `--blacklist` flag to then update everything. 
+To then enable your blacklist, pass `--blacklist` to any backup operation. This option can be useful when you have very large repositories that you don't need to backup every time, but may wish to sometimes backup since you can remove the `--blacklist` flag to then update everything.
 
-Importantly, the path you pick here must either be a folder or not exist. If it does not exist, it will be created automatically. 
+Importantly, the path you pick here must either be a folder or not exist. If it does not exist, it will be created automatically.
+
 ```bash
 $ git_sync backup create -r https://github.com/my-org/my-repo --path /path/to/backup/folder 
 $ git_sync backup create --all -p /path/to/backup/folder --slack
@@ -344,11 +388,13 @@ $ git_sync backup create --repository-type all -p /path/to/backup/folder --slack
 When using --repository-type all, any repositories listed in more than one place or group will only be backed up once.
 
 ##### Atomic backups
-All backup operations are atomic, meaning that any backups will only be kept if they are successfully cloned. This ensures you don't end up with backups in unknown states. The repositories will be cloned into a {name}.git.tmp folder, and once fully cloned, will be moved to {name}.git. 
+
+All backup operations are atomic, meaning that any backups will only be kept if they are successfully cloned. This ensures you don't end up with backups in unknown states. The repositories will be cloned into a {name}.git.tmp folder, and once fully cloned, will be moved to {name}.git.
 
 Backups can also be updated atomically; the existing {name}.git folder will be copied into {name}.git.tmp. This folder will then be updated, and if everything succeeds, the original {name}.git folder will be deleted and the new folder will be renamed to {name}.git. This ensures that if something goes wrong during the update, your existing backup will remain intact.
 
 #### S3 backup
+
 Back ups can also be automatically uploaded to S3. This requires that you have the `aws` feature enabled at build time, and that you have configured your AWS credentials correctly. The bucket you are uploading to must already exist, and you must have write access to it. You may also need to set the name of your AWS profile in the terminal before starting the process.
 
 You will still need to have enough hard drive space to store your backups. They will be compressed before uploading directly into your specified bucket. Uploading everything to AWS will make the entire backup process take longer.
@@ -356,16 +402,17 @@ You will still need to have enough hard drive space to store your backups. They 
 To do so, you need to use both the `--destination s3` and `--bucket <bucket_name>` flags when uploading to S3. If you only set one of the two, you will get an error before the process starts.
 
 ```bash
-$ aws sso login --profile my_aws_profile_name
-$ export AWS_PROFILE=my_aws_profile_name
+aws sso login --profile my_aws_profile_name
+export AWS_PROFILE=my_aws_profile_name
 
-$ git_sync backup create -r https://github.com/my-org/my-repo --path /path/to/backup/folder --destination s3 --bucket my-bucket-name
-$ git_sync backup create --repository-type all -p /path/to/backup/folder --destination s3 --bucket my-bucket-name --slack --all
+git_sync backup create -r https://github.com/my-org/my-repo --path /path/to/backup/folder --destination s3 --bucket my-bucket-name
+git_sync backup create --repository-type all -p /path/to/backup/folder --destination s3 --bucket my-bucket-name --slack --all
 ```
 
 This is an example of when using `--repository-type all` along with `--all` target is useful behaviour.
 
 You can also use a long lasting IAM secret key and access key. This can be done by adding two variables to your environment:
+
 ```bash
 export AWS_ACCESS_KEY_ID="your access key id"
 export AWS_SECRET_ACCESS_KEY="your secret access key"
@@ -374,6 +421,7 @@ export AWS_SECRET_ACCESS_KEY="your secret access key"
 You may also need to have `export AWS_REGION=ca-central-1` (or your region) set in the environment as well.
 
 ### Managing branches
+
 You can create and delete branches for a single repository or for all configured repositories. This is useful when you have a set of common branches across all of your repositories. You can also change text to change the version of software used. This is primarily useful after creating a branch based off some older tag/branch version where you want to match it to your new version, but can be used to make any simple change (no regexes) across any repositories.
 
 ```bash
@@ -389,20 +437,21 @@ $ git_sync branch modify -r https://github.com/acceldata-io/nifi --not-version -
 $ git_sync branch delete --all --branch my_branch_name
 ```
 
-
 At the moment, running `branch delete` will immediately delete the branch without any confirmation. A future feature planned is a configurable delete queue that will create a 'cooling off' period before actually deleting the branch in order to avoid deleting branches permanently by accident. Support for this will come along with any SQL features since that will allow for persistent storage.
 
 Notes for the `branch modify` command:
-  - odp-bigtop has a specific workaround involving version numbers, file names, and build numbers. If you do not want this behaviour (ie you are modifying something other than a version number), you can specify the `--not-version` flag to disable this behaviour.
-  - The `--not-version` flag also changes the automated commit message to be more generic for any `branch modify` subcommand
-  - `--message <custom message>` can be used to specify whatever commit message you would like. Without this, a message prefixed with [Automated] will be used.
+
+- odp-bigtop has a specific workaround involving version numbers, file names, and build numbers. If you do not want this behaviour (ie you are modifying something other than a version number), you can specify the `--not-version` flag to disable this behaviour.
+- The `--not-version` flag also changes the automated commit message to be more generic for any `branch modify` subcommand
+- `--message <custom message>` can be used to specify whatever commit message you would like. Without this, a message prefixed with [Automated] will be used.
 
 ### Managing tags
+
 Managing tags is very similar to managing branches. You can create and delete lightweight tags for a single repository or for all configured repositories. If you want to create an annotated tag, you must use git directly and create it yourself.
 
 ```shell
-$ git_sync tag create --tag my_tag_name --branch the_branch_the_tag_points_to -r https://github.com/my-org/my-repo
-$ git_sync tag delete -t my_tag_name --all
+git_sync tag create --tag my_tag_name --branch the_branch_the_tag_points_to -r https://github.com/my-org/my-repo
+git_sync tag delete -t my_tag_name --all
 ```
 
 Just like with branches, running `delete` will immediately delete the tag. Support for a delete queue for a 'cooling off' period will come in the future.
@@ -412,10 +461,11 @@ If you just want to see the difference between a repository and its parent, you 
 In future, a 'cooling off' period will be added for tag deletions.
 
 ### Creating releases
+
 Using this, you can create releases for a specific repository or all of them at one time. This requires knowing the previous release's name and the current release's name. Release notes will be automatically generated based on the difference between these two commits. Using the `--all` flag requires that all configured repositories have the same release tags present. Make sure that a release for this tag does not already exist, otherwise the command will fail.
 
 ```shell
-$ git_sync release create --current-release v1.0.1 --previous-release v0.99.6 --all
+git_sync release create --current-release v1.0.1 --previous-release v0.99.6 --all
 ```
 
 You can also optionally specify the release name by setting the `--release-name <RELEASE NAME>` flag. If you don't specify it, it will use the name of the `--current-release` tag.
@@ -423,17 +473,20 @@ You can also optionally specify the release name by setting the `--release-name 
 There are times where you may want to create a release for components where some do not have a previous release tag. To create a release and generate release notes for components that have a previous release and create a new release without release notes for those that don't, you can use the `--skip-missing-tag` flag. This will create releases for all components, but only generate release notes for those that have a previous release tag.
 
 ```bash
-$ git_sync release create --current-release v1.0.1 --previous-release v0.99.6 --all --skip-missing-tag
+git_sync release create --current-release v1.0.1 --previous-release v0.99.6 --all --skip-missing-tag
 ```
 
 When using `--skip-missing-tag`, you do not need to provide the `--previous-release` flag.
+
 ```bash
-$ git_sync release create --current-release v1.0.1 --all --skip-missing-tag
+git_sync release create --current-release v1.0.1 --all --skip-missing-tag
 ```
 
 You will still get an error if the current tag does not exist, but whether your repository has the previous release tag will no longer matter.
+
 ### Creating and merging pull requests
-You can create and merge pull requests using the `pr open` command. There are many optional flags that can be used to customize the pull request, and if you would like to see all of them, run `git_sync pr open --help`. 
+
+You can create and merge pull requests using the `pr open` command. There are many optional flags that can be used to customize the pull request, and if you would like to see all of them, run `git_sync pr open --help`.
 
 Not all branches can be merged automatically. If there are any merge conflicts, you will need to resolve them manually. The pull request will still be created even if it can't be merged automatically.
 
@@ -442,29 +495,32 @@ You can specify the most recent commit in your feature branch with the `--sha` f
 Automatic merging requires specifying the `--merge` option. If you leave it out, there will be no attempt to merge the pull request automatically. Optionally, you can specify `--delete` when `--merge` is specified to automatically delete the branch after a successful merge. If the merge fails, the branch will not be deleted.
 
 ```bash
-$ git_sync pr open -r https://github.com/my-org/my-repo --base main --head my_feature_branch --merge
-$ git_sync pr open --all --base MY_MAIN_BRANCH --head my_feature_branch --merge
+git_sync pr open -r https://github.com/my-org/my-repo --base main --head my_feature_branch --merge
+git_sync pr open --all --base MY_MAIN_BRANCH --head my_feature_branch --merge
 ```
 
 ### Check repositories
+
 This tool supports a few sanity checks for repositories. This includes checking the main license of the repository, checking for the status of branch protection rules, and checking for the presence of stale branches.
 
 When running `git_sync repo check`, you must specify at least of of `--license`, `--protected`, or `--old-branches`. Specifying `--protected` requires that you also specify `--branch` since this is a branch specific check.
 
 `--old-branches` has two optional flags that can be used to customize its behaviour:
+
 1. `--days-ago`, which allows you to configure how old a branch must be before it is considered stale. The default is 30 days.
-2. `--branch-filter` is a regex that you can use to filter which branches will be displayed. 
+2. `--branch-filter` is a regex that you can use to filter which branches will be displayed.
 
 At the moment, little attention has been paid to checking for protection rules. This will be improved in the future.
 
 The `blacklist` option in the `git-manage.toml` file is useful here. Any branch that you have specified in that list will be ignored when reporting stale branches. This is useful for long living branches that are intentionally not deleted.
 
 ```bash
-$ git_sync repo check --repository https://github.com/my-org/my-repo --license --old-branches
-$ git_sync repo check --all --license --protected --branch my_branch --old-branches --days-ago 90 --branch-filter ^HADOOP
+git_sync repo check --repository https://github.com/my-org/my-repo --license --old-branches
+git_sync repo check --all --license --protected --branch my_branch --old-branches --days-ago 90 --branch-filter ^HADOOP
 ```
 
 If you want to create a csv file for visually checking all of your branches stale repositories, you can run the above like this:
+
 ```bash
 $ git_sync repo check --repository-type all --all --license --old-branches --days-ago 90 > output.csv
 # Or turn it into a nice table with the `column` command
@@ -472,7 +528,9 @@ $ $ git_sync repo check --repository-type all --all --license --old-branches --d
 ```
 
 It will detect you are not running in an interactive terminal and will create a header, then output information in a comma separated format.
+
 ## Additional notes
+
 - You will need a Github Token with both the 'repo' scope and the 'workflow' scope enabled, if using a classic token. Without these, syncing repositories may not work correctly.
 
 - In **almost** every case, if you are trying to sync tags with an upstream repository, you will need to sync your fork before syncing the tags. If you don't, the references that the new tags point to may not yet exist in your fork which will cause your tag syncing to fail.
@@ -480,15 +538,17 @@ It will detect you are not running in an interactive terminal and will create a 
 - There is a limit to the number of API requests you can make to Github in an hour. This limit is generally 5000 requests for the REST API, and around 5000 tokens for the GraphQL API. If you pass `--verbose` to your command, you will get the number of remaining requests you can make and when that limit will reset. Certain commands use REST API calls, while others use the GraphQL API which helps limit the impact of this limit.
 
 ## Getting help
+
 All commands and subcommand have a `--help` flag that will give you information about the various flags, including valid options for each flag.
 
 The API documentation can be generated locally by running `cargo doc --no-deps --open`.
 
-
 ## Compatibility
+
 This has been verified to run on both Redhat 7 and MacOS 15 meaning that it likely works on just about any Unix Operating System. It will likely not work on Windows since this tool expects a Unix environment, and has not been tested on Windows. No issues involving Windows will be addressed at this time.
 
 ## Generating man pages and shell completion
+
 To generate new versions of the man pages, you can run `git_sync generate --kind man`.
 
 To generate shell completion for bash, fish, or zsh, you can run `git_sync generate --kind [shell_type]` and then copy the output file them into your shell's completions directory.
