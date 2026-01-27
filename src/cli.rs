@@ -426,6 +426,8 @@ NOTES:
 
     You can specify --sha for single repositories, but cannot use this with --all.
     If you do not specify it, it will be fetched automatically.
+
+    You can also specify a title with --title \"<TITLE>\". If you don't, a title will be generated automatically based off of HEAD and BASE.
 "
 )]
 pub struct CreatePRCommand {
@@ -442,8 +444,8 @@ pub struct CreatePRCommand {
     #[arg(short, long)]
     pub base: String,
     /// The title for the PR
-    #[arg(short, long)]
-    pub title: String,
+    #[arg(short, long, value_parser=non_empty_string)]
+    pub title: Option<String>,
     /// The body for the PR
     #[arg(long)]
     pub body: Option<String>,
@@ -468,6 +470,14 @@ pub struct CreatePRCommand {
     /// Optionally delete the branch after a successful merge. Only valid if --merge is specified
     #[arg(long, requires = "merge")]
     pub delete: Option<String>,
+}
+
+fn non_empty_string(val: &str) -> Result<String, String> {
+    if val.trim().is_empty() {
+        Err(String::from("Option must not be empty or only whitespace"))
+    } else {
+        Ok(val.to_string())
+    }
 }
 
 /// Close a PR for a repository. Currently, doesn't do anything, since it's kind of pointless

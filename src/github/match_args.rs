@@ -707,11 +707,16 @@ async fn match_pr_cmds(
                 .trim()
                 .to_owned();
             let merge = open_cmd.merge;
+            let title = if let Some(t) = &open_cmd.title {
+                t.clone()
+            } else {
+                format!("Merge '{}' into '{}'", open_cmd.head, open_cmd.base)
+            };
             let opts = CreatePrOptions {
                 url: repository.clone(),
                 head: open_cmd.head.clone(),
                 base: open_cmd.base.clone(),
-                title: open_cmd.title.clone(),
+                title,
                 body: open_cmd.body.clone(),
                 reviewers: open_cmd.reviewers.clone(),
                 should_merge: merge,

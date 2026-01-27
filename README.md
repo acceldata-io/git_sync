@@ -494,6 +494,8 @@ You can specify the most recent commit in your feature branch with the `--sha` f
 
 Automatic merging requires specifying the `--merge` option. If you leave it out, there will be no attempt to merge the pull request automatically. Optionally, you can specify `--delete` when `--merge` is specified to automatically delete the branch after a successful merge. If the merge fails, the branch will not be deleted.
 
+You can specify the title for your PR with `--title <TITLE>`, but if it is not specified, a default title will be created based off of the branch names.
+
 ```bash
 git_sync pr open -r https://github.com/my-org/my-repo --base main --head my_feature_branch --merge
 git_sync pr open --all --base MY_MAIN_BRANCH --head my_feature_branch --merge
