@@ -17,18 +17,18 @@ specific language governing permissions and limitations
 under the License.
 */
 use crate::error::GitError;
+use dashmap::DashMap;
 use fancy_regex::Regex;
-use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::OnceLock;
-use std::sync::RwLock;
 
 // Thread-safe cache for compiled regexes
-// Wrapping it in a OnceLock ensures that we only initialize the RwLock<HashMap...> once
-static REGEX_CACHE: OnceLock<RwLock<HashMap<String, Arc<Regex>>>> = OnceLock::new();
+// Wrapping it in a OnceLock ensures that we only initialize the RwLock<DashMap...> once
+// DashMap is used for concurrent access without needing to lock the entire map
+static REGEX_CACHE: OnceLock<DashMap<String, Arc<Regex>>> = OnceLock::new();
 
-fn cache() -> &'static RwLock<HashMap<String, Arc<Regex>>> {
-    REGEX_CACHE.get_or_init(|| RwLock::new(HashMap::new()))
+fn cache() -> &'static DashMap<String, Arc<Regex>> {
+    REGEX_CACHE.get_or_init(DashMap::new)
 }
 
 /// Gets or compiles a regex pattern, saving it to a Hashmap cache for future use.
@@ -38,25 +38,15 @@ pub fn get_or_compile<T>(pattern: T) -> Result<Arc<Regex>, Box<fancy_regex::Erro
 where
     T: AsRef<str>,
 {
-    let read_lock = cache().read().expect("Regex cache mutex poisoned");
-    if let Some(regex) = read_lock.get(pattern.as_ref()) {
-        return Ok(Arc::clone(regex));
+    if let Some(regex) = cache().get(pattern.as_ref()) {
+        return Ok(Arc::clone(&regex));
     }
-    // Intentionally drop the read lock before acquiring the write lock
-    drop(read_lock);
 
-    let mut write_lock = cache().write().expect("Regex cache mutex poisoned");
-    // If some other thread has already compiled this regex between when we got the read_lock and
-    // the write_lock, return the result instead of recompiling it. This should only be able to
-    // happen on the first couple of calls
-    if let Some(regex) = write_lock.get(pattern.as_ref()) {
-        return Ok(Arc::clone(regex));
-    }
     let regex_result = Regex::new(pattern.as_ref());
     match regex_result {
         Ok(re) => {
             let regex = Arc::new(re);
-            write_lock.insert(pattern.as_ref().to_string(), Arc::clone(&regex));
+            cache().insert(pattern.as_ref().to_string(), Arc::clone(&regex));
             Ok(regex)
         }
         Err(e) => Err(std::boxed::Box::new(e)),
