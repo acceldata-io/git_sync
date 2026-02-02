@@ -40,7 +40,6 @@ use std::hash::Hash;
 use std::io::Write;
 use std::path::Path;
 use std::path::PathBuf;
-use std::sync::Arc;
 
 /// This is used to deserialize the response from the GitHub API when fetching a tag. This is
 /// needed when we fetch an annotated tag.
@@ -734,7 +733,7 @@ impl GithubClient {
             .collect();
         debug!(
             "Finished filtering. Locks are now: {}",
-            Arc::strong_count(&self.semaphore)
+            self.semaphore.available_permits()
         );
         filter_ref(&all_branches, &filter)
     }
@@ -823,7 +822,7 @@ impl GithubClient {
                     debug!("No matching branches for {repo}, skipping");
                 }
                 Err(e) => {
-                    debug!("Failed to filter branches for {repo}: {e}");
+                    eprintln!("Failed to filter branches for {repo}: {e}");
                     errors.push((repo.clone(), e));
                 }
             }

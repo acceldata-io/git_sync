@@ -23,7 +23,7 @@ use std::sync::Arc;
 use std::sync::OnceLock;
 
 // Thread-safe cache for compiled regexes
-// Wrapping it in a OnceLock ensures that we only initialize the RwLock<DashMap...> once
+// Wrapping it in a OnceLock ensures that we only initialize the <DashMap...> once
 // DashMap is used for concurrent access without needing to lock the entire map
 static REGEX_CACHE: OnceLock<DashMap<String, Arc<Regex>>> = OnceLock::new();
 
@@ -46,7 +46,10 @@ where
     match regex_result {
         Ok(re) => {
             let regex = Arc::new(re);
-            cache().insert(pattern.as_ref().to_string(), Arc::clone(&regex));
+            cache()
+                .entry(pattern.as_ref().to_string())
+                .or_try_insert_with(|| Regex::new(pattern.as_ref()).map(Arc::new))?;
+            //cache().insert(pattern.as_ref().to_string(), Arc::clone(&regex));
             Ok(regex)
         }
         Err(e) => Err(std::boxed::Box::new(e)),
