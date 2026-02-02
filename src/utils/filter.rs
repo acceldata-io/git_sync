@@ -48,8 +48,7 @@ where
             let regex = Arc::new(re);
             cache()
                 .entry(pattern.as_ref().to_string())
-                .or_try_insert_with(|| Regex::new(pattern.as_ref()).map(Arc::new))?;
-            //cache().insert(pattern.as_ref().to_string(), Arc::clone(&regex));
+                .or_try_insert_with(|| Ok::<Arc<Regex>, fancy_regex::Error>(Arc::clone(&regex)))?;
             Ok(regex)
         }
         Err(e) => Err(std::boxed::Box::new(e)),
