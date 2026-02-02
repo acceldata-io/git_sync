@@ -19,6 +19,7 @@ under the License.
 
 use crate::utils::pr::MergeMethod;
 use clap::{ArgGroup, Args, CommandFactory, Parser, Subcommand, ValueEnum};
+use log::debug;
 use std::fmt;
 use std::path::PathBuf;
 
@@ -58,14 +59,8 @@ pub struct AppArgs {
     #[command(subcommand)]
     pub command: Command,
 
-    /// Make output quiet. This is useful when not running in interactive mode. If Slack is
-    /// enabled, this will silence some success messages to slack.
-    #[arg(short, long, default_value_t = false, global = true)]
-    pub quiet: bool,
-
-    /// Verbose output. Currently only checks and reports your api usage
-    #[arg(long, default_value_t = false, global = true)]
-    pub verbose: bool,
+    #[command(flatten)]
+    pub verbosity: clap_verbosity_flag::Verbosity,
 
     /// The maximum number of parallel tasks to run.
     #[arg(short = 'j', long, global = true, value_parser = validate_jobs)]
@@ -956,6 +951,10 @@ pub fn parse_args() -> AppArgs {
     let app = AppArgs::try_parse();
     match app {
         Ok(app) => {
+            env_logger::Builder::new()
+                .filter_level(app.verbosity.into())
+                .init();
+            debug!("Verbosity level: {:?}", app.verbosity);
             if let Command::Repo {
                 cmd: RepoCommand::Sync(sync_cmd),
             } = &app.command
