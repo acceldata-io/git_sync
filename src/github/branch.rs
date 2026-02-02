@@ -732,7 +732,7 @@ impl GithubClient {
             .cloned()
             .collect();
         debug!(
-            "Finished filtering. Locks are now: {}",
+            "Finished filtering. Available permits are now: {}",
             self.semaphore.available_permits()
         );
         filter_ref(&all_branches, &filter)
