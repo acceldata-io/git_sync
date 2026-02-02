@@ -36,7 +36,6 @@ use std::hash::Hash;
 use std::io::Write;
 use std::path::Path;
 use std::process::Command;
-use std::sync::Arc;
 use tempfile::TempDir;
 
 use indexmap::IndexSet;
