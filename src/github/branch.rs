@@ -25,6 +25,7 @@ use crate::utils::repo::{get_repo_info_from_url, http_to_ssh_repo};
 use fancy_regex::Captures;
 use futures::{StreamExt, stream::FuturesUnordered};
 use http_body_util::BodyExt;
+use log::debug;
 use octocrab::models::repos::Object;
 use octocrab::params::repos::Reference;
 use std::fmt::Display;
@@ -39,6 +40,7 @@ use std::hash::Hash;
 use std::io::Write;
 use std::path::Path;
 use std::path::PathBuf;
+use std::sync::Arc;
 
 /// This is used to deserialize the response from the GitHub API when fetching a tag. This is
 /// needed when we fetch an annotated tag.
@@ -724,13 +726,16 @@ impl GithubClient {
     {
         let info = get_repo_info_from_url(url.as_ref())?;
         let (owner, repo) = (info.owner, info.repo_name);
-        let _permit = self.semaphore.clone().acquire_owned().await?;
         let all_branches: Vec<String> = self
             .fetch_branches(owner, repo)
             .await?
             .keys()
             .cloned()
             .collect();
+        debug!(
+            "Finished filtering. Locks are now: {}",
+            Arc::strong_count(&self.semaphore)
+        );
         filter_ref(&all_branches, &filter)
     }
     /// Check to see if a branch is present in a repository
@@ -807,14 +812,18 @@ impl GithubClient {
         let mut filtered_map: HashMap<String, Vec<String>> = HashMap::new();
         let mut errors: Vec<(String, GitError)> = Vec::new();
         while let Some((repo, result)) = futures.next().await {
+            debug!("Processing results for {repo}");
             match result {
                 Ok(branches) if !branches.is_empty() => {
+                    debug!("{repo} succeeded");
                     filtered_map.insert(repo, branches);
                 }
                 // Don't add to the vector if no matching branches are returned
-                Ok(_) => {}
+                Ok(_) => {
+                    debug!("No matching branches for {repo}, skipping");
+                }
                 Err(e) => {
-                    eprintln!("Failed to filter branches for {repo}: {e}");
+                    debug!("Failed to filter branches for {repo}: {e}");
                     errors.push((repo.clone(), e));
                 }
             }
