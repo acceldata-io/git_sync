@@ -24,6 +24,7 @@ use crate::utils::repo::{RepoInfo, TagInfo, TagType, get_repo_info_from_url, htt
 use crate::{async_retry, handle_api_response, handle_futures_unordered};
 use futures::stream::FuturesUnordered;
 use futures::{FutureExt, StreamExt, future::try_join};
+use log::debug;
 use octocrab::models::repos::Ref;
 use octocrab::params::repos::Reference;
 use serde::Deserialize;
@@ -150,6 +151,10 @@ impl GithubClient {
         let url_owned = url.as_ref().to_string();
         while has_next_page {
             // Acquire a lock on the semaphore
+            debug!(
+                "Acquiring semaphore to fetch tags from {owner}/{repo}. Available locks: {}",
+                self.semaphore.available_permits()
+            );
             let permit = self.semaphore.clone().acquire_owned().await?;
 
             let payload = json!({

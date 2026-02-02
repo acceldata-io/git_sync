@@ -32,6 +32,7 @@ use clap_complete::{
     shells::{Bash, Fish, Zsh},
 };
 use clap_mangen::Man;
+use clap_verbosity_flag::log::LevelFilter;
 use fancy_regex::Regex;
 use std::collections::{HashMap, HashSet};
 use std::env;
@@ -50,8 +51,16 @@ pub async fn match_arguments(app: &AppArgs, config: Config) -> Result<(), GitErr
             .or_else(|| config.get_github_token().clone())
             .ok_or(GitError::MissingToken)?,
     };
-    let verbose = app.verbose;
-    let quiet = app.quiet;
+    let verbose = if let Some(level) = app.verbosity.log_level() {
+        level > LevelFilter::Info
+    } else {
+        false
+    };
+    let quiet = if let Some(level) = app.verbosity.log_level() {
+        level <= LevelFilter::Error
+    } else {
+        false
+    };
     let dry_run = app.dry_run;
 
     let fork_workaround_repositories = if app.with_fork_workaround {
