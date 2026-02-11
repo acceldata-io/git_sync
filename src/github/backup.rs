@@ -113,11 +113,13 @@ impl GithubClient {
                     copy_recursive(&path, tmp_directory)?;
                 }
 
+                let update_args: [&'static str; 3] = ["remote", "update", "--prune"];
+
                 // If the path exists, we assume it's a git repository and we fetch the latest changes
                 let output = Command::new("git")
                     .stdout(Stdio::piped())
                     .stderr(Stdio::piped())
-                    .args(["remote", "update"])
+                    .args(update_args)
                     .current_dir(&clone_output)
                     .output();
 
@@ -152,12 +154,12 @@ impl GithubClient {
                         eprintln!("STDERR:\n{stderr}");
 
                         let actual_command = if atomic {
-                            tmp_path.clone()
+                            format!("git {} -C {tmp_path}", update_args.join(" "))
                         } else {
-                            path.clone()
+                            format!("git {} -C {path}", update_args.join(" "))
                         };
                         Err(GitError::ExecutionError {
-                            command: format!("git remote update -C {actual_command}"),
+                            command: actual_command,
                             status: s.status.to_string(),
                         })
                     }
@@ -167,7 +169,7 @@ impl GithubClient {
                             std::fs::remove_dir_all(tmp_directory)?;
                         }
                         Err(GitError::Other(format!(
-                            "Failed to back up repository: {ssh_url}, error: {e}"
+                            "Failed to back up repository {ssh_url}: {e}"
                         )))
                     }
                 }
@@ -335,88 +337,6 @@ impl GithubClient {
             progress.finish_with_message("Finished cloning backups");
         }
         Ok(successful_backup_paths)
-    }
-    /// This is a way to clean up stale references in a configured backed up repository. This is
-    /// still under development, so don't rely on it too much yet.
-    pub async fn prune_backup(&self, path: &Path, since: Option<String>) -> Result<(), GitError> {
-        let ext = match path.extension() {
-            Some(ext) => ext.to_str().unwrap_or(""),
-            _ => return Err(GitError::Other("Failed to get file extension".to_string())),
-        };
-
-        if !path.exists() {
-            return Err(GitError::FileDoesNotExist(
-                path.to_string_lossy().to_string(),
-            ));
-        }
-        if ext != "git" {
-            return Err(GitError::NotGitMirror(path.to_string_lossy().to_string()));
-        }
-        let _lock = self.semaphore.clone().acquire_owned().await?;
-        let path = path.to_path_buf();
-        let result = tokio::task::spawn_blocking(move || {
-            let output = if let Some(since) = since {
-                Command::new("git")
-                    .stdout(Stdio::piped())
-                    .stderr(Stdio::piped())
-                    .args(["gc", &format!("--prune={since}")])
-                    .current_dir(&path)
-                    .output()
-            } else {
-                Command::new("git")
-                    .stdout(Stdio::piped())
-                    .stderr(Stdio::piped())
-                    .args(["gc", "--prune=now"])
-                    .current_dir(&path)
-                    .output()
-            };
-
-            match output {
-                // This branch happens only if the output of the command was successful
-                Ok(s) if s.status.success() => Ok::<_, GitError>(format!(
-                    "Successfully pruned backup at path: {}",
-                    path.display()
-                )),
-                Ok(s) => {
-                    let stderr = String::from_utf8_lossy(&s.stderr);
-                    eprintln!("Error while pruning backup.");
-                    eprintln!("STDERR:\n{stderr}");
-                    Err(GitError::ExecutionError {
-                        command: format!("git gc --prune=now -C {}", path.display()),
-                        status: s.status.to_string(),
-                    })
-                }
-                Err(e) => Err(GitError::Other(format!(
-                    "Failed to prune backup at path: {}, error: {e}",
-                    path.display()
-                ))),
-            }
-        })
-        .await?;
-
-        match result {
-            Ok(m) => {
-                if let Some(t) = self.output.get()
-                    && *t == OutputMode::Print
-                    && self.is_tty
-                {
-                    println!("{m}");
-                }
-                self.append_slack_message(m).await;
-            }
-            Err(e) => {
-                if let Some(t) = self.output.get()
-                    && *t == OutputMode::Print
-                    && self.is_tty
-                {
-                    eprintln!("{e}");
-                }
-                self.append_slack_error(e.to_string()).await;
-                return Err(e);
-            }
-        }
-
-        Ok(())
     }
     #[cfg(feature = "aws")]
     /// Upload a backup to s3. This requires your aws credentials to be configured in the
