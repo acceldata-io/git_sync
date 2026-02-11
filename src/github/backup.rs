@@ -358,8 +358,7 @@ impl GithubClient {
             String::new()
         };
 
-        // Use the behaviour version from when this was developed
-        let config = aws_config::defaults(BehaviorVersion::v2025_08_07())
+        let config = aws_config::defaults(BehaviorVersion::v2026_01_12())
             .region(region)
             .load()
             .await;

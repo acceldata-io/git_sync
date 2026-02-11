@@ -24,15 +24,19 @@ use crate::utils::filter::get_or_compile;
 use crate::utils::repo::get_repo_info_from_url;
 use chrono::{DateTime, Duration, Utc};
 use futures::{StreamExt, stream::FuturesUnordered};
-use octocrab::models::repos::ReleaseNotes;
 use octocrab::params::repos::Reference;
+
+/// Holds the body of the release notes
+struct ReleaseNotes {
+    body: String,
+}
 
 impl GithubClient {
     /// Generate release notes for a particular release. It grabs all the commits present in `tag`
     /// that are newer than the latest commit in `previous_tag`.
     /// This needs to be cleaned up, it is a bit of a mess right now.
     #[allow(clippy::too_many_lines)]
-    pub async fn generate_release_notes(
+    async fn generate_release_notes(
         &self,
         url: &str,
         tag: &str,
@@ -221,10 +225,7 @@ impl GithubClient {
         }
 
         let body = body_commits.join("\n");
-        let notes: ReleaseNotes = ReleaseNotes {
-            name: body_header,
-            body,
-        };
+        let notes: ReleaseNotes = ReleaseNotes { body };
 
         Ok(notes)
     }
@@ -254,18 +255,13 @@ impl GithubClient {
                     "Previous tag does not exist for '{owner}/{repo}'. Attempting to create a release for '{owner}/{repo}' without release notes."
                 );
                 ReleaseNotes {
-                    name: current_tag.to_string(),
                     body: String::new(),
                 }
             }
             Err(e) => return Err(e),
         };
 
-        let name = if let Some(release_name) = release_name {
-            release_name.to_string()
-        } else {
-            current_tag.to_string()
-        };
+        let name = release_name.unwrap_or(current_tag).to_string();
 
         // Acquire a lock on the semaphore
         let octocrab = self.octocrab.clone();
