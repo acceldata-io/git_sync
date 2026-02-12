@@ -669,6 +669,7 @@ fn run_fsck(path: &Path) -> Result<(), GitError> {
 mod tests {
     use super::*;
     use std::fs;
+    use std::os::unix::fs::PermissionsExt;
     use tempfile::TempDir;
 
     fn create_repository(root_path: &Path) -> Result<PathBuf, GitError> {
