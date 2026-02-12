@@ -24,6 +24,7 @@ use crate::utils::file_utils::copy_recursive;
 use crate::utils::repo::http_to_ssh_repo;
 use futures::stream::{FuturesUnordered, StreamExt};
 use indicatif::{ProgressBar, ProgressStyle};
+use log::debug;
 use std::collections::HashSet;
 use std::fmt::Display;
 use std::path::PathBuf;
@@ -139,6 +140,7 @@ impl GithubClient {
                             }
                             std::fs::rename(&tmp_path, &path)?;
                         }
+                        run_fsck(Path::new(&path))?;
                         Ok::<_, GitError>(format!(
                             "Successfully updated the backup of {name} to {path}"
                         ))
@@ -202,6 +204,7 @@ impl GithubClient {
                             }
                             std::fs::rename(&tmp_path, &path)?;
                         }
+                        run_fsck(Path::new(&path))?;
                         Ok::<_, GitError>(format!(
                             "\tSuccessfully backed up repository: {name} to path: {path}"
                         ))
@@ -626,5 +629,136 @@ impl GithubClient {
             return Err(GitError::MultipleErrors(errors));
         }
         Ok(())
+    }
+}
+
+fn run_fsck(path: &Path) -> Result<(), GitError> {
+    let output = Command::new("git")
+        .args(["fsck", "--verbose"])
+        .current_dir(path)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .output()?;
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    if !output.status.success() {
+        return Err(GitError::Other(format!(
+            "git fsck failed for repository at {}, stderr: {stderr}",
+            path.display()
+        )));
+    }
+    debug!("fsck succeeded for repository at {}", path.display());
+
+    if stdout.trim().is_empty() {
+        debug!("No stdout for git fsck");
+    } else {
+        debug!("Stdout from git fsck:\n{stdout}");
+    }
+
+    if stderr.trim().is_empty() {
+        debug!("No errors from git fsck");
+    } else {
+        debug!("Stderr from git fsck:\n{stderr}");
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use tempfile::TempDir;
+
+    fn create_repository(root_path: &Path) -> Result<PathBuf, GitError> {
+        let path = root_path.join("test_repo.git");
+        assert!(root_path.exists());
+        fs::create_dir(&path).expect("Failed to create repo directory");
+        assert!(path.exists());
+
+        Command::new("git")
+            .args(["init", path.to_str().unwrap()])
+            .current_dir(&path)
+            .output()
+            .map_err(|e| GitError::Other(format!("Failed to initialize git repository: {e}")))?;
+
+        fs::write(path.join("test.txt"), "content").unwrap();
+
+        Command::new("git")
+            .args(["add", "test.txt"])
+            .current_dir(&path)
+            .output()
+            .expect("Failed to add file to git repository");
+
+        Command::new("git")
+            .args(["commit", "-m", "Add test file"])
+            .current_dir(&path)
+            .output()
+            .expect("Failed to commit in git repository");
+
+        Ok(path)
+    }
+
+    #[test]
+    fn test_run_fsck() {
+        let temp_dir = TempDir::new().expect("Failed to create temp dir");
+
+        let repo_path = create_repository(temp_dir.path()).expect("Failed to create repository");
+        // Run fsck on the newly created repository
+        let result = run_fsck(&repo_path);
+        assert!(result.is_ok(), "fsck should succeed on a new repository");
+    }
+    #[test]
+    fn test_run_fsck_with_missing_file() {
+        let temp_dir = TempDir::new().expect("Failed to create temp dir");
+        let repo_path = create_repository(temp_dir.path()).expect("Failed to create repository");
+
+        let objects_dir = repo_path.join(".git").join("objects");
+        assert!(objects_dir.exists());
+
+        for entry in fs::read_dir(&objects_dir).expect("Could not open objects dir") {
+            let entry = entry.unwrap();
+            if entry.file_name() != "pack" && entry.file_name() != "info" {
+                let subdir = entry.path();
+                if let Some(object_file) = fs::read_dir(&subdir).unwrap().next() {
+                    fs::remove_file(object_file.unwrap().path()).unwrap();
+                    break;
+                }
+            }
+        }
+        assert!(run_fsck(&repo_path).is_err());
+    }
+    #[test]
+    fn test_run_fsck_with_corrupted_repo() {
+        let temp_dir = TempDir::new().expect("Failed to create temp dir");
+        let repo_path = create_repository(temp_dir.path()).expect("Failed to create repository");
+
+        let objects_dir = repo_path.join(".git").join("objects");
+        assert!(objects_dir.exists());
+
+        for entry in fs::read_dir(&objects_dir).unwrap() {
+            let entry = entry.unwrap();
+            if entry.file_name() != "pack" && entry.file_name() != "info" {
+                let subdir = entry.path();
+                if let Some(object_file) = fs::read_dir(&subdir).unwrap().next() {
+                    let mut input: Vec<u8> =
+                        fs::read(object_file.as_ref().unwrap().path()).unwrap();
+                    // Modify the first byte of the file to corrupt it
+                    input[0] += 1;
+                    // Git creates these files as 0o444 by default, so we have to explicitely set
+                    // it so that we can read it
+                    let permissions = fs::Permissions::from_mode(0o755);
+                    let read_only = fs::Permissions::from_mode(0o444);
+                    fs::set_permissions(object_file.as_ref().unwrap().path(), permissions).unwrap();
+                    fs::write(object_file.as_ref().unwrap().path(), input).unwrap();
+                    // Reset permissions to read only so it matches what is expected in a regular
+                    // repository
+                    fs::set_permissions(object_file.as_ref().unwrap().path(), read_only).unwrap();
+                    break;
+                }
+            }
+        }
+        assert!(run_fsck(&repo_path).is_err());
     }
 }
