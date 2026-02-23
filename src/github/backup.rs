@@ -678,25 +678,36 @@ mod tests {
         fs::create_dir(&path).expect("Failed to create repo directory");
         assert!(path.exists());
 
-        Command::new("git")
+        let status = Command::new("git")
             .args(["init", path.to_str().unwrap()])
             .current_dir(&path)
-            .output()
+            .status()
             .map_err(|e| GitError::Other(format!("Failed to initialize git repository: {e}")))?;
+        assert!(status.success(), "git init failed");
 
         fs::write(path.join("test.txt"), "content").unwrap();
 
-        Command::new("git")
+        let status = Command::new("git")
             .args(["add", "test.txt"])
             .current_dir(&path)
-            .output()
-            .expect("Failed to add file to git repository");
+            .status()
+            .expect("Failed to run git add");
+        assert!(status.success(), "git add failed");
 
-        Command::new("git")
-            .args(["commit", "-m", "Add test file"])
+        let status = Command::new("git")
+            .args([
+                "-c",
+                "user.name=Test",
+                "-c",
+                "user.email=test@example.com",
+                "commit",
+                "-m",
+                "Add test file",
+            ])
             .current_dir(&path)
-            .output()
-            .expect("Failed to commit in git repository");
+            .status()
+            .expect("Failed to run git commit");
+        assert!(status.success(), "git commit failed");
 
         Ok(path)
     }
