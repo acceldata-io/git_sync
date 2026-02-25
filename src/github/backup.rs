@@ -24,6 +24,7 @@ use crate::utils::file_utils::copy_recursive;
 use crate::utils::repo::http_to_ssh_repo;
 use futures::stream::{FuturesUnordered, StreamExt};
 use indicatif::{ProgressBar, ProgressStyle};
+use log::debug;
 use std::collections::HashSet;
 use std::fmt::Display;
 use std::path::PathBuf;
@@ -113,11 +114,13 @@ impl GithubClient {
                     copy_recursive(&path, tmp_directory)?;
                 }
 
+                let update_args: [&'static str; 3] = ["remote", "update", "--prune"];
+
                 // If the path exists, we assume it's a git repository and we fetch the latest changes
                 let output = Command::new("git")
                     .stdout(Stdio::piped())
                     .stderr(Stdio::piped())
-                    .args(["remote", "update"])
+                    .args(update_args)
                     .current_dir(&clone_output)
                     .output();
 
@@ -137,6 +140,7 @@ impl GithubClient {
                             }
                             std::fs::rename(&tmp_path, &path)?;
                         }
+                        run_fsck(Path::new(&path))?;
                         Ok::<_, GitError>(format!(
                             "Successfully updated the backup of {name} to {path}"
                         ))
@@ -152,12 +156,12 @@ impl GithubClient {
                         eprintln!("STDERR:\n{stderr}");
 
                         let actual_command = if atomic {
-                            tmp_path.clone()
+                            format!("git {} -C {tmp_path}", update_args.join(" "))
                         } else {
-                            path.clone()
+                            format!("git {} -C {path}", update_args.join(" "))
                         };
                         Err(GitError::ExecutionError {
-                            command: format!("git remote update -C {actual_command}"),
+                            command: actual_command,
                             status: s.status.to_string(),
                         })
                     }
@@ -167,7 +171,7 @@ impl GithubClient {
                             std::fs::remove_dir_all(tmp_directory)?;
                         }
                         Err(GitError::Other(format!(
-                            "Failed to back up repository: {ssh_url}, error: {e}"
+                            "Failed to back up repository {ssh_url}: {e}"
                         )))
                     }
                 }
@@ -200,6 +204,7 @@ impl GithubClient {
                             }
                             std::fs::rename(&tmp_path, &path)?;
                         }
+                        run_fsck(Path::new(&path))?;
                         Ok::<_, GitError>(format!(
                             "\tSuccessfully backed up repository: {name} to path: {path}"
                         ))
@@ -336,88 +341,6 @@ impl GithubClient {
         }
         Ok(successful_backup_paths)
     }
-    /// This is a way to clean up stale references in a configured backed up repository. This is
-    /// still under development, so don't rely on it too much yet.
-    pub async fn prune_backup(&self, path: &Path, since: Option<String>) -> Result<(), GitError> {
-        let ext = match path.extension() {
-            Some(ext) => ext.to_str().unwrap_or(""),
-            _ => return Err(GitError::Other("Failed to get file extension".to_string())),
-        };
-
-        if !path.exists() {
-            return Err(GitError::FileDoesNotExist(
-                path.to_string_lossy().to_string(),
-            ));
-        }
-        if ext != "git" {
-            return Err(GitError::NotGitMirror(path.to_string_lossy().to_string()));
-        }
-        let _lock = self.semaphore.clone().acquire_owned().await?;
-        let path = path.to_path_buf();
-        let result = tokio::task::spawn_blocking(move || {
-            let output = if let Some(since) = since {
-                Command::new("git")
-                    .stdout(Stdio::piped())
-                    .stderr(Stdio::piped())
-                    .args(["gc", &format!("--prune={since}")])
-                    .current_dir(&path)
-                    .output()
-            } else {
-                Command::new("git")
-                    .stdout(Stdio::piped())
-                    .stderr(Stdio::piped())
-                    .args(["gc", "--prune=now"])
-                    .current_dir(&path)
-                    .output()
-            };
-
-            match output {
-                // This branch happens only if the output of the command was successful
-                Ok(s) if s.status.success() => Ok::<_, GitError>(format!(
-                    "Successfully pruned backup at path: {}",
-                    path.display()
-                )),
-                Ok(s) => {
-                    let stderr = String::from_utf8_lossy(&s.stderr);
-                    eprintln!("Error while pruning backup.");
-                    eprintln!("STDERR:\n{stderr}");
-                    Err(GitError::ExecutionError {
-                        command: format!("git gc --prune=now -C {}", path.display()),
-                        status: s.status.to_string(),
-                    })
-                }
-                Err(e) => Err(GitError::Other(format!(
-                    "Failed to prune backup at path: {}, error: {e}",
-                    path.display()
-                ))),
-            }
-        })
-        .await?;
-
-        match result {
-            Ok(m) => {
-                if let Some(t) = self.output.get()
-                    && *t == OutputMode::Print
-                    && self.is_tty
-                {
-                    println!("{m}");
-                }
-                self.append_slack_message(m).await;
-            }
-            Err(e) => {
-                if let Some(t) = self.output.get()
-                    && *t == OutputMode::Print
-                    && self.is_tty
-                {
-                    eprintln!("{e}");
-                }
-                self.append_slack_error(e.to_string()).await;
-                return Err(e);
-            }
-        }
-
-        Ok(())
-    }
     #[cfg(feature = "aws")]
     /// Upload a backup to s3. This requires your aws credentials to be configured in the
     /// environment. For small enough files, it will do a single part file upload but if the file
@@ -438,8 +361,7 @@ impl GithubClient {
             String::new()
         };
 
-        // Use the behaviour version from when this was developed
-        let config = aws_config::defaults(BehaviorVersion::v2025_08_07())
+        let config = aws_config::defaults(BehaviorVersion::v2026_01_12())
             .region(region)
             .load()
             .await;
@@ -707,5 +629,148 @@ impl GithubClient {
             return Err(GitError::MultipleErrors(errors));
         }
         Ok(())
+    }
+}
+
+fn run_fsck(path: &Path) -> Result<(), GitError> {
+    let output = Command::new("git")
+        .args(["fsck", "--verbose"])
+        .current_dir(path)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .output()?;
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    if !output.status.success() {
+        return Err(GitError::Other(format!(
+            "git fsck failed for repository at {}, stderr: {stderr}",
+            path.display()
+        )));
+    }
+    debug!("fsck succeeded for repository at {}", path.display());
+
+    if stdout.trim().is_empty() {
+        debug!("No stdout for git fsck");
+    } else {
+        debug!("Stdout from git fsck:\n{stdout}");
+    }
+
+    if stderr.trim().is_empty() {
+        debug!("No errors from git fsck");
+    } else {
+        debug!("Stderr from git fsck:\n{stderr}");
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use std::os::unix::fs::PermissionsExt;
+    use tempfile::TempDir;
+
+    fn create_repository(root_path: &Path) -> Result<PathBuf, GitError> {
+        let path = root_path.join("test_repo.git");
+        assert!(root_path.exists());
+        fs::create_dir(&path).expect("Failed to create repo directory");
+        assert!(path.exists());
+
+        let status = Command::new("git")
+            .args(["init", path.to_str().unwrap()])
+            .current_dir(&path)
+            .status()
+            .map_err(|e| GitError::Other(format!("Failed to initialize git repository: {e}")))?;
+        assert!(status.success(), "git init failed");
+
+        fs::write(path.join("test.txt"), "content").unwrap();
+
+        let status = Command::new("git")
+            .args(["add", "test.txt"])
+            .current_dir(&path)
+            .status()
+            .expect("Failed to run git add");
+        assert!(status.success(), "git add failed");
+
+        let status = Command::new("git")
+            .args([
+                "-c",
+                "user.name=Test",
+                "-c",
+                "user.email=test@example.com",
+                "commit",
+                "-m",
+                "Add test file",
+            ])
+            .current_dir(&path)
+            .status()
+            .expect("Failed to run git commit");
+        assert!(status.success(), "git commit failed");
+
+        Ok(path)
+    }
+
+    #[test]
+    fn test_run_fsck() {
+        let temp_dir = TempDir::new().expect("Failed to create temp dir");
+
+        let repo_path = create_repository(temp_dir.path()).expect("Failed to create repository");
+        // Run fsck on the newly created repository
+        let result = run_fsck(&repo_path);
+        assert!(result.is_ok(), "fsck should succeed on a new repository");
+    }
+    #[test]
+    fn test_run_fsck_with_missing_file() {
+        let temp_dir = TempDir::new().expect("Failed to create temp dir");
+        let repo_path = create_repository(temp_dir.path()).expect("Failed to create repository");
+
+        let objects_dir = repo_path.join(".git").join("objects");
+        assert!(objects_dir.exists());
+
+        for entry in fs::read_dir(&objects_dir).expect("Could not open objects dir") {
+            let entry = entry.unwrap();
+            if entry.file_name() != "pack" && entry.file_name() != "info" {
+                let subdir = entry.path();
+                if let Some(object_file) = fs::read_dir(&subdir).unwrap().next() {
+                    fs::remove_file(object_file.unwrap().path()).unwrap();
+                    break;
+                }
+            }
+        }
+        assert!(run_fsck(&repo_path).is_err());
+    }
+    #[test]
+    fn test_run_fsck_with_corrupted_repo() {
+        let temp_dir = TempDir::new().expect("Failed to create temp dir");
+        let repo_path = create_repository(temp_dir.path()).expect("Failed to create repository");
+
+        let objects_dir = repo_path.join(".git").join("objects");
+        assert!(objects_dir.exists());
+
+        for entry in fs::read_dir(&objects_dir).unwrap() {
+            let entry = entry.unwrap();
+            if entry.file_name() != "pack" && entry.file_name() != "info" {
+                let subdir = entry.path();
+                if let Some(object_file) = fs::read_dir(&subdir).unwrap().next() {
+                    let mut input: Vec<u8> =
+                        fs::read(object_file.as_ref().unwrap().path()).unwrap();
+                    // Modify the first byte of the file to corrupt it
+                    input[0] += 1;
+                    // Git creates these files as 0o444 by default, so we have to explicitely set
+                    // it so that we can read it
+                    let permissions = fs::Permissions::from_mode(0o755);
+                    let read_only = fs::Permissions::from_mode(0o444);
+                    fs::set_permissions(object_file.as_ref().unwrap().path(), permissions).unwrap();
+                    fs::write(object_file.as_ref().unwrap().path(), input).unwrap();
+                    // Reset permissions to read only so it matches what is expected in a regular
+                    // repository
+                    fs::set_permissions(object_file.as_ref().unwrap().path(), read_only).unwrap();
+                    break;
+                }
+            }
+        }
+        assert!(run_fsck(&repo_path).is_err());
     }
 }

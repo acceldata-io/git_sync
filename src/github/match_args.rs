@@ -22,7 +22,7 @@ use crate::cli::{
     RepoCommand, RepositoryType, TagCommand, cli,
 };
 use crate::config::Config;
-use crate::github::client::GithubClient;
+use crate::github::client::{GithubClient, OutputMode};
 use crate::init::generate_config;
 use crate::utils::pr::{CreatePrOptions, MergePrOptions};
 use crate::utils::repo::Checks;
@@ -856,6 +856,10 @@ async fn match_backup_cmds(
                     return Ok(());
                 }
             } else if let Some(repository) = repository {
+                if client.is_tty {
+                    // If this fails, we just won't get cli output.
+                    let _ = client.output.set(OutputMode::Print);
+                }
                 let repo_dist = client.backup_repo(repository.clone(), path, atomic).await?;
                 if dest == BackupDestination::S3 {
                     if let Some(bucket) = bucket {
@@ -868,10 +872,6 @@ async fn match_backup_cmds(
                     return Ok(());
                 }
             }
-        }
-        BackupCommand::Clean(clean_cmd) => {
-            let path = clean_cmd.directory.clone();
-            client.prune_backup(&path, None).await?;
         }
     }
     Ok(())

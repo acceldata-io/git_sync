@@ -814,13 +814,6 @@ fn dir_exists(s: &str) -> Result<PathBuf, String> {
     }
 }
 
-#[derive(Args, Clone, Debug)]
-pub struct PruneBackupCommand {
-    /// Path to the backup directory. This is only implemented for local backups
-    #[arg(short, long, value_parser = dir_exists)]
-    pub directory: PathBuf,
-}
-
 // === Subcommand Enums ===
 
 /// Define all the valid commands for acting on pull requests
@@ -835,8 +828,6 @@ pub enum PRCommand {
 pub enum BackupCommand {
     /// Create new backups. This operation can take a long time depending on the size of the repo.
     Create(BackupRepoCommand),
-    /// Clean up old backups
-    Clean(PruneBackupCommand),
 }
 
 /// Define all the valid commands for action on releases
