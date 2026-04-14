@@ -61,14 +61,16 @@ pub fn replace_in_file<T: AsRef<str>>(
         return Ok(FileStatus::Skipped);
     }
     let content = fs::read_to_string(path)?;
-    let new_content: String = content
-        .split('\n')
-        .map(|line| match re.replace_all(line, replacement.as_ref()) {
-            Cow::Borrowed(_) => line.to_string(),
-            Cow::Owned(s) => s,
-        })
-        .collect::<Vec<_>>()
-        .join("\n");
+    let mut new_content = String::with_capacity(content.len());
+    for (index, line) in content.split('\n').enumerate() {
+        if index > 0 {
+            new_content.push('\n');
+        }
+        match re.replace_all(line, replacement.as_ref()) {
+            Cow::Borrowed(_) => new_content.push_str(line),
+            Cow::Owned(s) => new_content.push_str(&s),
+        }
+    }
 
     if new_content == content {
         Ok(FileStatus::NoChanges)
@@ -91,18 +93,18 @@ where
     }
 
     let content = fs::read_to_string(path)?;
+    let mut new_content = String::with_capacity(content.len());
     // Walk through each line of the file rather than applying the regex to the whole file.
     // This helps match the expected output to other cli tools
-    let new_content: String = content
-        .split('\n')
-        .map(
-            |line| match re.replace_all(line, |captures: &Captures| replacement(captures)) {
-                Cow::Borrowed(_) => line.to_string(),
-                Cow::Owned(s) => s,
-            },
-        )
-        .collect::<Vec<_>>()
-        .join("\n");
+    for (index, line) in content.split('\n').enumerate() {
+        if index > 0 {
+            new_content.push('\n');
+        }
+        match re.replace_all(line, |captures: &Captures| replacement(captures)) {
+            Cow::Borrowed(_) => new_content.push_str(line),
+            Cow::Owned(s) => new_content.push_str(&s),
+        }
+    }
     if new_content == content {
         Ok(FileStatus::NoChanges)
     } else {
