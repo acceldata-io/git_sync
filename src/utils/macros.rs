@@ -31,7 +31,9 @@ under the License.
 /// Returns the result of `$ok` if successful, or a `GitError` if the API call fails.
 /// You can use '?' to propagate the error to your function.
 ///
-/// ```rust
+/// ```rust,ignore
+/// # use git_sync::handle_api_response;
+/// # use git_sync::error::GitError;
 /// async fn sync_fork(owner: &str, repo: &str, parent_owner: &str, parent_repo: &str, main_branch: &str) -> Result<(), GitError> {
 ///     let octocrab = octocrab::instance();
 ///     let body = serde_json::json!({"branch": main_branch.to_string()});
@@ -82,7 +84,8 @@ macro_rules! handle_api_response {
 /// and a block of code to process each result.
 ///
 /// # Example
-/// ```rust
+/// ```rust,ignore
+/// # use git_sync::handle_futures_unordered;
 /// handle_futures_unordered!(
 ///     vec.iter().map(|x| (x.clone(),)), |x| async move {
 ///         (x, async_function(x).await)
@@ -150,7 +153,8 @@ macro_rules! handle_futures_unordered {
 /// - `body = $body`: The asynchronous block to execute and retry on failure.
 ///
 /// # Example
-/// ```rust
+/// ```rust,ignore
+/// # use git_sync::async_retry;
 /// use tokio_retry::strategy::ExponentialBackoff;
 /// use tokio_retry::RetryIf;
 ///

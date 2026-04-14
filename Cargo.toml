@@ -49,7 +49,6 @@ octocrab = { default-features = false, features = [
   "timeout",
   "tokio",
 ], version = "0.49.7" }
-#rand = "0.10.1"
 reqwest = { features = [
   "__tls",
   "charset",
