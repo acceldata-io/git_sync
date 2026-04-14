@@ -85,7 +85,9 @@ async fn main() -> Result<(), GitError> {
 
     let result: Result<(), GitError> = {
         let config = Config::new(args.file.as_ref())?;
-        match_args::match_arguments(&args, config).await
+        // use Box::pin to prevent any potential stack overflows
+        // see https://rust-lang.github.io/rust-clippy/rust-1.94.0/index.html#large_futures
+        Box::pin(match_args::match_arguments(&args, config)).await
     };
     // Get nice error messages, with simple suggestions instead of huge structs
     if let Err(e) = result {
