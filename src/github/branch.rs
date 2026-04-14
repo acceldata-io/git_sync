@@ -156,7 +156,6 @@ impl GithubClient {
             let repo = repo.clone();
             let reference = Reference::Tag(base_tag.to_string());
             async move {
-                let _permit = self.semaphore.clone().acquire_owned().await;
                 get_sha_from_ref(&self.octocrab, &self.semaphore, &owner, &repo, reference).await
             }
         })
@@ -841,8 +840,7 @@ fn replace_odp_and_bn(
                 captures.name("indent").map(|m| m.as_str()).unwrap_or(""),
                 captures
                     .name("key")
-                    .ok_or_else(|| GitError::Other("Could not get ODP version name".to_string()))
-                    .expect("Failed to get ODP version name")
+                    .expect("Could not get ODP version")
                     .as_str(),
                 new_odp_version
             )
@@ -856,7 +854,7 @@ fn replace_odp_and_bn(
 
     let bn_regex_string = r#"(?<indent>\s*)(?<bn>odp_bn|ODP_BN)\s*=\s*"(?:[0-9]+|SNAPSHOT)";"#;
     let bn_regex = get_or_compile(bn_regex_string)
-        .expect("Unable to compile ODP build number regex '{bn_regex_string}'");
+        .map_err(|e| GitError::Other(format!("Unable to compile ODP build number regex: {e}")))?;
 
     // This grabs the capture group, which will be either ODP_BN or odp_bn, then uses
     // a closure to correctly format the replacement string.
@@ -870,6 +868,8 @@ fn replace_odp_and_bn(
                 &caps
                     .name("bn")
                     .ok_or_else(|| GitError::Other("Could not get ODP build number".to_string()))
+                    // It's better if we crash the whole program here instead of potentially
+                    // introducing unexpected results in the git repo
                     .expect("Failed to get build num")
                     .as_str(),
                 build_number
@@ -893,15 +893,22 @@ fn fix_debian_paths(
     let old_text_dash = old_text.replace('.', "-");
     let new_text_dash = new_text.replace('.', "-");
 
-    let odp_version_dashes_re = get_or_compile(fancy_regex::escape(&old_text_dash))
-        .expect("Unable to compile ODP version with dashes regex using '{old_text_dash}'");
+    let odp_version_dashes_re =
+        get_or_compile(fancy_regex::escape(&old_text_dash)).map_err(|e| {
+            GitError::Other(format!(
+                "Unable to compile ODP version with dashes regex using '{old_text_dash}': {e}"
+            ))
+        })?;
 
     replace_all_in_directory(repo_dir, &odp_version_dashes_re, &new_text_dash, quiet);
 
     let bigtop_re_text = format!("^(.*)-{}([.-].*)(.*)", fancy_regex::escape(&old_text_dash));
 
-    let bigtop_re = get_or_compile(&bigtop_re_text)
-        .expect("Failed to compile old version regex '{bigtop_re_text}'");
+    let bigtop_re = get_or_compile(&bigtop_re_text).map_err(|e| {
+        GitError::Other(format!(
+            "Failed to compile bigtop regex '{bigtop_re_text}': {e}"
+        ))
+    })?;
 
     for entry in WalkDir::new(&dir).into_iter().filter_map(Result::ok) {
         let path = entry.path();
@@ -929,11 +936,14 @@ fn fix_hadoop_jars(
     let hadoop_version =
         |version: &str| -> String { version.splitn(4, '.').take(3).collect::<Vec<_>>().join(".") };
 
+    // The odp version will already have been modified once we hit this point which is why we match
+    // it against old_text, new_text
     let old_full_version = format!("{}.{}", hadoop_version(old_text), new_text);
     let new_full_version = format!("{}.{}", hadoop_version(new_text), new_text);
 
-    let old_text_re = get_or_compile(fancy_regex::escape(&old_full_version))
-        .expect("Unable to compile regex for Hadoop JARs using '{old_text}'");
+    let old_text_re = get_or_compile(fancy_regex::escape(&old_full_version)).unwrap_or_else(|e| {
+        panic!("Unable to compile regex for Hadoop JARs using '{old_text}': {e}")
+    });
     replace_all_in_directory(path, &old_text_re, &new_full_version, quiet);
     Ok(())
 }

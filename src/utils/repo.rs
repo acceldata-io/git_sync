@@ -29,6 +29,7 @@ use octocrab::params::repos::Reference;
 use serde::Deserialize;
 use std::fmt;
 use std::fmt::Write as _;
+use std::future::Future;
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 use tokio::sync::Semaphore;
@@ -211,13 +212,11 @@ pub async fn get_sha_from_ref(
     repo: &str,
     reference: Reference,
 ) -> Result<String, GitError> {
+    let _semaphore = Arc::clone(semaphore).acquire_owned().await?;
     let ref_object = octocrab.repos(owner, repo).get_ref(&reference).await?;
-    let semaphore = Arc::clone(semaphore);
     match ref_object.object {
         Object::Commit { sha, .. } => Ok(sha),
         Object::Tag { sha, .. } => {
-            let _permit = semaphore.acquire_owned().await;
-
             let tag_opt: Result<GitTagObject, octocrab::Error> = octocrab
                 .get(format!("/repos/{owner}/{repo}/git/tags/{sha}"), None::<&()>)
                 .await;
