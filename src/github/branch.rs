@@ -927,12 +927,20 @@ fn fix_debian_paths(
     }
     Ok(())
 }
+/// This can only be used when the odp version and the hadoop version can match
+/// So 13.3.6 and 3.3.6.2-1 will not match
+/// This function only matters when the major/minor hadoop version has been modified
 fn fix_hadoop_jars(
     old_text: &str,
     new_text: &str,
     path: &Path,
     quiet: bool,
 ) -> Result<(), GitError> {
+    // If this isn't an odp version, we can skip this. This makes no sense otherwise
+    let version_re = get_or_compile(r"^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+-([0-9]+|SNAPSHOT)$")?;
+    if !version_re.is_match(old_text)? || !version_re.is_match(new_text)? {
+        return Ok(());
+    }
     let hadoop_version =
         |version: &str| -> String { version.splitn(4, '.').take(3).collect::<Vec<_>>().join(".") };
 
@@ -941,7 +949,8 @@ fn fix_hadoop_jars(
     let old_full_version = format!("{}.{}", hadoop_version(old_text), new_text);
     let new_full_version = format!("{}.{}", hadoop_version(new_text), new_text);
 
-    let old_text_re = get_or_compile(fancy_regex::escape(&old_full_version)).unwrap_or_else(|e| {
+    let escaped = fancy_regex::escape(&old_full_version);
+    let old_text_re = get_or_compile(format!(r"\b{escaped}\b")).unwrap_or_else(|e| {
         panic!("Unable to compile regex for Hadoop JARs using '{old_text}': {e}")
     });
     replace_all_in_directory(path, &old_text_re, &new_full_version, quiet);
@@ -1061,6 +1070,8 @@ mod tests {
     }
     #[test]
     fn fix_hadoop_jar_version() {
+        // This input came from an actual file in odp-bigtop, with slightly
+        // modified version numbers for the test
         let input = r#"
 hadoop-annotations-3.3.6.3.3.7.1-1.jar
 hadoop-auth-3.3.6.3.3.7.1-1.jar
@@ -1092,5 +1103,29 @@ hadoop-yarn-common-3.3.7.3.3.7.1-1.jar
 
         let got = fs::read_to_string(&file).unwrap();
         assert_eq!(got, expected_output);
+    }
+    #[test]
+    /// Make sure that if there is no match, it does nothing
+    fn hadoop_jar_versions_no_match() {
+        let input = r#"abc\ndef\nghi"#;
+        let expected_output = r#"abc\ndef\nghi"#;
+        let (_dir, file) = create_test_file("test.txt", input);
+        let dir = file.parent().unwrap();
+        fix_hadoop_jars("def", "my_new_text", dir, true).unwrap();
+        let got = fs::read_to_string(&file).unwrap();
+        assert_eq!(got, expected_output);
+    }
+    #[test]
+    /// Test that partial matches (like ^13.3.6) don't match
+    fn fix_hadoop_jars_no_partial_match() {
+        let input = "hadoop-annotations-13.3.6.3.3.7.1-1.jar\n";
+        let (_dir, file) = create_test_file("hadoop-client.list", input);
+        let dir = file.parent().unwrap();
+        fix_hadoop_jars("3.3.6.3-SNAPSHOT", "3.3.7.1-1", dir, true).unwrap();
+        let got = fs::read_to_string(&file).unwrap();
+        assert_eq!(
+            got, input,
+            "partial match should not have been replaced: {got}"
+        );
     }
 }
