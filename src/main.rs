@@ -65,18 +65,10 @@ under the License.
 //!
 //! This way the binary will be built with information about the build dependencies embedded into
 //! the binary so that it can be scanned with tools like `cargo-audit` or Trivy.
-mod cli;
-mod config;
-mod error;
-mod github;
-mod init;
-mod slack;
-mod utils;
-
-use cli::parse_args;
-use config::Config;
-use error::GitError;
-use github::match_args;
+use git_sync::cli::parse_args;
+use git_sync::config::Config;
+use git_sync::error::GitError;
+use git_sync::github::match_args;
 use rustls::crypto::aws_lc_rs;
 #[tokio::main]
 async fn main() -> Result<(), GitError> {

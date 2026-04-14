@@ -211,6 +211,12 @@ pub enum GitError {
 }
 
 impl GitError {
+    pub fn is_retryable(&self) -> bool {
+        match self {
+            GitError::GithubApiError(e) => is_retryable(e),
+            _ => false,
+        }
+    }
     /// Convert errors into a user-friendly format. Include a suggestion on how to proceed, if possible.
     #[allow(clippy::too_many_lines)]
     pub fn to_user_error(&self) -> UserError {

@@ -18,11 +18,20 @@ under the License.
 */
 use crate::error::GitError;
 use crate::utils::filter::get_or_compile;
+use tokio_retry::RetryIf;
+use tokio_retry::strategy::{ExponentialBackoff, jitter};
+
 use fancy_regex::Regex;
+use octocrab::Octocrab;
+use octocrab::models::repos::Object;
+use octocrab::params::repos::Reference;
+
 use serde::Deserialize;
 use std::fmt;
 use std::fmt::Write as _;
 use std::hash::{Hash, Hasher};
+use std::sync::Arc;
+use tokio::sync::Semaphore;
 
 /// Hold basic information about a github url
 #[derive(Debug)]
@@ -182,6 +191,107 @@ pub struct RepoChecks {
     pub branch_filter: Option<Regex>,
 }
 
+/// This is used to deserialize the response from the GitHub API when fetching a tag. This is
+/// needed when we fetch an annotated tag.
+#[derive(Debug, serde::Deserialize)]
+struct GitTagObject {
+    object: GitTagTarget,
+}
+/// This is the SHA of the actual commit the annotated tag points to.
+#[derive(Debug, serde::Deserialize)]
+struct GitTagTarget {
+    sha: String,
+}
+
+/// Get the SHA for either Tag or a Commit
+pub async fn get_sha_from_ref(
+    octocrab: &Octocrab,
+    semaphore: &Arc<Semaphore>,
+    owner: &str,
+    repo: &str,
+    reference: Reference,
+) -> Result<String, GitError> {
+    let ref_object = octocrab.repos(owner, repo).get_ref(&reference).await?;
+    let semaphore = Arc::clone(semaphore);
+    match ref_object.object {
+        Object::Commit { sha, .. } => Ok(sha),
+        Object::Tag { sha, .. } => {
+            let _permit = semaphore.acquire_owned().await;
+
+            let tag_opt: Result<GitTagObject, octocrab::Error> = octocrab
+                .get(format!("/repos/{owner}/{repo}/git/tags/{sha}"), None::<&()>)
+                .await;
+            if let Ok(tag) = tag_opt {
+                Ok(tag.object.sha)
+            } else {
+                Err(GitError::NoSuchReference(reference.to_string()))
+            }
+        }
+        _ => Err(GitError::NoSuchReference(reference.to_string())),
+    }
+}
+
+/// Retry async functions passed by a closure.
+///
+/// ### Example
+///
+/// ```rust
+/// # use tokio;
+/// # use tokio_retry::strategy::{ExponentialBackoff, jitter};
+/// # // Replace 'your_crate' with your actual crate name if needed
+/// # use git_sync::utils::repo::async_retry;
+/// #
+/// # #[tokio::main]
+/// # async fn main() {
+/// #[derive(Debug, PartialEq)]
+/// enum MyError {
+///     Retryable,
+///     Fatal,
+/// }
+///
+/// let mut attempts = 0;
+///
+/// let result = async_retry(
+///     5,         // ms (keep it low for fast tests)
+///     50,        // timeout
+///     3,         // retries
+///     |e: &MyError| e == &MyError::Retryable,
+///     || {
+///         attempts += 1;
+///         let current_attempt = attempts;
+///         async move {
+///             if current_attempt < 3 {
+///                 Err(MyError::Retryable)
+///             } else {
+///                 Ok("Success")
+///             }
+///         }
+///     },
+/// ).await;
+///
+/// assert_eq!(result.unwrap(), "Success");
+/// assert_eq!(attempts, 3);
+/// # }
+/// ```
+pub async fn async_retry<T, E, Fut, F, P>(
+    ms: u64,
+    timeout: u64,
+    retries: usize,
+    error_predicate: P,
+    body: F,
+) -> Result<T, E>
+where
+    F: FnMut() -> Fut,
+    Fut: Future<Output = Result<T, E>>,
+    P: FnMut(&E) -> bool,
+{
+    let retry_strategy = ExponentialBackoff::from_millis(ms)
+        .max_delay(std::time::Duration::from_millis(timeout))
+        .map(jitter)
+        .take(retries);
+    RetryIf::spawn(retry_strategy, body, error_predicate).await
+}
+
 /// Parse the owner and repository name from a github repository url.
 pub fn get_repo_info_from_url<T: AsRef<str>>(url: T) -> Result<RepoInfo, GitError> {
     let repo_regex = get_or_compile(
@@ -293,5 +403,30 @@ mod tests {
             let info = get_repo_info_from_url(test);
             assert!(info.is_err());
         }
+    }
+    #[tokio::test]
+    async fn test_async_retry() {
+        let mut attempts = 0;
+        let res: Result<i32, String> = async_retry(
+            1,
+            10,
+            3,
+            |e: &String| e == "retry",
+            || {
+                attempts += 1;
+                let a = attempts;
+                async move {
+                    if a < 2 {
+                        Err("retry".to_string())
+                    } else {
+                        Ok(42)
+                    }
+                }
+            },
+        )
+        .await;
+
+        assert_eq!(res.unwrap(), 42);
+        assert_eq!(attempts, 2);
     }
 }
