@@ -19,6 +19,7 @@ under the License.
 
 use fancy_regex::Captures;
 use fancy_regex::Regex;
+use std::borrow::Cow;
 use std::collections::HashSet;
 use std::ffi::OsStr;
 use std::fs;
@@ -60,11 +61,21 @@ pub fn replace_in_file<T: AsRef<str>>(
         return Ok(FileStatus::Skipped);
     }
     let content = fs::read_to_string(path)?;
-    let new_content = re.replace_all(&content, replacement.as_ref());
+    let mut new_content = String::with_capacity(content.len());
+    for (index, line) in content.split('\n').enumerate() {
+        if index > 0 {
+            new_content.push('\n');
+        }
+        match re.replace_all(line, replacement.as_ref()) {
+            Cow::Borrowed(_) => new_content.push_str(line),
+            Cow::Owned(s) => new_content.push_str(&s),
+        }
+    }
+
     if new_content == content {
         Ok(FileStatus::NoChanges)
     } else {
-        fs::write(path, new_content.as_ref())?;
+        fs::write(path, &new_content)?;
         Ok(FileStatus::Modified)
     }
 }
@@ -82,11 +93,22 @@ where
     }
 
     let content = fs::read_to_string(path)?;
-    let new_content = re.replace_all(&content, |captures: &Captures| replacement(captures));
+    let mut new_content = String::with_capacity(content.len());
+    // Walk through each line of the file rather than applying the regex to the whole file.
+    // This helps match the expected output to other cli tools
+    for (index, line) in content.split('\n').enumerate() {
+        if index > 0 {
+            new_content.push('\n');
+        }
+        match re.replace_all(line, |captures: &Captures| replacement(captures)) {
+            Cow::Borrowed(_) => new_content.push_str(line),
+            Cow::Owned(s) => new_content.push_str(&s),
+        }
+    }
     if new_content == content {
         Ok(FileStatus::NoChanges)
     } else {
-        fs::write(path, new_content.as_ref())?;
+        fs::write(path, &new_content)?;
         Ok(FileStatus::Modified)
     }
 }
@@ -206,6 +228,22 @@ mod tests {
         assert!(got.contains(r#"ODP_BN="3002"#));
         assert!(got.contains(r#"odp_bn="3002"#));
         assert!(!got.contains("3001"));
+    }
+    #[test]
+    /// Checks to make sure that SNAPSHOT is correctly transformed.
+    /// A previous bug prevented that from happening
+    fn replace_text_using_closure_snapshot() {
+        let input = "ODP_BN=\"SNAPSHOT\"\nodp_bn=\"SNAPSHOT\"";
+        // Hold onto the dir reference so that the temp dir isn't deleted
+        let (_dir, file) = create_test_file("test.txt", input);
+
+        let re = get_or_compile(r#"(?i)(odp_bn)(?-i)="(\d+|SNAPSHOT)"#).unwrap();
+        let replacement = |captures: &Captures| format!(r#"{}="{}"#, &captures[1], "3002");
+        replace_in_file_with(&file, &re, &replacement).unwrap();
+        let got = fs::read_to_string(&file).unwrap();
+        assert!(got.contains(r#"ODP_BN="3002"#));
+        assert!(got.contains(r#"odp_bn="3002"#));
+        assert!(!got.contains("SNAPSHOT"));
     }
     #[test]
     fn replace_text_no_matches() {

@@ -17,11 +17,12 @@ specific language governing permissions and limitations
 under the License.
 */
 use crate::async_retry;
-use crate::error::{GitError, is_retryable};
+use crate::error::GitError;
+use crate::error::is_retryable;
 use crate::github::client::GithubClient;
 use crate::utils::file_utils::{replace_all_in_directory, replace_all_in_directory_with};
 use crate::utils::filter::{filter_ref, get_or_compile};
-use crate::utils::repo::{get_repo_info_from_url, http_to_ssh_repo};
+use crate::utils::repo::{async_retry, get_repo_info_from_url, get_sha_from_ref, http_to_ssh_repo};
 use fancy_regex::Captures;
 use futures::{StreamExt, stream::FuturesUnordered};
 use http_body_util::BodyExt;
@@ -41,17 +42,6 @@ use std::io::Write;
 use std::path::Path;
 use std::path::PathBuf;
 
-/// This is used to deserialize the response from the GitHub API when fetching a tag. This is
-/// needed when we fetch an annotated tag.
-#[derive(Debug, serde::Deserialize)]
-struct GitTagObject {
-    object: GitTagTarget,
-}
-/// This is the SHA of the actual commit the annotated tag points to.
-#[derive(Debug, serde::Deserialize)]
-struct GitTagTarget {
-    sha: String,
-}
 /// An enum to get typed results from modifying a branch instead of using strings.
 #[derive(Debug)]
 enum ModificationResult {
@@ -107,38 +97,14 @@ impl GithubClient {
         let info = get_repo_info_from_url(url)?;
         let (owner, repo) = (info.owner, info.repo_name);
 
-        let res: Result<_, octocrab::Error> = async_retry!(
-            ms = 100,
-            timeout = 5000,
-            retries = 3,
-            error_predicate = |e: &octocrab::Error| is_retryable(e),
-            body = {
-                let _lock = self.semaphore.clone().acquire_owned().await;
-                self.octocrab
-                    .clone()
-                    .repos(&owner, &repo)
-                    .get_ref(&Reference::Branch(base_branch.to_string()))
-                    .await
-            },
-        );
-        let response = match res {
-            Ok(r) => r,
-            Err(e) => {
-                self.append_slack_error(format!(
-                    "{owner}/{repo}: Unable to fetch tag {base_branch} from Github: {e}"
-                ))
-                .await;
-
-                return Err(GitError::GithubApiError(e));
-            }
-        };
-
-        let Object::Commit { sha, .. } = response.object else {
-            self.append_slack_error(format!("{owner}/{repo}: No such branch {base_branch}"))
-                .await;
-
-            return Err(GitError::NoSuchBranch(base_branch.to_string()));
-        };
+        let sha = get_sha_from_ref(
+            &self.octocrab,
+            &self.semaphore,
+            &owner,
+            &repo,
+            Reference::Branch(base_branch.to_string()),
+        )
+        .await?;
 
         let res: Result<_, octocrab::Error> = async_retry!(
             ms = 100,
@@ -185,64 +151,24 @@ impl GithubClient {
         let info = get_repo_info_from_url(url)?;
         let (owner, repo) = (info.owner, info.repo_name);
 
-        // Acquire a lock on the semaphore
-        let octocrab = self.octocrab.clone();
-
-        // We have to match against the SHA of the commit the tag points to, which is why we have
-        // to check if we're working with a lightweight or annotated tag.
-        let res: Result<Option<String>, octocrab::Error> = async_retry!(
-            ms = 100,
-            timeout = 5000,
-            retries = 3,
-            error_predicate = |e: &octocrab::Error| is_retryable(e),
-            body = {
-                let permit = self.semaphore.clone().acquire_owned().await;
-                let tag_ref = octocrab
-                    .repos(&owner, &repo)
-                    .get_ref(&Reference::Tag(base_tag.to_string()))
-                    .await;
-                drop(permit);
-                match tag_ref {
-                    Ok(t) => match t.object {
-                        Object::Commit { sha, .. } => Ok(Some(sha)),
-                        // TODO: See if the macro can be nested, so the below can be retried as
-                        // well
-                        Object::Tag { sha, .. } => {
-                            let _permit = self.semaphore.clone().acquire_owned().await;
-                            let tag_opt: Result<GitTagObject, octocrab::Error> = octocrab
-                                .get(format!("/repos/{owner}/{repo}/git/tags/{sha}"), None::<&()>)
-                                .await;
-                            if let Ok(tag) = tag_opt {
-                                Ok(Some(tag.object.sha))
-                            } else {
-                                Ok(None)
-                            }
-                        }
-                        _ => Ok(None),
-                    },
-                    Err(e) => {
-                        return Err(e);
-                    }
-                }
-            },
-        );
-        let response = match res {
-            Ok(Some(r)) => r,
-            Ok(None) => {
-                eprintln!("Error: Could not get SHA for {base_tag}");
-                self.append_slack_error(format!(
-                    "{owner}/{repo}: Unable to get SHA for tag '{base_tag}'"
-                ))
-                .await;
-                return Err(GitError::NoSuchTag(base_tag.to_string()));
+        let res = async_retry(100, 5000, 3, GitError::is_retryable, || {
+            let owner = owner.clone();
+            let repo = repo.clone();
+            let reference = Reference::Tag(base_tag.to_string());
+            async move {
+                get_sha_from_ref(&self.octocrab, &self.semaphore, &owner, &repo, reference).await
             }
+        })
+        .await;
+        let response = match res {
+            Ok(r) => r,
             Err(e) => {
-                eprintln!("ERROR: {e}");
+                eprintln!("Unable to create branch from tag: {e}");
                 self.append_slack_error(format!(
                     "{owner}/{repo}: Unable to fetch tag {base_tag} from Github: {e}"
                 ))
                 .await;
-                return Err(GitError::GithubApiError(e));
+                return Err(e);
             }
         };
 
@@ -255,20 +181,22 @@ impl GithubClient {
             return Err(GitError::NoSuchTag(base_tag.to_string()));
         }
 
-        let res: Result<_, octocrab::Error> = async_retry!(
-            ms = 100,
-            timeout = 5000,
-            retries = 3,
-            error_predicate = |e: &octocrab::Error| is_retryable(e),
-            body = {
-                let _lock = self.semaphore.clone().acquire_owned().await;
-                self.octocrab
-                    .clone()
+        let res: Result<_, GitError> = async_retry(100, 5000, 3, GitError::is_retryable, || {
+            let owner = owner.clone();
+            let repo = repo.clone();
+            let new_branch = new_branch.as_ref().to_string();
+            let octocrab = self.octocrab.clone();
+            let response = response.clone();
+            async move {
+                let _permit = self.semaphore.clone().acquire_owned().await;
+                octocrab
                     .repos(&owner, &repo)
-                    .create_ref(&Reference::Branch(new_branch.to_string()), response.clone())
+                    .create_ref(&Reference::Branch(new_branch), response)
                     .await
-            },
-        );
+                    .map_err(GitError::from)
+            }
+        })
+        .await;
         match res {
             Ok(_) => {
                 if !quiet {
@@ -285,13 +213,13 @@ impl GithubClient {
                 ))
                 .await;
                 match e {
-                    octocrab::Error::GitHub { source, .. } => {
+                    GitError::GithubApiError(octocrab::Error::GitHub { source, .. }) => {
                         eprintln!("{source:#?}");
                         return Ok(());
                     }
                     _ => eprintln!("{e}"),
                 }
-                Err(GitError::GithubApiError(e))
+                Err(e)
             }
         }
     }
@@ -348,21 +276,27 @@ impl GithubClient {
     {
         let info = get_repo_info_from_url(url)?;
         let (owner, repo) = (info.owner, info.repo_name);
-        // Acquire a lock on the semaphore
-        let result: Result<_, octocrab::Error> = async_retry!(
-            ms = 100,
-            timeout = 5000,
-            retries = 3,
-            error_predicate = |e: &octocrab::Error| is_retryable(e),
-            body = {
-                let _permit = self.semaphore.clone().acquire_owned().await;
-                self.octocrab
-                    .clone()
-                    .repos(&owner, &repo)
-                    .delete_ref(&Reference::Branch(branch.to_string()))
-                    .await
+
+        let result: Result<_, octocrab::Error> = async_retry(
+            100,
+            5000,
+            3,
+            |e: &octocrab::Error| is_retryable(e),
+            || {
+                let owner = owner.clone();
+                let repo = repo.clone();
+                let branch = branch.as_ref();
+                async move {
+                    let _permit = self.semaphore.clone().acquire_owned().await;
+                    self.octocrab
+                        .clone()
+                        .repos(&owner, &repo)
+                        .delete_ref(&Reference::Branch(branch.to_string()))
+                        .await
+                }
             },
-        );
+        )
+        .await;
 
         match result {
             Ok(()) => {
@@ -495,93 +429,22 @@ impl GithubClient {
             // We can't recover from a failed regex compilation, so panic lazily (ie don't allocate
             // unless there's an error).
             let re = get_or_compile(fancy_regex::escape(&old_text))
-                .unwrap_or_else(|_| panic!("Unable to compile regex using '{old_text}'"));
+                .expect("Unable to compile regex using '{old_text}'");
             replace_all_in_directory(&repo_dir, &re, new_text.as_str(), quiet);
 
-            // If we're working with the odp-bigtop repo, we also need to rename package files
-            // in bigtop-packages/src/deb
             if repo == "odp-bigtop" && is_version {
-                let is_odp = get_or_compile(r"(?P<odp>[0-9][.][0-9][.][0-9][.][0-9])-([0-9]+)")
-                    .unwrap_or_else(|_| panic!("Unable to compile ODP regex"));
-                if let Some(captures) = is_odp.captures(&fancy_regex::escape(&old_text))? {
-                    let odp_version = match captures.name("odp") {
-                        Some(m) => m.as_str().to_string(),
-                        None => return Err(GitError::Other("Some error occurred while determining the ODP VERSION".to_string())),
-                    };
-
-                    let odp_regex_text = format!(r#"^\s*(version|VERSION|ODP_VERSION|odp_version)\s*=\s*\"?{odp_version}?""#);
-                    let odp_version_re = get_or_compile(odp_regex_text)?;
-                    let new_odp_version = new_text.split('-').next().ok_or_else(|| GitError::Other("Some error occurred while determining the ODP version".to_string()))?;
-
-                    let replacement = |captures: &Captures| format!(r#"{} = "{}"#, &captures[1], new_odp_version);
-                    replace_all_in_directory_with(
-                        &repo_dir,
-                        &odp_version_re,
-                        &replacement,
-                        quiet,
-                    );
-                }
-                let build_number = new_text
-                    .split('-')
-                    .next_back()
-                    .ok_or_else(|| GitError::InvalidBigtopVersion(new_text.clone()))?;
-
-                let bn_regex_string = r#"(odp_bn|ODP_BN)\s*=\s*"\d+";"#;
-                let bn_regex = get_or_compile(bn_regex_string).unwrap_or_else(|_| {
-                    panic!("Unable to compile ODP build number regex '{bn_regex_string}'")
-                });
-
-                // This grabs the capture group, which will be either ODP_BN or odp_bn, then uses
-                // a closure to correctly format the replacement string.
-                replace_all_in_directory_with(
-                    &repo_dir,
-                    &bn_regex,
-                    &|caps: &Captures| format!(r#"{} = "{}";"#, &caps[1], build_number),
+                // Replace some special cases in bigtop
+                replace_odp_and_bn(&old_text, &new_text, &repo_dir, quiet)?;
+                // If we're working with the odp-bigtop repo, we also need to rename package files
+                // in bigtop-packages/src/deb
+                fix_debian_paths(&old_text, &new_text, &repo_dir, quiet)?;
+                // Fix hadoop jar versions listed in any files
+                fix_hadoop_jars(
+                    &old_text,
+                    &new_text,
+                    &repo_dir.join("bigtop-packages/src/common/hadoop"),
                     quiet,
-                );
-
-                let dir = format!("{}/bigtop-packages/src/deb", repo_dir.display());
-
-                let old_text_dash = old_text.replace('.', "-");
-                let new_text_dash = new_text.replace('.', "-");
-
-                let odp_version_dashes_re = get_or_compile(fancy_regex::escape(&old_text_dash))
-                    .unwrap_or_else(|_| {
-                        panic!(
-                            "Unable to compile ODP version with dashes regex using '{old_text_dash}'"
-                        )
-                    });
-
-                replace_all_in_directory(
-                    &repo_dir,
-                    &odp_version_dashes_re,
-                    &new_text_dash,
-                    quiet,
-                );
-
-                let bigtop_re_text =
-                    format!("^(.*)-{}([.-].*)(.*)", fancy_regex::escape(&old_text_dash));
-
-                let bigtop_re = get_or_compile(&bigtop_re_text).unwrap_or_else(|_| {
-                    panic!("Failed to compile old version regex '{bigtop_re_text}'")
-                });
-
-
-                for entry in WalkDir::new(&dir).into_iter().filter_map(Result::ok) {
-                    let path = entry.path();
-                    if path.is_dir() {
-                        continue;
-                    }
-                    if let Some(file_name) = path.file_name().and_then(|n| n.to_str())
-                        && let Some(caps) = bigtop_re.captures(file_name)?
-                    {
-                        let prefix = &caps[1];
-                        let suffix = &caps[2];
-                        let new_file_name = format!("{prefix}-{new_text_dash}{suffix}");
-                        let new_path = path.with_file_name(new_file_name);
-                        fs::rename(path, &new_path)?;
-                    }
-                }
+                )?;
             }
             let commit_message = if let Some(msg) = message {
                 msg.clone()
@@ -939,5 +802,334 @@ impl GithubClient {
             return Err(GitError::MultipleErrors(errors));
         }
         Ok(())
+    }
+}
+/// This specifically targets odp-bigtop, in order to set the build number and
+/// odp version correctly.
+/// Other occurences of the ODP version work fine, such as 'ref' in bigtop.bom
+/// but are not handled here
+fn replace_odp_and_bn(
+    old_text: &str,
+    new_text: &str,
+    repo_dir: &Path,
+    quiet: bool,
+) -> Result<(), GitError> {
+    let is_odp = get_or_compile(
+        r"(?P<odp>[0-9]+[.][0-9]+[.][0-9]+[.][0-9]+)-(?P<build_num>[0-9]+|SNAPSHOT)",
+    )
+    .expect("Unable to compile ODP regex");
+    if let Some(captures) = is_odp.captures(old_text)? {
+        let odp_version = match captures.name("odp") {
+            Some(m) => m.as_str().to_string(),
+            None => {
+                return Err(GitError::Other(
+                    "Some error occurred while determining the ODP VERSION".to_string(),
+                ));
+            }
+        };
+
+        let escaped_odp_version = fancy_regex::escape(&odp_version);
+
+        let odp_regex_text = format!(
+            r#"^(?<indent>\s*)(?<key>version|VERSION|ODP_VERSION|odp_version)(?![A-Za-z0-9_])\s*=\s*\"?{escaped_odp_version}"?"#
+        );
+        let odp_version_re = get_or_compile(odp_regex_text)?;
+        let new_odp_version = new_text.split('-').next().ok_or_else(|| {
+            GitError::Other("Some error occurred while determining the ODP version".to_string())
+        })?;
+
+        let replacement = |captures: &Captures| {
+            format!(
+                r#"{}{} = "{}""#,
+                captures.name("indent").map(|m| m.as_str()).unwrap_or(""),
+                captures
+                    .name("key")
+                    .expect("Could not get ODP version")
+                    .as_str(),
+                new_odp_version
+            )
+        };
+        replace_all_in_directory_with(repo_dir, &odp_version_re, &replacement, quiet);
+    }
+    let build_number = new_text
+        .split('-')
+        .nth(1)
+        .ok_or_else(|| GitError::Other("Could not determine new build number".to_string()))?;
+
+    let bn_regex_string = r#"(?<indent>\s*)(?<bn>odp_bn|ODP_BN)\s*=\s*"(?:[0-9]+|SNAPSHOT)";"#;
+    let bn_regex = get_or_compile(bn_regex_string)
+        .map_err(|e| GitError::Other(format!("Unable to compile ODP build number regex: {e}")))?;
+
+    // This grabs the capture group, which will be either ODP_BN or odp_bn, then uses
+    // a closure to correctly format the replacement string.
+    replace_all_in_directory_with(
+        repo_dir,
+        &bn_regex,
+        &|caps: &Captures| {
+            format!(
+                r#"{}{} = "{}";"#,
+                &caps.name("indent").map(|m| m.as_str()).unwrap_or(""),
+                &caps
+                    .name("bn")
+                    .ok_or_else(|| GitError::Other("Could not get ODP build number".to_string()))
+                    // It's better if we crash the whole program here instead of potentially
+                    // introducing unexpected results in the git repo
+                    .expect("Failed to get build num")
+                    .as_str(),
+                build_number
+            )
+        },
+        quiet,
+    );
+    Ok(())
+}
+/// Some debian files have the odp version embedded into the name of the file,
+/// as well as in the name of the package, so we need to rename the file and
+/// replace the version in the file if it's present.
+fn fix_debian_paths(
+    old_text: &str,
+    new_text: &str,
+    repo_dir: &Path,
+    quiet: bool,
+) -> Result<(), GitError> {
+    let dir = format!("{}/bigtop-packages/src/deb", repo_dir.display());
+
+    let old_text_dash = old_text.replace('.', "-");
+    let new_text_dash = new_text.replace('.', "-");
+
+    let odp_version_dashes_re =
+        get_or_compile(fancy_regex::escape(&old_text_dash)).map_err(|e| {
+            GitError::Other(format!(
+                "Unable to compile ODP version with dashes regex using '{old_text_dash}': {e}"
+            ))
+        })?;
+
+    replace_all_in_directory(repo_dir, &odp_version_dashes_re, &new_text_dash, quiet);
+
+    let bigtop_re_text = format!("^(.*)-{}([.-].*)(.*)", fancy_regex::escape(&old_text_dash));
+
+    let bigtop_re = get_or_compile(&bigtop_re_text).map_err(|e| {
+        GitError::Other(format!(
+            "Failed to compile bigtop regex '{bigtop_re_text}': {e}"
+        ))
+    })?;
+
+    for entry in WalkDir::new(&dir).into_iter().filter_map(Result::ok) {
+        let path = entry.path();
+        if path.is_dir() {
+            continue;
+        }
+        if let Some(file_name) = path.file_name().and_then(|n| n.to_str())
+            && let Some(caps) = bigtop_re.captures(file_name)?
+        {
+            let prefix = &caps[1];
+            let suffix = &caps[2];
+            let new_file_name = format!("{prefix}-{new_text_dash}{suffix}");
+            let new_path = path.with_file_name(new_file_name);
+            fs::rename(path, &new_path)?;
+        }
+    }
+    Ok(())
+}
+/// This can only be used when the odp version and the hadoop version can match
+/// So 13.3.6 and 3.3.6.2-1 will not match
+/// This function only matters when the major/minor hadoop version has been modified
+fn fix_hadoop_jars(
+    old_text: &str,
+    new_text: &str,
+    path: &Path,
+    quiet: bool,
+) -> Result<(), GitError> {
+    // If this isn't an odp version, we can skip this. This makes no sense otherwise
+    let version_re = get_or_compile(r"^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+-([0-9]+|SNAPSHOT)$")?;
+    if !version_re.is_match(old_text)? || !version_re.is_match(new_text)? {
+        return Ok(());
+    }
+    let hadoop_version =
+        |version: &str| -> String { version.splitn(4, '.').take(3).collect::<Vec<_>>().join(".") };
+
+    // The odp version will already have been modified once we hit this point which is why we match
+    // it against old_text, new_text
+    let old_full_version = format!("{}.{}", hadoop_version(old_text), new_text);
+    let new_full_version = format!("{}.{}", hadoop_version(new_text), new_text);
+
+    let escaped = fancy_regex::escape(&old_full_version);
+    let old_text_re = get_or_compile(format!(r"\b{escaped}\b")).unwrap_or_else(|e| {
+        panic!("Unable to compile regex for Hadoop JARs using '{old_text}': {e}")
+    });
+    replace_all_in_directory(path, &old_text_re, &new_full_version, quiet);
+    Ok(())
+}
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::TempDir;
+    /// If using this function, make sure to hold onto the `TempDir` reference
+    /// because once it goes out of scope, that temp directory is deleted.
+    fn create_test_file(filename: &str, content: &str) -> (TempDir, std::path::PathBuf) {
+        let dir = TempDir::new().unwrap();
+        let file_path = dir.path().join(filename);
+        fs::write(&file_path, content).unwrap();
+        (dir, file_path)
+    }
+    #[test]
+    /// Checks that replace_odp_and_bn correctly updates odp version and build number,
+    /// including SNAPSHOT → numeric build number transformation.
+    fn replace_odp_and_bn_updates_version_and_build_number() {
+        let input = r#"stack {
+    'odp' {
+        version = "3.3.6.3";
+        odp_version = "3.3.6.3";
+        odp_bn = "SNAPSHOT";
+    }
+    'ODP' {
+        VERSION = "3.3.6.3";
+        ODP_VERSION = "3.3.6.3";
+        ODP_BN = "SNAPSHOT";
+        ODP_VERSION_AS_NAME = ODP_VERSION.replaceAll("\\.", "-") + "-" + ODP_BN;
+    }
+}\n\n\n"#;
+        let expected_output = r#"stack {
+    'odp' {
+        version = "3.3.6.4";
+        odp_version = "3.3.6.4";
+        odp_bn = "1";
+    }
+    'ODP' {
+        VERSION = "3.3.6.4";
+        ODP_VERSION = "3.3.6.4";
+        ODP_BN = "1";
+        ODP_VERSION_AS_NAME = ODP_VERSION.replaceAll("\\.", "-") + "-" + ODP_BN;
+    }
+}\n\n\n"#;
+
+        let (_dir, file) = create_test_file("test.txt", input);
+        let dir = file.parent().unwrap();
+
+        replace_odp_and_bn("3.3.6.3-SNAPSHOT", "3.3.6.4-1", dir, true).unwrap();
+
+        let got = fs::read_to_string(&file).unwrap();
+        assert_eq!(got, expected_output);
+    }
+
+    #[test]
+    /// Checks that fix_debian_paths correctly updates file contents and renames
+    /// files containing the old ODP version in the deb directory.
+    fn fix_debian_paths_updates_content_and_renames_files() {
+        let dir = TempDir::new().unwrap();
+        let deb_dir = dir.path().join("bigtop-packages/src/deb/kudu/debian");
+        fs::create_dir_all(&deb_dir).unwrap();
+
+        let control_path = deb_dir.join("control");
+        fs::write(&control_path, "Package: kudu-3-3-6-3-SNAPSHOT\n").unwrap();
+
+        let install_path = deb_dir.join("kudu-3-3-6-3-SNAPSHOT.install");
+        fs::write(&install_path, "").unwrap();
+
+        fix_debian_paths("3.3.6.3-SNAPSHOT", "3.3.6.4-1", dir.path(), true).unwrap();
+
+        let control = fs::read_to_string(&control_path).unwrap();
+        assert!(
+            control.contains("kudu-3-3-6-4-1"),
+            "control content not updated: {control}"
+        );
+        assert!(
+            !control.contains("3-3-6-3-SNAPSHOT"),
+            "old version still in control: {control}"
+        );
+
+        assert!(!install_path.exists(), "old .install file still exists");
+        assert!(
+            deb_dir.join("kudu-3-3-6-4-1.install").exists(),
+            "renamed .install file not found"
+        );
+    }
+    #[test]
+    /// Checks that fix_debian_paths does nothing when it can't find matches
+    fn debian_rename_fails() {
+        let dir = TempDir::new().unwrap();
+        let deb_dir = dir.path().join("bigtop-packages/src/deb/kudu/debian");
+        fs::create_dir_all(&deb_dir).unwrap();
+
+        let control_path = deb_dir.join("control");
+        fs::write(&control_path, "Package: kudu-3-3-6-3-SNAPSHOT\n").unwrap();
+
+        let install_path = deb_dir.join("kudu-3-3-6-3-SNAPSHOT.install");
+        fs::write(&install_path, "").unwrap();
+
+        fix_debian_paths("3.3.6.3-101", "3.3.6.4-1", dir.path(), true).unwrap();
+
+        let control = fs::read_to_string(&control_path).unwrap();
+
+        assert!(
+            control.contains("3-3-6-3-SNAPSHOT"),
+            "Control content modified: {control}"
+        );
+
+        assert!(install_path.exists(), "old .install file deleted");
+        assert!(
+            deb_dir.join("kudu-3-3-6-3-SNAPSHOT.install").exists(),
+            "Original .install file deleted"
+        );
+    }
+    #[test]
+    fn fix_hadoop_jar_version() {
+        // This input came from an actual file in odp-bigtop, with slightly
+        // modified version numbers for the test
+        let input = r#"
+hadoop-annotations-3.3.6.3.3.7.1-1.jar
+hadoop-auth-3.3.6.3.3.7.1-1.jar
+hadoop-common-3.3.6.3.3.7.1-1.jar
+hadoop-hdfs-client-3.3.6.3.3.7.1-1.jar
+hadoop-mapreduce-client-common-3.3.6.3.3.7.1-1.jar
+hadoop-mapreduce-client-core-3.3.6.3.3.7.1-1.jar
+hadoop-mapreduce-client-jobclient-3.3.6.3.3.7.1-1.jar
+hadoop-yarn-api-3.3.6.3.3.7.1-1.jar
+hadoop-yarn-client-3.3.6.3.3.7.1-1.jar
+hadoop-yarn-common-3.3.6.3.3.7.1-1.jar
+"#;
+        let expected_output = r#"
+hadoop-annotations-3.3.7.3.3.7.1-1.jar
+hadoop-auth-3.3.7.3.3.7.1-1.jar
+hadoop-common-3.3.7.3.3.7.1-1.jar
+hadoop-hdfs-client-3.3.7.3.3.7.1-1.jar
+hadoop-mapreduce-client-common-3.3.7.3.3.7.1-1.jar
+hadoop-mapreduce-client-core-3.3.7.3.3.7.1-1.jar
+hadoop-mapreduce-client-jobclient-3.3.7.3.3.7.1-1.jar
+hadoop-yarn-api-3.3.7.3.3.7.1-1.jar
+hadoop-yarn-client-3.3.7.3.3.7.1-1.jar
+hadoop-yarn-common-3.3.7.3.3.7.1-1.jar
+"#;
+        let (_dir, file) = create_test_file("test.txt", input);
+        let dir = file.parent().unwrap();
+
+        fix_hadoop_jars("3.3.6.4-1", "3.3.7.1-1", dir, true).unwrap();
+
+        let got = fs::read_to_string(&file).unwrap();
+        assert_eq!(got, expected_output);
+    }
+    #[test]
+    /// Make sure that if there is no match, it does nothing
+    fn hadoop_jar_versions_no_match() {
+        let input = r#"abc\ndef\nghi"#;
+        let expected_output = r#"abc\ndef\nghi"#;
+        let (_dir, file) = create_test_file("test.txt", input);
+        let dir = file.parent().unwrap();
+        fix_hadoop_jars("def", "my_new_text", dir, true).unwrap();
+        let got = fs::read_to_string(&file).unwrap();
+        assert_eq!(got, expected_output);
+    }
+    #[test]
+    /// Test that partial matches (like ^13.3.6) don't match
+    fn fix_hadoop_jars_no_partial_match() {
+        let input = "hadoop-annotations-13.3.6.3.3.7.1-1.jar\n";
+        let (_dir, file) = create_test_file("hadoop-client.list", input);
+        let dir = file.parent().unwrap();
+        fix_hadoop_jars("3.3.6.3-SNAPSHOT", "3.3.7.1-1", dir, true).unwrap();
+        let got = fs::read_to_string(&file).unwrap();
+        assert_eq!(
+            got, input,
+            "partial match should not have been replaced: {got}"
+        );
     }
 }

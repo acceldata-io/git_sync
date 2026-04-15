@@ -65,18 +65,10 @@ under the License.
 //!
 //! This way the binary will be built with information about the build dependencies embedded into
 //! the binary so that it can be scanned with tools like `cargo-audit` or Trivy.
-mod cli;
-mod config;
-mod error;
-mod github;
-mod init;
-mod slack;
-mod utils;
-
-use cli::parse_args;
-use config::Config;
-use error::GitError;
-use github::match_args;
+use git_sync::cli::parse_args;
+use git_sync::config::Config;
+use git_sync::error::GitError;
+use git_sync::github::match_args;
 use rustls::crypto::aws_lc_rs;
 #[tokio::main]
 async fn main() -> Result<(), GitError> {
@@ -93,7 +85,9 @@ async fn main() -> Result<(), GitError> {
 
     let result: Result<(), GitError> = {
         let config = Config::new(args.file.as_ref())?;
-        match_args::match_arguments(&args, config).await
+        // use Box::pin to prevent any potential stack overflows
+        // see https://rust-lang.github.io/rust-clippy/rust-1.94.0/index.html#large_futures
+        Box::pin(match_args::match_arguments(&args, config)).await
     };
     // Get nice error messages, with simple suggestions instead of huge structs
     if let Err(e) = result {

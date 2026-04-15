@@ -16,12 +16,12 @@ KIND, either express or implied.  See the License for the
 specific language governing permissions and limitations
 under the License.
 */
-use crate::GitError;
 use crate::cli::{
     AppArgs, BackupCommand, BackupDestination, BranchCommand, Command, PRCommand, ReleaseCommand,
     RepoCommand, RepositoryType, TagCommand, cli,
 };
 use crate::config::Config;
+use crate::error::GitError;
 use crate::github::client::{GithubClient, OutputMode};
 use crate::init::generate_config;
 use crate::utils::pr::{CreatePrOptions, MergePrOptions};
