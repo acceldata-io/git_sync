@@ -432,15 +432,19 @@ impl GithubClient {
                 .expect("Unable to compile regex using '{old_text}'");
             replace_all_in_directory(&repo_dir, &re, new_text.as_str(), quiet);
 
-            // Fix hadoop jar versions, if there are any
-            fix_hadoop_jars(&old_text, &new_text, &repo_dir, quiet)?;
-
             if repo == "odp-bigtop" && is_version {
                 // Replace some special cases in bigtop
                 replace_odp_and_bn(&old_text, &new_text, &repo_dir, quiet)?;
                 // If we're working with the odp-bigtop repo, we also need to rename package files
                 // in bigtop-packages/src/deb
                 fix_debian_paths(&old_text, &new_text, &repo_dir, quiet)?;
+                // Fix hadoop jar versions listed in any files
+                fix_hadoop_jars(
+                    &old_text,
+                    &new_text,
+                    &repo_dir.join("bigtop-packages/src/common/hadoop"),
+                    quiet,
+                )?;
             }
             let commit_message = if let Some(msg) = message {
                 msg.clone()
