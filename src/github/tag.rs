@@ -935,9 +935,23 @@ impl GithubClient {
         T: AsRef<str>,
         U: AsRef<str> + Display,
     {
-        let (all_tags, _) = self.get_tags(url).await?;
-        let is_present = all_tags.iter().any(|t| t.name == tag.as_ref());
-        Ok(is_present)
+        let info = get_repo_info_from_url(url)?;
+        let (owner, repo) = (info.owner, info.repo_name);
+
+        //let (all_tags, _) = self.get_tags(url).await?;
+        //let is_present = all_tags.iter().any(|t| t.name == tag.as_ref());
+        //Ok(is_present)
+        match self
+            .octocrab
+            .clone()
+            .repos(owner, repo)
+            .get_ref(&Reference::Tag(tag.as_ref().to_string()))
+            .await
+        {
+            Ok(_) => Ok(true),
+            Err(octocrab::Error::GitHub { source, .. }) if source.status_code == 404 => Ok(false),
+            Err(e) => Err(GitError::GithubApiError(e)),
+        }
     }
 
     /// Filter tags for all configured repositories

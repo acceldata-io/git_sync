@@ -608,13 +608,19 @@ impl GithubClient {
     {
         let info = get_repo_info_from_url(&url)?;
         let (owner, repository) = (info.owner, info.repo_name);
-        let branches: Vec<String> = self
-            .fetch_branches(owner, repository)
-            .await?
-            .keys()
-            .cloned()
-            .collect();
-        Ok(branches.iter().any(|b| b == branch.as_ref()))
+        //let branches = self.fetch_branches(owner, repository).await?;
+        //Ok(branches.contains_key(branch.as_ref()))
+        match self
+            .octocrab
+            .clone()
+            .repos(owner, repository)
+            .get_ref(&Reference::Branch(branch.to_string()))
+            .await
+        {
+            Ok(_) => Ok(true),
+            Err(octocrab::Error::GitHub { source, .. }) if source.status_code == 404 => Ok(false),
+            Err(e) => Err(GitError::GithubApiError(e)),
+        }
     }
     /// Check to see if a branch is *not* present, in all passed repositories
     pub async fn is_branch_present_all<T, U>(
