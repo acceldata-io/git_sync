@@ -210,7 +210,7 @@ impl GithubClient {
 
         match response {
             Ok(resp) => {
-                let rate_limit = &resp["data"]["rateLimit"];
+                let rate_limit = &resp["rateLimit"];
                 let limit = rate_limit["limit"].as_u64().unwrap_or(0);
                 let remaining = rate_limit["remaining"].as_u64().unwrap_or(0);
                 let reset_at_str = rate_limit["resetAt"].as_str().unwrap_or("");

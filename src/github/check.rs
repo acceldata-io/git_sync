@@ -122,8 +122,8 @@ impl GithubClient {
                 body = { octocrab.graphql(&payload).await },
             )?;
             drop(permit);
-            let refs = &response["data"]["repository"]["refs"];
-            license = response["data"]["repository"]["licenseInfo"]
+            let refs = &response["repository"]["refs"];
+            license = response["repository"]["licenseInfo"]
                 .as_object()
                 .and_then(|license| {
                     serde_json::from_value::<LicenseInfo>(serde_json::Value::Object(
@@ -160,7 +160,7 @@ impl GithubClient {
                 }
             }
             if let Some(protection) =
-                response["data"]["repository"]["branchProtectionRules"]["nodes"].as_array()
+                response["repository"]["branchProtectionRules"]["nodes"].as_array()
             {
                 for rule in protection {
                     let parsed_rule: Option<BranchProtectionRule> =
@@ -214,8 +214,11 @@ impl GithubClient {
         license: Option<&LicenseInfo>,
         repo: &str,
     ) {
+        if rows.is_empty() && self.is_tty {
+            println!("No results for {repo}");
+            return;
+        }
         if self.is_tty {
-            println!("TTY?");
             let table = Table::builder(tabled::settings::style::Style::ascii())
                 .title(format!("Stale Branches for {repo}"))
                 .header(header)
