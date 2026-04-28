@@ -214,19 +214,20 @@ impl GithubClient {
         license: Option<&LicenseInfo>,
         repo: &str,
     ) {
-        if rows.is_empty() && self.is_tty {
-            println!("No results for {repo}");
-            return;
-        }
         if self.is_tty {
             let table = Table::builder(tabled::settings::style::Style::ascii())
                 .title(format!("Stale Branches for {repo}"))
                 .header(header)
-                .rows(rows)
+                .rows(&rows)
                 .centre(false)
                 .align(tabled::settings::Alignment::center())
                 .build();
-            println!("{table}");
+
+            if rows.is_empty() {
+                println!("No stale entries found for {repo}");
+            } else {
+                println!("{table}");
+            }
             if !rules.is_empty() {
                 for rule in rules {
                     println!("{rule}");
