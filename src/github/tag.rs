@@ -46,11 +46,6 @@ use std::fmt::{Display, Write as _};
 use crate::github::client::GithubClient;
 use http_body_util::BodyExt;
 
-/// The root level response from github
-#[derive(Deserialize)]
-pub struct RepoResponse {
-    pub data: RepoData,
-}
 /// Struct to deserialize the repository data into
 #[derive(Deserialize)]
 pub struct RepoData {

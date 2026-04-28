@@ -630,10 +630,8 @@ impl GithubClient {
             }
         })
         .await;
-        match res {
-            Ok(result) => Ok(result),
-            Err(e) => Err(e),
-        }
+
+        res
     }
     /// Check to see if a branch is *not* present, in all passed repositories
     pub async fn is_branch_present_all<T, U>(
@@ -653,6 +651,7 @@ impl GithubClient {
                 (repo.to_string(), result)
             });
         }
+
         let mut presence_map: HashMap<String, bool> = HashMap::new();
         let mut errors: Vec<(String, GitError)> = Vec::new();
         while let Some((repo, result)) = futures.next().await {

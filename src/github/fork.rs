@@ -173,7 +173,6 @@ impl GithubClient {
                 error_predicate = |e: &octocrab::Error| is_retryable(e),
                 body = {
                     let _lock = Arc::clone(&self.semaphore).acquire_owned().await;
-                    debug!("Payload is: {payload}");
                     octocrab.graphql(&payload).await
                 },
             )?;
