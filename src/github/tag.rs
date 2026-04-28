@@ -934,7 +934,7 @@ impl GithubClient {
         let info = get_repo_info_from_url(url)?;
         let (owner, repo) = (info.owner, info.repo_name);
 
-        let res: Result<bool, GitError> = async_retry(100, 5000, 3, GitError::is_retryable, || {
+        async_retry(100, 5000, 3, GitError::is_retryable, || {
             let owner = owner.clone();
             let repo = repo.clone();
             let tag = tag.as_ref().to_string();
@@ -954,11 +954,7 @@ impl GithubClient {
                 }
             }
         })
-        .await;
-        match res {
-            Ok(result) => Ok(result),
-            Err(e) => Err(e),
-        }
+        .await
     }
 
     /// Filter tags for all configured repositories
