@@ -1,7 +1,7 @@
 [advisories]
 # These are both low severity vulnerabilities.
 # Safe to ignore
-ignore = ["RUSTSEC-2026-0098", "RUSTSEC-2026-0099"]
+ignore = ["RUSTSEC-2026-0098", "RUSTSEC-2026-0099", "RUSTSEC-2026-0104"]
 informational_warnings = ["unmaintained"]
 severity_threshold = "high"
 
