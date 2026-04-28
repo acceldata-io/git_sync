@@ -609,18 +609,30 @@ impl GithubClient {
     {
         let info = get_repo_info_from_url(&url)?;
         let (owner, repository) = (info.owner, info.repo_name);
-        //let branches = self.fetch_branches(owner, repository).await?;
-        //Ok(branches.contains_key(branch.as_ref()))
-        match self
-            .octocrab
-            .clone()
-            .repos(owner, repository)
-            .get_ref(&Reference::Branch(branch.to_string()))
-            .await
-        {
-            Ok(_) => Ok(true),
-            Err(octocrab::Error::GitHub { source, .. }) if source.status_code == 404 => Ok(false),
-            Err(e) => Err(GitError::GithubApiError(e)),
+        let res: Result<bool, GitError> = async_retry(100, 5000, 3, GitError::is_retryable, || {
+            let owner = owner.clone();
+            let repo = repository.clone();
+            let branch = branch.as_ref().to_string();
+            async move {
+                match self
+                    .octocrab
+                    .clone()
+                    .repos(owner, repo)
+                    .get_ref(&Reference::Branch(branch))
+                    .await
+                {
+                    Ok(_) => Ok(true),
+                    Err(octocrab::Error::GitHub { source, .. }) if source.status_code == 404 => {
+                        Ok(false)
+                    }
+                    Err(e) => Err(GitError::GithubApiError(e)),
+                }
+            }
+        })
+        .await;
+        match res {
+            Ok(result) => Ok(result),
+            Err(e) => Err(e),
         }
     }
     /// Check to see if a branch is *not* present, in all passed repositories

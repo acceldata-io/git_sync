@@ -166,13 +166,6 @@ impl GithubClient {
                 repository.as_ref()
             );
 
-            /*let raw: serde_json::Value = {
-                let _lock = Arc::clone(&self.semaphore).acquire_owned().await;
-                debug!("Getting raw json...");
-                octocrab.graphql(&payload).await
-            }?;
-            */
-
             let res: RepositoryData = async_retry!(
                 ms = 100,
                 timeout = 5000,

@@ -20,6 +20,7 @@ under the License.
 use crate::error::{GitError, is_retryable};
 use crate::github::client::Comparison;
 use crate::utils::filter::filter_ref;
+use crate::utils::repo::async_retry;
 use crate::utils::repo::{RepoInfo, TagInfo, TagType, get_repo_info_from_url, http_to_ssh_repo};
 use crate::{async_retry, handle_api_response, handle_futures_unordered};
 use futures::stream::FuturesUnordered;
@@ -938,19 +939,30 @@ impl GithubClient {
         let info = get_repo_info_from_url(url)?;
         let (owner, repo) = (info.owner, info.repo_name);
 
-        //let (all_tags, _) = self.get_tags(url).await?;
-        //let is_present = all_tags.iter().any(|t| t.name == tag.as_ref());
-        //Ok(is_present)
-        match self
-            .octocrab
-            .clone()
-            .repos(owner, repo)
-            .get_ref(&Reference::Tag(tag.as_ref().to_string()))
-            .await
-        {
-            Ok(_) => Ok(true),
-            Err(octocrab::Error::GitHub { source, .. }) if source.status_code == 404 => Ok(false),
-            Err(e) => Err(GitError::GithubApiError(e)),
+        let res: Result<bool, GitError> = async_retry(100, 5000, 3, GitError::is_retryable, || {
+            let owner = owner.clone();
+            let repo = repo.clone();
+            let tag = tag.as_ref().to_string();
+            async move {
+                match self
+                    .octocrab
+                    .clone()
+                    .repos(owner, repo)
+                    .get_ref(&Reference::Tag(tag))
+                    .await
+                {
+                    Ok(_) => Ok(true),
+                    Err(octocrab::Error::GitHub { source, .. }) if source.status_code == 404 => {
+                        Ok(false)
+                    }
+                    Err(e) => Err(GitError::GithubApiError(e)),
+                }
+            }
+        })
+        .await;
+        match res {
+            Ok(result) => Ok(result),
+            Err(e) => Err(e),
         }
     }
 
