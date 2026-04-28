@@ -23,6 +23,7 @@ use crate::utils::repo::{get_repo_info_from_url, http_to_ssh_repo};
 use crate::{async_retry, handle_api_response};
 use chrono::DateTime;
 use futures::{StreamExt, stream::FuturesUnordered};
+use log::debug;
 use octocrab::params::repos::Reference;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
@@ -87,10 +88,6 @@ struct RepositoryData {
 #[derive(Debug, Deserialize)]
 struct RepoRefs {
     refs: BranchConnection,
-}
-#[derive(Debug, Deserialize)]
-struct BranchCommits {
-    data: RepositoryData,
 }
 
 impl GithubClient {
@@ -163,23 +160,39 @@ impl GithubClient {
                 },
             });
 
-            let res: BranchCommits = async_retry!(
+            debug!(
+                "Fetching branches for {}/{} with cursor: {cursor:?}",
+                owner.as_ref(),
+                repository.as_ref()
+            );
+
+            /*let raw: serde_json::Value = {
+                let _lock = Arc::clone(&self.semaphore).acquire_owned().await;
+                debug!("Getting raw json...");
+                octocrab.graphql(&payload).await
+            }?;
+            */
+
+            let res: RepositoryData = async_retry!(
                 ms = 100,
                 timeout = 5000,
                 retries = 3,
                 error_predicate = |e: &octocrab::Error| is_retryable(e),
                 body = {
                     let _lock = Arc::clone(&self.semaphore).acquire_owned().await;
+                    debug!("Payload is: {payload}");
                     octocrab.graphql(&payload).await
                 },
             )?;
 
-            res.data.repository.refs.nodes.iter().for_each(|node| {
+            debug!("Finished fetching branches");
+
+            res.repository.refs.nodes.iter().for_each(|node| {
                 branches.insert(node.name.clone(), node.target.committed_date.clone());
             });
 
-            has_next_page = res.data.repository.refs.page_info.has_next_page;
-            cursor = res.data.repository.refs.page_info.end_cursor;
+            has_next_page = res.repository.refs.page_info.has_next_page;
+            cursor = res.repository.refs.page_info.end_cursor;
         }
 
         Ok(branches)

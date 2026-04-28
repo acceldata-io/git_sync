@@ -588,6 +588,7 @@ impl GithubClient {
     {
         let info = get_repo_info_from_url(url.as_ref())?;
         let (owner, repo) = (info.owner, info.repo_name);
+        debug!("Starting to filter: {url}");
         let all_branches: Vec<String> = self
             .fetch_branches(owner, repo)
             .await?
