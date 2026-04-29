@@ -29,12 +29,8 @@ use thiserror::Error;
 pub enum CacheError {
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
-    #[error("Failed to deserialize cache: {0}")]
-    Deserialize(#[from] serde_json::Error),
-    // You need to map this error for it to work.
-    // Ex: serde_json::to_vec_pretty(&*inner).map_err(CacheError::Serialize)?;
-    #[error("Failed to serialize cache: {0}")]
-    Serialize(serde_json::Error),
+    #[error("Failed to serialize/deserialize Json for cache: {0}")]
+    JsonError(#[from] serde_json::Error),
     #[error("Cache entry invalid for {key}: {reason}")]
     Invalid { key: String, reason: String },
     #[error("Lock Error: {0}")]
