@@ -81,10 +81,38 @@ pub struct AppArgs {
     #[arg(long, global = true, default_value_t = false)]
     pub dry_run: bool,
 
+    /// Force update the cache for repositories
+    #[arg(short, long, global = true, default_value_t = false)]
+    pub update: bool,
+
+    /// Set the cache ttl in seconds. Default is 24 hours (60 * 60 * 24).
+    /// See `update` for force updating the cache
+    #[arg(long, global = true, default_value_t = 86_400)]
+    pub ttl: u64,
+
+    /// The cache file used for tags and branches
+    #[arg(
+        long,
+        global = true,
+        env = "CACHE_FILE",
+        default_value = "~/.config/git-cache.json",
+        value_parser = expand_tilde,
+    )]
+    pub cache_file: PathBuf,
+
     /// Override the slack webhook url from the config file
     #[cfg(feature = "slack")]
     #[arg(long, global = true, env = "SLACK_WEBHOOK")]
     pub slack_webhook: Option<String>,
+}
+
+fn expand_tilde(path: &str) -> Result<PathBuf, String> {
+    if let Some(stripped) = path.strip_prefix("~/") {
+        let home = std::env::var("HOME").map_err(|_| "Could not determine $HOME".to_string())?;
+        Ok(PathBuf::from(home).join(stripped))
+    } else {
+        Ok(PathBuf::from(path))
+    }
 }
 
 /// Validate that the maximum number of parallel jobs is between 1 and 64.

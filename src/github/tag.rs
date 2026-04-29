@@ -20,7 +20,9 @@ under the License.
 use crate::error::{GitError, is_retryable};
 use crate::github::client::Comparison;
 use crate::utils::filter::filter_ref;
-use crate::utils::repo::{RepoInfo, TagInfo, TagType, get_repo_info_from_url, http_to_ssh_repo};
+use crate::utils::repo::{
+    RepoInfo, TagInfo, TagType, async_retry, get_repo_info_from_url, http_to_ssh_repo,
+};
 use crate::{async_retry, handle_api_response, handle_futures_unordered};
 use futures::stream::FuturesUnordered;
 use futures::{FutureExt, StreamExt, future::try_join};
@@ -111,6 +113,15 @@ impl GithubClient {
     ) -> Result<(IndexSet<TagInfo>, HashSet<String>), GitError> {
         let info = get_repo_info_from_url(&url)?;
         let (owner, repo) = (info.owner, info.repo_name);
+
+        let key = format!("{}/{}", owner, repo);
+
+        if let Some(cached) = self.cache.get_tags(&key) {
+            debug!("Cache hit for tags in {key}");
+            return Ok(cached);
+        } else {
+            debug!("No cache found for {key}");
+        }
 
         let mut all_tags: IndexSet<TagInfo> = IndexSet::new();
         let mut has_next_page = true;
@@ -208,6 +219,8 @@ impl GithubClient {
             has_next_page = repo.refs.page_info.has_next_page;
             after = repo.refs.page_info.end_cursor;
         }
+        self.cache
+            .set_tags(&key, (all_tags.clone(), parent_urls.clone()))?;
 
         Ok((all_tags, parent_urls))
     }
@@ -924,20 +937,57 @@ impl GithubClient {
         U: AsRef<str> + Display,
     {
         let (all_tags, _) = self.get_tags(url).await?;
-        let tag_names_only: Vec<String> = all_tags.into_iter().map(|t| t.name.clone()).collect();
-        let filtered: Vec<String> = filter_ref(&tag_names_only, filter)?;
-        Ok(filtered)
+        filter_ref(all_tags.iter().map(|t| t.name.as_str()), filter)
     }
 
     /// Check to see if a tag is present in a repository
-    pub async fn is_tag_present<T, U>(&self, url: T, tag: U) -> Result<bool, GitError>
+    /*pub async fn is_tag_present<T, U>(&self, url: T, tag: U) -> Result<bool, GitError>
     where
         T: AsRef<str>,
         U: AsRef<str> + Display,
     {
         let (all_tags, _) = self.get_tags(url).await?;
-        let is_present = all_tags.iter().any(|t| t.name == tag.as_ref());
-        Ok(is_present)
+        Ok(all_tags.iter().any(|t| t.name == tag.as_ref()))
+    }
+    */
+    /// Check to see if a branch is present in a repository
+    pub async fn is_tag_present<T, U>(&self, url: T, tag: U) -> Result<bool, GitError>
+    where
+        T: AsRef<str> + Display,
+        U: AsRef<str> + Display,
+    {
+        let info = get_repo_info_from_url(&url)?;
+        let (owner, repository) = (info.owner, info.repo_name);
+        let key = format!("{}/{}", owner, repository);
+        if let Some((tags, _)) = self.cache.get_tags(&key) {
+            debug!("Cache hit for branches in {key}");
+            return Ok(tags.iter().any(|t| t.name == tag.as_ref()));
+        }
+
+        let res = async_retry(100, 5000, 3, GitError::is_retryable, || {
+            let owner = owner.clone();
+            let repo = repository.clone();
+            let tag = tag.as_ref().to_string();
+            async move {
+                let _permit = self.semaphore.clone().acquire_owned().await?;
+                match self
+                    .octocrab
+                    .clone()
+                    .repos(owner, repo)
+                    .get_ref(&Reference::Tag(tag))
+                    .await
+                {
+                    Ok(_) => Ok(true),
+                    Err(octocrab::Error::GitHub { source, .. }) if source.status_code == 404 => {
+                        Ok(false)
+                    }
+                    Err(e) => Err(GitError::GithubApiError(e)),
+                }
+            }
+        })
+        .await?;
+
+        Ok(res)
     }
 
     /// Filter tags for all configured repositories

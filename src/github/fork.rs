@@ -23,6 +23,7 @@ use crate::utils::repo::{get_repo_info_from_url, http_to_ssh_repo};
 use crate::{async_retry, handle_api_response};
 use chrono::DateTime;
 use futures::{StreamExt, stream::FuturesUnordered};
+use log::debug;
 use octocrab::params::repos::Reference;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
@@ -153,6 +154,13 @@ impl GithubClient {
         let mut cursor: Option<String> = None;
         let octocrab = self.octocrab.clone();
 
+        let key = format!("{}/{}", owner.as_ref(), repository.as_ref());
+
+        if let Some(cached) = self.cache.get_branches(&key) {
+            debug!("Cache hit for branches in {key}");
+            return Ok(cached);
+        }
+
         while has_next_page {
             let payload = serde_json::json!({
                 "query": GRAPHQL_QUERY,
@@ -181,6 +189,10 @@ impl GithubClient {
             has_next_page = res.data.repository.refs.page_info.has_next_page;
             cursor = res.data.repository.refs.page_info.end_cursor;
         }
+
+        self.cache
+            .set_branches(&key, branches.clone())
+            .unwrap_or_else(|e| eprintln!("Failed to cache branches for {key}: {e}"));
 
         Ok(branches)
     }

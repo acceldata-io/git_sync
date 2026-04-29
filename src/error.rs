@@ -25,6 +25,22 @@ use std::io::ErrorKind::{
 };
 use thiserror::Error;
 
+#[derive(Error, Debug)]
+pub enum CacheError {
+    #[error("IO error: {0}")]
+    Io(#[from] std::io::Error),
+    #[error("Failed to deserialize cache: {0}")]
+    Deserialize(#[from] serde_json::Error),
+    // You need to map this error for it to work.
+    // Ex: serde_json::to_vec_pretty(&*inner).map_err(CacheError::Serialize)?;
+    #[error("Failed to serialize cache: {0}")]
+    Serialize(serde_json::Error),
+    #[error("Cache entry invalid for {key}: {reason}")]
+    Invalid { key: String, reason: String },
+    #[error("Lock Error: {0}")]
+    LockError(String),
+}
+
 /// Error type to make it easier to handle returning from functions
 #[derive(Error, Debug)]
 pub enum GitError {
@@ -202,6 +218,10 @@ pub enum GitError {
         /// Group Name
         String,
     ),
+    /// An error with the cache
+    #[error("Cache error: {0}")]
+    Cache(#[from] CacheError),
+
     /// Unclassified error
     #[error("{0}")]
     Other(
@@ -415,7 +435,11 @@ impl GitError {
                 message: format!("Semaphore Error: {e}"),
                 suggestion: None,
             },
-
+            GitError::Cache(e) => UserError {
+                code: None,
+                message: format!("Cache error: {e}"),
+                suggestion: Some("Check your cache file/folder and permissions.".into()),
+            },
             GitError::Other(msg) => UserError {
                 code: None,
                 message: msg.clone(),
