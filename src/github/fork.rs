@@ -89,10 +89,6 @@ struct RepositoryData {
 struct RepoRefs {
     refs: BranchConnection,
 }
-#[derive(Debug, Deserialize)]
-struct BranchCommits {
-    data: RepositoryData,
-}
 
 impl GithubClient {
     /// Sync a single repository with its parent repository. Optionally, specify a branch to sync.
@@ -171,7 +167,7 @@ impl GithubClient {
                 },
             });
 
-            let res: BranchCommits = async_retry!(
+            let res: RepositoryData = async_retry!(
                 ms = 100,
                 timeout = 5000,
                 retries = 3,
@@ -182,12 +178,12 @@ impl GithubClient {
                 },
             )?;
 
-            res.data.repository.refs.nodes.iter().for_each(|node| {
+            res.repository.refs.nodes.iter().for_each(|node| {
                 branches.insert(node.name.clone(), node.target.committed_date.clone());
             });
 
-            has_next_page = res.data.repository.refs.page_info.has_next_page;
-            cursor = res.data.repository.refs.page_info.end_cursor;
+            has_next_page = res.repository.refs.page_info.has_next_page;
+            cursor = res.repository.refs.page_info.end_cursor;
         }
 
         self.cache

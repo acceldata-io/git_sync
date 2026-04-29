@@ -47,11 +47,6 @@ use std::fmt::{Display, Write as _};
 use crate::github::client::GithubClient;
 use http_body_util::BodyExt;
 
-/// The root level response from github
-#[derive(Deserialize)]
-pub struct RepoResponse {
-    pub data: RepoData,
-}
 /// Struct to deserialize the repository data into
 #[derive(Deserialize)]
 pub struct RepoData {
@@ -177,7 +172,7 @@ impl GithubClient {
                     "after": after,
                 }
             });
-            let res: RepoResponse = async_retry!(
+            let res: RepoData = async_retry!(
                 ms = 100,
                 timeout = 5000,
                 retries = 3,
@@ -188,7 +183,7 @@ impl GithubClient {
             // Drop the lock on the semaphore so other network activities can potentially run
             drop(permit);
 
-            let repo = res.data.repository;
+            let repo = res.repository;
 
             let parent_url = repo.parent.as_ref().map(|p| p.url.clone());
 
