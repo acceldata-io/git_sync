@@ -964,7 +964,7 @@ impl GithubClient {
             return Ok(tags.iter().any(|t| t.name == tag.as_ref()));
         }
 
-        let res = async_retry(100, 5000, 3, GitError::is_retryable, || {
+        async_retry(100, 5000, 3, GitError::is_retryable, || {
             let owner = owner.clone();
             let repo = repository.clone();
             let tag = tag.as_ref().to_string();
@@ -985,9 +985,7 @@ impl GithubClient {
                 }
             }
         })
-        .await?;
-
-        Ok(res)
+        .await
     }
 
     /// Filter tags for all configured repositories

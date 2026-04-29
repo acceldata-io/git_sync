@@ -609,7 +609,7 @@ impl GithubClient {
             return Ok(branches.contains_key(branch.as_ref()));
         }
 
-        let res = async_retry(100, 5000, 3, GitError::is_retryable, || {
+        async_retry(100, 5000, 3, GitError::is_retryable, || {
             let owner = owner.clone();
             let repo = repository.clone();
             let branch = branch.as_ref().to_string();
@@ -630,9 +630,7 @@ impl GithubClient {
                 }
             }
         })
-        .await?;
-
-        Ok(res)
+        .await
     }
     /// Check to see if a branch is *not* present, in all passed repositories
     pub async fn is_branch_present_all<T, U>(
