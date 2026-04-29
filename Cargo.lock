@@ -1377,7 +1377,7 @@ dependencies = [
 
 [[package]]
 name = "git_sync"
-version = "1.0.9"
+version = "1.0.10"
 dependencies = [
  "aws-config",
  "aws-lc-rs",
