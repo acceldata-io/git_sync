@@ -239,14 +239,46 @@ mod tests {
     use std::collections::{HashMap, HashSet};
     use std::path::PathBuf;
     use std::sync::RwLock;
-    use std::time::Duration;
+    use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
     // Helper functions for tests
+    struct TempCacheFile(PathBuf);
+
+    impl TempCacheFile {
+        fn new(ttl_secs: u64) -> (Cache, Self) {
+            let path = unique_test_cache_path();
+            let cache = Cache {
+                data: RwLock::new(DiskCache::default()),
+                path: path.clone(),
+                ttl: Duration::from_secs(ttl_secs),
+                update: false,
+            };
+            (cache, TempCacheFile(path))
+        }
+    }
+
+    impl Drop for TempCacheFile {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_file(&self.0); // ignore error if file was never written
+        }
+    }
+
+    fn unique_test_cache_path() -> PathBuf {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system time should be after UNIX_EPOCH")
+            .as_nanos();
+        std::env::temp_dir().join(format!(
+            "git_sync_unit_test_{}_{}.json",
+            std::process::id(),
+            nanos
+        ))
+    }
 
     fn make_cache(ttl_secs: u64) -> Cache {
         Cache {
             data: RwLock::new(DiskCache::default()),
-            path: PathBuf::from("/tmp/git_sync_unit_test_never_written.json"),
+            path: unique_test_cache_path(),
             ttl: Duration::from_secs(ttl_secs),
             update: false,
         }
@@ -301,7 +333,7 @@ mod tests {
 
     #[test]
     fn stale_branch_entry_is_not_returned() {
-        let cache = make_cache(3600);
+        let (cache, _guard) = TempCacheFile::new(3600);
         // Insert entry that is greater than one hour old
         let entry = stale_entry(sample_branches(), 7200);
         cache
@@ -317,13 +349,13 @@ mod tests {
 
     #[test]
     fn missing_branch_key_returns_none() {
-        let cache = make_cache(3600);
+        let (cache, _guard) = TempCacheFile::new(3600);
         assert!(cache.get_branches("owner/nonexistent").is_none());
     }
 
     #[test]
     fn tag_entry_returned() {
-        let cache = make_cache(3600);
+        let (cache, _guard) = TempCacheFile::new(3600);
         let (tags, parents) = (sample_tag_data().tags, sample_tag_data().parent_urls);
         cache.set_tags("owner/repo", (tags, parents)).unwrap();
         let result = cache.get_tags("owner/repo");
@@ -334,7 +366,7 @@ mod tests {
 
     #[test]
     fn stale_tag_entry_not_returned() {
-        let cache = make_cache(3600);
+        let (cache, _guard) = TempCacheFile::new(3600);
         let entry = stale_entry(sample_tag_data(), 7200);
         cache
             .data
@@ -350,7 +382,7 @@ mod tests {
     }
     #[test]
     fn remove_tag_removes_specific_tag() {
-        let cache = make_cache(3600);
+        let (cache, _guard) = TempCacheFile::new(3600);
         let data = sample_tag_data();
         cache
             .set_tags("owner/repo", (data.tags, data.parent_urls))
@@ -368,7 +400,7 @@ mod tests {
 
     #[test]
     fn remove_tag_noop_when_tag_not_in_cache() {
-        let cache = make_cache(3600);
+        let (cache, _guard) = TempCacheFile::new(3600);
         let data = sample_tag_data();
         cache
             .set_tags("owner/repo", (data.tags, data.parent_urls))
@@ -383,7 +415,7 @@ mod tests {
 
     #[test]
     fn remove_tag_noop_when_repo_not_in_cache() {
-        let cache = make_cache(3600);
+        let (cache, _guard) = TempCacheFile::new(3600);
         let result = cache.remove_tag("owner", "missing", "v1.0");
         assert!(result.is_ok());
     }

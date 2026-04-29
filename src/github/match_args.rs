@@ -117,7 +117,7 @@ pub async fn match_arguments(app: &AppArgs, config: Config) -> Result<(), GitErr
 
     let cache_file = app.cache_file.to_owned();
     let cache_ttl = app.ttl;
-    let cache_update = app.update;
+    let cache_update = app.update_cache;
 
     let client = GithubClient::new(
         &token,

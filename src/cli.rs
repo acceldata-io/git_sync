@@ -82,8 +82,8 @@ pub struct AppArgs {
     pub dry_run: bool,
 
     /// Force update the cache for repositories
-    #[arg(short, long, global = true, default_value_t = false)]
-    pub update: bool,
+    #[arg(long, global = true, default_value_t = false)]
+    pub update_cache: bool,
 
     /// Set the cache ttl in seconds. Default is 24 hours (60 * 60 * 24).
     /// See `update` for force updating the cache

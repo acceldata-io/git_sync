@@ -936,16 +936,6 @@ impl GithubClient {
     }
 
     /// Check to see if a tag is present in a repository
-    /*pub async fn is_tag_present<T, U>(&self, url: T, tag: U) -> Result<bool, GitError>
-    where
-        T: AsRef<str>,
-        U: AsRef<str> + Display,
-    {
-        let (all_tags, _) = self.get_tags(url).await?;
-        Ok(all_tags.iter().any(|t| t.name == tag.as_ref()))
-    }
-    */
-    /// Check to see if a branch is present in a repository
     pub async fn is_tag_present<T, U>(&self, url: T, tag: U) -> Result<bool, GitError>
     where
         T: AsRef<str> + Display,
