@@ -531,6 +531,15 @@ $ $ git_sync repo check --repository-type all --all --license --old-branches --d
 
 It will detect you are not running in an interactive terminal and will create a header, then output information in a comma separated format.
 
+## Cache
+
+This tool caches the branches and tags for repositories in order to speed up operations that would otherwise take quite a while, such as fetching tags from 40+ repositories. This cache file is by default stored in `~/.config/git-cache.json`, but can be changed at runtime.
+It has a few modifiable flags to manage different aspects of it:
+
+1. `--update-cache` - update the cache, even if it already exists.
+2. `--cache-file <path>` - path to your cache file. This only needs to be provided if you want to use a different path than the default.
+3. `--ttl <seconds>` - the length of time for which the cached values are valid. Anything that exceeds this time will be considered stale and removed from the cache. By default, this is set to 86,400 seconds (24h).
+
 ## Additional notes
 
 - You will need a Github Token with both the 'repo' scope and the 'workflow' scope enabled, if using a classic token. Without these, syncing repositories may not work correctly.
