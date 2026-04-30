@@ -17,11 +17,13 @@ specific language governing permissions and limitations
 under the License.
 */
 use crate::async_retry;
+use crate::cache::store::Cache;
 use crate::config::Config;
 use crate::error::{GitError, is_retryable};
 use crate::utils::repo::{RepoInfo, TagInfo, get_repo_info_from_url};
 use chrono::{DateTime, Local, TimeZone, Utc};
 use octocrab::Octocrab;
+use std::time::Duration;
 use tokio::sync::Mutex;
 
 use indexmap::IndexSet;
@@ -30,6 +32,7 @@ use tokio::sync::Semaphore;
 use std::collections::HashSet;
 use std::fmt::Write as _;
 use std::io::IsTerminal;
+use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::OnceCell;
 
@@ -55,6 +58,8 @@ pub struct GithubClient {
     pub is_tty: bool,
     /// Where output should go. This can only be written to Once
     pub output: Arc<OnceCell<OutputMode>>,
+    /// A cache for storing branches/tags for faster access
+    pub cache: Cache,
     /// A message that gets sent to slack at the end of all processing, if it has any contents.
     /// This is thread safe.
     slack_messages: Arc<Mutex<Vec<String>>>,
@@ -86,12 +91,21 @@ impl GithubClient {
         _config: &Config,
         max_jobs: usize,
         slack_webhook: Option<String>,
+        cache_file: PathBuf,
+        cache_ttl: u64,
+        cache_update: bool,
     ) -> Result<Self, GitError> {
         let octocrab = Octocrab::builder()
             .personal_token(github_token.as_ref())
             .build()
             .map_err(GitError::GithubApiError)?;
         let webhook_url: String = slack_webhook.unwrap_or_default().trim().to_string();
+        let cache =
+            if let Ok(c) = Cache::from(&cache_file, Duration::from_secs(cache_ttl), cache_update) {
+                c
+            } else {
+                Cache::new(cache_file, Duration::from_secs(cache_ttl), cache_update)
+            };
 
         Ok(Self {
             octocrab,
@@ -101,6 +115,7 @@ impl GithubClient {
             // This is a type that can only be written to once, and represents the type of output
             // that we have.
             output: Arc::new(OnceCell::new()),
+            cache,
             // Arbitrary initial capacity to avoid allocations if there aren't that many messages
             slack_messages: Arc::new(Mutex::new(Vec::with_capacity(100))),
             slack_errors: Arc::new(Mutex::new(Vec::with_capacity(100))),
@@ -195,7 +210,7 @@ impl GithubClient {
 
         match response {
             Ok(resp) => {
-                let rate_limit = &resp["data"]["rateLimit"];
+                let rate_limit = &resp["rateLimit"];
                 let limit = rate_limit["limit"].as_u64().unwrap_or(0);
                 let remaining = rate_limit["remaining"].as_u64().unwrap_or(0);
                 let reset_at_str = rate_limit["resetAt"].as_str().unwrap_or("");

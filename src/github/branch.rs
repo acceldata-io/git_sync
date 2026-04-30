@@ -588,17 +588,12 @@ impl GithubClient {
     {
         let info = get_repo_info_from_url(url.as_ref())?;
         let (owner, repo) = (info.owner, info.repo_name);
-        let all_branches: Vec<String> = self
-            .fetch_branches(owner, repo)
-            .await?
-            .keys()
-            .cloned()
-            .collect();
+        let all_branches = self.fetch_branches(owner, repo).await?;
         debug!(
             "Finished filtering. Available permits are now: {}",
             self.semaphore.available_permits()
         );
-        filter_ref(&all_branches, &filter)
+        filter_ref(all_branches.keys().map(|s| s.as_str()), &filter)
     }
     /// Check to see if a branch is present in a repository
     pub async fn is_branch_present<T, U>(&self, url: T, branch: U) -> Result<bool, GitError>
@@ -608,13 +603,34 @@ impl GithubClient {
     {
         let info = get_repo_info_from_url(&url)?;
         let (owner, repository) = (info.owner, info.repo_name);
-        let branches: Vec<String> = self
-            .fetch_branches(owner, repository)
-            .await?
-            .keys()
-            .cloned()
-            .collect();
-        Ok(branches.iter().any(|b| b == branch.as_ref()))
+        let key = format!("{}/{}", owner, repository);
+        if let Some(branches) = self.cache.get_branches(&key) {
+            debug!("Cache hit for branches in {key}");
+            return Ok(branches.contains_key(branch.as_ref()));
+        }
+
+        async_retry(100, 5000, 3, GitError::is_retryable, || {
+            let owner = owner.clone();
+            let repo = repository.clone();
+            let branch = branch.as_ref().to_string();
+            async move {
+                let _permit = self.semaphore.clone().acquire_owned().await?;
+                match self
+                    .octocrab
+                    .clone()
+                    .repos(owner, repo)
+                    .get_ref(&Reference::Branch(branch))
+                    .await
+                {
+                    Ok(_) => Ok(true),
+                    Err(octocrab::Error::GitHub { source, .. }) if source.status_code == 404 => {
+                        Ok(false)
+                    }
+                    Err(e) => Err(GitError::GithubApiError(e)),
+                }
+            }
+        })
+        .await
     }
     /// Check to see if a branch is *not* present, in all passed repositories
     pub async fn is_branch_present_all<T, U>(

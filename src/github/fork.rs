@@ -23,6 +23,7 @@ use crate::utils::repo::{get_repo_info_from_url, http_to_ssh_repo};
 use crate::{async_retry, handle_api_response};
 use chrono::DateTime;
 use futures::{StreamExt, stream::FuturesUnordered};
+use log::debug;
 use octocrab::params::repos::Reference;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
@@ -88,10 +89,6 @@ struct RepositoryData {
 struct RepoRefs {
     refs: BranchConnection,
 }
-#[derive(Debug, Deserialize)]
-struct BranchCommits {
-    data: RepositoryData,
-}
 
 impl GithubClient {
     /// Sync a single repository with its parent repository. Optionally, specify a branch to sync.
@@ -153,6 +150,13 @@ impl GithubClient {
         let mut cursor: Option<String> = None;
         let octocrab = self.octocrab.clone();
 
+        let key = format!("{}/{}", owner.as_ref(), repository.as_ref());
+
+        if let Some(cached) = self.cache.get_branches(&key) {
+            debug!("Cache hit for branches in {key}");
+            return Ok(cached);
+        }
+
         while has_next_page {
             let payload = serde_json::json!({
                 "query": GRAPHQL_QUERY,
@@ -163,7 +167,7 @@ impl GithubClient {
                 },
             });
 
-            let res: BranchCommits = async_retry!(
+            let res: RepositoryData = async_retry!(
                 ms = 100,
                 timeout = 5000,
                 retries = 3,
@@ -174,13 +178,17 @@ impl GithubClient {
                 },
             )?;
 
-            res.data.repository.refs.nodes.iter().for_each(|node| {
+            res.repository.refs.nodes.iter().for_each(|node| {
                 branches.insert(node.name.clone(), node.target.committed_date.clone());
             });
 
-            has_next_page = res.data.repository.refs.page_info.has_next_page;
-            cursor = res.data.repository.refs.page_info.end_cursor;
+            has_next_page = res.repository.refs.page_info.has_next_page;
+            cursor = res.repository.refs.page_info.end_cursor;
         }
+
+        self.cache
+            .set_branches(&key, branches.clone())
+            .unwrap_or_else(|e| eprintln!("Failed to cache branches for {key}: {e}"));
 
         Ok(branches)
     }

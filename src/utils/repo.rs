@@ -26,7 +26,7 @@ use octocrab::Octocrab;
 use octocrab::models::repos::Object;
 use octocrab::params::repos::Reference;
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::fmt::Write as _;
 use std::future::Future;
@@ -49,7 +49,7 @@ pub struct RepoInfo {
 
 /// Struct for holding tag information.
 /// This is for both annotated and lightweight tags.
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct TagInfo {
     /// Name of the tag
     pub name: String,
@@ -80,7 +80,7 @@ impl Hash for TagInfo {
 }
 
 /// The different types of tags
-#[derive(Debug, Deserialize, PartialEq, Eq, Hash, Clone, Copy)]
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq, Hash, Clone, Copy)]
 pub enum TagType {
     Annotated,
     Lightweight,

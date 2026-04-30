@@ -115,7 +115,19 @@ pub async fn match_arguments(app: &AppArgs, config: Config) -> Result<(), GitErr
     // This value must be greater than 0
     let jobs: usize = app.jobs.unwrap_or(default_jobs);
 
-    let client = GithubClient::new(&token, &config, jobs, slack_webhook)?;
+    let cache_file = app.cache_file.to_owned();
+    let cache_ttl = app.ttl;
+    let cache_update = app.update_cache;
+
+    let client = GithubClient::new(
+        &token,
+        &config,
+        jobs,
+        slack_webhook,
+        cache_file,
+        cache_ttl,
+        cache_update,
+    )?;
     if !token.is_empty() && verbose {
         let (rest_limit, graphql_limit) =
             tokio::join!(client.get_rate_limit(), client.get_graphql_limit());
