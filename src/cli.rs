@@ -86,7 +86,7 @@ pub struct AppArgs {
     pub update_cache: bool,
 
     /// Set the cache ttl in seconds. Default is 24 hours (60 * 60 * 24).
-    /// See `update` for force updating the cache
+    /// See the `update-cache` flag for force updating the cache
     #[arg(long, global = true, default_value_t = 86_400)]
     pub ttl: u64,
 
