@@ -34,10 +34,12 @@ use clap_complete::{
 use clap_mangen::Man;
 use clap_verbosity_flag::log::LevelFilter;
 use fancy_regex::Regex;
+use indicatif::ProgressBar;
 use std::collections::{HashMap, HashSet};
 use std::env;
 use std::fs::File;
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 /// Parse the argument that gets passed, and run their associated methods
 pub async fn match_arguments(app: &AppArgs, config: Config) -> Result<(), GitError> {
@@ -236,7 +238,47 @@ async fn match_tag_cmds(
         TagCommand::Show(show_cmd) => {
             let repository = show_cmd.repository.as_ref();
 
-            if let Some(repository) = repository {
+            let pb = spinner(client.is_tty, "Fetching tags...");
+
+            let sorted = if let Some(repository) = repository {
+                let mut output = client.filter_tags(repository, &show_cmd.filter).await?;
+                output.sort();
+                if !output.is_empty() && client.is_tty {
+                    println!("Repository '{repository}'");
+                }
+                vec![(repository.clone(), output)]
+            } else if show_cmd.all {
+                let output = client.filter_all_tags(&repos[..], &show_cmd.filter).await?;
+                pb.set_message("Sorting tags...");
+                let sorted: Vec<(String, Vec<String>)> = output
+                    .into_iter()
+                    .map(|(repo, mut tags)| {
+                        tags.sort();
+                        (repo, tags)
+                    })
+                    .collect();
+
+                pb.finish_with_message("Tag processing complete");
+                sorted
+            } else {
+                return Err(GitError::MissingRepositoryName);
+            };
+
+            for (repository, tags) in &sorted {
+                if client.is_tty {
+                    println!("Repository '{repository}'");
+                }
+                let prefix = if client.is_tty {
+                    "Tag"
+                } else {
+                    repository.as_str()
+                };
+                for tag in tags {
+                    println!("\t{prefix}: '{tag}'");
+                }
+            }
+
+            /*if let Some(repository) = repository {
                 let mut output = client.filter_tags(repository, &show_cmd.filter).await?;
                 output.sort();
                 if !output.is_empty() && client.is_tty {
@@ -273,6 +315,7 @@ async fn match_tag_cmds(
                     }
                 }
             }
+            */
         }
         TagCommand::Missing(missing_cmd) => {
             let repository = missing_cmd.repository.as_ref();
@@ -500,20 +543,20 @@ async fn match_branch_cmds(
         }
         BranchCommand::Show(show_cmd) => {
             let repository = show_cmd.repository.as_ref();
-
-            if let Some(repository) = repository {
-                let mut output = client.filter_branches(repository, &show_cmd.filter).await?;
-                output.sort();
-                if !output.is_empty() && client.is_tty {
-                    println!("Repository '{repository}'");
-                }
-                for branch in output {
-                    println!("\tBranch: '{branch}'");
+            let pb = spinner(client.is_tty, "Fetching branches...");
+            let sorted: Vec<(String, Vec<String>)> = if let Some(repository) = repository {
+                let mut branches = client.filter_branches(repository, &show_cmd.filter).await?;
+                branches.sort();
+                if repository.is_empty() {
+                    vec![]
+                } else {
+                    vec![(repository.clone(), branches)]
                 }
             } else if show_cmd.all {
                 let output = client
                     .filter_all_branches(&repos[..], &show_cmd.filter)
                     .await?;
+                pb.set_message("Sorting branches...");
                 let sorted: Vec<(String, Vec<String>)> = output
                     .into_iter()
                     .map(|(repo, mut branches)| {
@@ -521,23 +564,24 @@ async fn match_branch_cmds(
                         (repo, branches)
                     })
                     .collect();
-                if !sorted.is_empty() {
-                    for (repository, branches) in sorted {
-                        if client.is_tty {
-                            println!("Repository '{repository}'");
-                        }
-                        for branch in branches {
-                            // Give some extra context to non-interactive use
-                            // This could come up if piping the output or redirecting stdout to a
-                            // file.
-                            let prefix = if client.is_tty {
-                                String::from("Branch")
-                            } else {
-                                repository.clone()
-                            };
-                            println!("\t{prefix}: '{branch}'");
-                        }
-                    }
+
+                pb.finish_with_message("Branch processing complete");
+                sorted
+            } else {
+                return Err(GitError::MissingRepositoryName);
+            };
+
+            for (repository, branches) in sorted {
+                if client.is_tty {
+                    println!("Repository '{repository}'");
+                }
+                let prefix = if client.is_tty {
+                    "Branch"
+                } else {
+                    repository.as_str()
+                };
+                for branch in &branches {
+                    println!("\t{prefix}: '{branch}'");
                 }
             }
         }
@@ -546,8 +590,10 @@ async fn match_branch_cmds(
             let branch = missing_cmd.branch.trim_ascii();
 
             if missing_cmd.all {
+                let pb = spinner(client.is_tty, "Checking for Missing Branches...");
                 let mut no_missing_branches = true;
                 let present = client.is_branch_present_all(&repos[..], branch).await?;
+                pb.finish_with_message("Branch presence check complete");
                 for (repo, found) in present {
                     if !found {
                         println!("Branch '{branch}' is missing from {repo}");
@@ -912,4 +958,15 @@ fn generate_man_pages(mut cmd: clap::Command, out_dir: &PathBuf, parent: Option<
         let sub_name = subcommand.get_name().to_string().replace('_', "-");
         generate_man_pages(subcommand.clone(), out_dir, Some(sub_name));
     }
+}
+
+fn spinner(is_tty: bool, msg: &str) -> ProgressBar {
+    let pb = if is_tty {
+        ProgressBar::new_spinner()
+    } else {
+        ProgressBar::hidden()
+    };
+    pb.enable_steady_tick(Duration::from_millis(100));
+    pb.set_message(msg.to_string());
+    pb
 }
