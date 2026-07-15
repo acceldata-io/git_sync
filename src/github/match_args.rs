@@ -438,9 +438,10 @@ async fn match_branch_cmds(
     match cmd {
         BranchCommand::Create(create_cmd) => {
             let repository = create_cmd.repository.as_ref();
-            let (base_branch, base_tag, new) = (
+            let (base_branch, base_tag, base_sha, new) = (
                 create_cmd.base_branch.clone(),
                 create_cmd.base_tag.clone(),
+                create_cmd.base_sha.clone(),
                 create_cmd.new_branch.clone(),
             );
             if let Some(base) = &base_branch {
@@ -460,6 +461,20 @@ async fn match_branch_cmds(
                     client
                         .create_branch_from_tag(repository, &tag, &new, quiet)
                         .await?;
+                }
+            } else if let Some(sha) = &base_sha {
+                if create_cmd.all {
+                    return Err(GitError::Other(
+                        "Creating branches from --base-sha is only supported for a single --repository"
+                            .to_string(),
+                    ));
+                }
+                if let Some(repository) = repository {
+                    client
+                        .create_branch_from_sha(repository, sha, &new, quiet)
+                        .await?;
+                } else {
+                    return Err(GitError::MissingRepositoryName);
                 }
             }
         }

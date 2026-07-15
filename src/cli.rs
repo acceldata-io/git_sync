@@ -676,10 +676,21 @@ pub struct ChangeBranchTextCommand {
         .args(&["all", "repository"])
     ),
     group(
-        ArgGroup::new("branch_tag")
+        ArgGroup::new("branch_tag_sha")
         .required(true)
-        .args(&["base_branch", "base_tag"])
-    )
+        .args(&["base_branch", "base_tag", "base_sha"])
+    ),
+    long_about = "Create a new branch from a base branch, tag, or commit SHA.",
+    after_help = "\
+EXAMPLES:
+    git_sync branch create -r https://github.com/org/repo --new-branch tmp --base-branch main
+    git_sync branch create -r https://github.com/org/repo --new-branch tmp --base-tag v1.0.0
+    git_sync branch create -r https://github.com/org/repo --new-branch tmp --base-sha abcdef1234
+
+NOTES:
+    --base-sha only works with a single --repository (not --all), because each
+    repository would need a different commit SHA.
+"
 )]
 pub struct CreateBranchCommand {
     /// Create a branch in this repository
@@ -688,12 +699,15 @@ pub struct CreateBranchCommand {
     /// New branch to create
     #[arg(short, long)]
     pub new_branch: String,
-    /// The base branch for the new branch. Not valid if --base-tag is passed
+    /// The base branch for the new branch. Not valid if --base-tag or --base-sha is passed
     #[arg(short = 'b', long)]
     pub base_branch: Option<String>,
-    /// The base tag for the new branch. Not valid if --base-branch is passed
+    /// The base tag for the new branch. Not valid if --base-branch or --base-sha is passed
     #[arg(short = 't', long)]
     pub base_tag: Option<String>,
+    /// The commit SHA to point the new branch at. Not valid with --all, --base-branch, or --base-tag
+    #[arg(long, conflicts_with = "all")]
+    pub base_sha: Option<String>,
     /// Create the branch for all configured repositories
     #[arg(short, long, default_value_t = false)]
     pub all: bool,

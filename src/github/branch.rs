@@ -140,6 +140,58 @@ impl GithubClient {
             }
         }
     }
+    /// Create a branch pointing at an exact commit SHA in a repository
+    pub async fn create_branch_from_sha(
+        &self,
+        url: impl AsRef<str>,
+        base_sha: impl AsRef<str> + ToString + Display,
+        new_branch: impl AsRef<str> + ToString + Display,
+        quiet: bool,
+    ) -> Result<(), GitError> {
+        let info = get_repo_info_from_url(url)?;
+        let (owner, repo) = (info.owner, info.repo_name);
+        let sha = base_sha.as_ref().trim().to_string();
+
+        if sha.is_empty() {
+            return Err(GitError::Other(
+                "base SHA must not be empty when creating a branch from SHA".to_string(),
+            ));
+        }
+
+        let res: Result<_, octocrab::Error> = async_retry!(
+            ms = 100,
+            timeout = 5000,
+            retries = 3,
+            error_predicate = |e: &octocrab::Error| is_retryable(e),
+            body = {
+                let _lock = self.semaphore.clone().acquire_owned().await;
+                self.octocrab
+                    .clone()
+                    .repos(&owner, &repo)
+                    .create_ref(&Reference::Branch(new_branch.to_string()), sha.clone())
+                    .await
+            },
+        );
+        match res {
+            Ok(_) => {
+                if !quiet {
+                    self.append_slack_message(format!(
+                        "{owner}/{repo}: New branch '{new_branch}' created from SHA {sha}"
+                    ))
+                    .await;
+                }
+                Ok(())
+            }
+            Err(e) => {
+                self.append_slack_error(format!(
+                    "{owner}/{repo}: Failed to create {new_branch} from SHA {sha}: {e}"
+                ))
+                .await;
+
+                Err(GitError::GithubApiError(e))
+            }
+        }
+    }
     /// Create a branch from some base branch in a repository
     pub async fn create_branch_from_tag(
         &self,
