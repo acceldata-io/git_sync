@@ -39,7 +39,29 @@ impl GithubClient {
         let retries = 3;
 
         // Verify that head and base have difference. If they don't, skip creating a PR since it's
-        // not necessary
+        // not necessary. Prefer a SHA equality check first: octocrab's compare deserializer can
+        // fail on some GitHub payloads (missing `repository` on base_commit), which previously
+        // turned a benign "already up to date" case into a hard failure.
+        match (
+            self.get_branch_sha(&opts.url, &opts.base).await,
+            self.get_branch_sha(&opts.url, &opts.head).await,
+        ) {
+            (Ok(base_sha), Ok(head_sha)) if base_sha == head_sha => {
+                eprintln!(
+                    "No differences between {} and {} in {}/{} - skipping PR creation",
+                    opts.head, opts.base, owner, repo
+                );
+                return Ok(None);
+            }
+            (Err(e), _) => {
+                eprintln!("Failed to resolve base branch SHA for {owner}/{repo}: {e}");
+            }
+            (_, Err(e)) => {
+                eprintln!("Failed to resolve head branch SHA for {owner}/{repo}: {e}");
+            }
+            _ => {}
+        }
+
         let difference: Result<_, octocrab::Error> = async_retry!(
             ms = 100,
             timeout = 5000,
@@ -128,15 +150,19 @@ impl GithubClient {
                 },
             );
             match pr_result {
-                Ok(p) => p
-                    .items
-                    .first()
-                    .map(|pr| pr.number)
-                    .ok_or_else(|| GitError::NoSuchPR {
-                        repository: format!("{owner}/{repo}"),
-                        head: opts.head.clone(),
-                        base: opts.base.clone(),
-                    })?,
+                Ok(p) => {
+                    if let Some(pr) = p.items.first() {
+                        pr.number
+                    } else {
+                        // 422 with no existing PR usually means GitHub rejected creation because
+                        // there are no commits between head and base (already up to date).
+                        eprintln!(
+                            "No openable PR between {} and {} in {}/{} - skipping",
+                            opts.head, opts.base, owner, repo
+                        );
+                        return Ok(None);
+                    }
+                }
                 Err(e) => {
                     self.append_slack_error(format!(
                         "Failed to get existing PR number for {owner}/{repo}: {e}"
