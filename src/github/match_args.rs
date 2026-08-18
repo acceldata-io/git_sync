@@ -797,6 +797,7 @@ async fn match_pr_cmds(
                     title: open_cmd.merge_title.clone(),
                     message: open_cmd.merge_body.clone(),
                     sha: open_cmd.sha.clone(),
+                    force: open_cmd.force_merge,
                 })
             } else {
                 None

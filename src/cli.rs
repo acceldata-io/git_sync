@@ -484,6 +484,11 @@ pub struct CreatePRCommand {
     /// The method to use when merging the PR. The default, per GitHub, is "merge"
     #[arg(long, value_enum, default_value = "merge")]
     pub merge_method: MergeMethod,
+    /// If a branch protection rule or ruleset refuses the merge, merge head into base directly
+    /// instead. This only succeeds for accounts on the bypass list for that rule, and always
+    /// produces a merge commit regardless of --merge-method
+    #[arg(long, default_value_t = false, requires = "merge")]
+    pub force_merge: bool,
     /// SHA that the pull request head must match to permit merging
     #[arg(long)]
     pub sha: Option<String>,

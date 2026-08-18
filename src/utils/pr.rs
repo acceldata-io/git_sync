@@ -54,6 +54,10 @@ pub struct MergePrOptions {
     pub message: Option<String>,
     /// SHA that pull request head must match to allow merge.  
     pub sha: Option<String>,
+    /// If the pull request merge endpoint is refused by a branch protection rule or ruleset,
+    /// merge `head` into `base` directly instead. Only useful for accounts that are on the
+    /// bypass list for that rule.
+    pub force: bool,
 }
 
 #[derive(ValueEnum, Copy, Clone, Debug, Default)]
