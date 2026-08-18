@@ -367,7 +367,11 @@ impl GithubClient {
             .clone()
             .unwrap_or_else(|| pull_request.head.sha.clone());
 
-        let title = opts.title.as_deref().map(str::trim).filter(|t| !t.is_empty());
+        let title = opts
+            .title
+            .as_deref()
+            .map(str::trim)
+            .filter(|t| !t.is_empty());
         let detail = opts
             .message
             .as_deref()
