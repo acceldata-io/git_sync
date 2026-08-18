@@ -86,7 +86,7 @@ pub fn replace_in_file_with<F>(
     replacement: &F,
 ) -> io::Result<FileStatus>
 where
-    F: Fn(&Captures) -> String,
+    F: Fn(&Captures<'_, str>) -> String,
 {
     if skip_file(path) {
         return Ok(FileStatus::Skipped);
@@ -100,7 +100,7 @@ where
         if index > 0 {
             new_content.push('\n');
         }
-        match re.replace_all(line, |captures: &Captures| replacement(captures)) {
+        match re.replace_all(line, |captures: &Captures<'_, str>| replacement(captures)) {
             Cow::Borrowed(_) => new_content.push_str(line),
             Cow::Owned(s) => new_content.push_str(&s),
         }
@@ -156,7 +156,7 @@ pub fn replace_all_in_directory_with<F>(
     replacement: &F,
     quiet: bool,
 ) where
-    F: Fn(&Captures) -> String,
+    F: Fn(&Captures<'_, str>) -> String,
 {
     for entry in WalkDir::new(path)
         .into_iter()
@@ -222,7 +222,7 @@ mod tests {
         let (_dir, file) = create_test_file("test.txt", input);
 
         let re = get_or_compile(r#"(?i)(odp_bn)(?-i)="\d+"#).unwrap();
-        let replacement = |captures: &Captures| format!(r#"{}="{}"#, &captures[1], "3002");
+        let replacement = |captures: &Captures<'_, str>| format!(r#"{}="{}"#, &captures[1], "3002");
         replace_in_file_with(&file, &re, &replacement).unwrap();
         let got = fs::read_to_string(&file).unwrap();
         assert!(got.contains(r#"ODP_BN="3002"#));
@@ -238,7 +238,7 @@ mod tests {
         let (_dir, file) = create_test_file("test.txt", input);
 
         let re = get_or_compile(r#"(?i)(odp_bn)(?-i)="(\d+|SNAPSHOT)"#).unwrap();
-        let replacement = |captures: &Captures| format!(r#"{}="{}"#, &captures[1], "3002");
+        let replacement = |captures: &Captures<'_, str>| format!(r#"{}="{}"#, &captures[1], "3002");
         replace_in_file_with(&file, &re, &replacement).unwrap();
         let got = fs::read_to_string(&file).unwrap();
         assert!(got.contains(r#"ODP_BN="3002"#));
@@ -251,7 +251,7 @@ mod tests {
         let (_dir, file) = create_test_file("test.txt", input);
 
         let re = get_or_compile(r#"(odp_bn|ODP_BN)="\d+"#).unwrap();
-        let replacement = |captures: &Captures| format!(r#"{}="{}"#, &captures[1], "3002");
+        let replacement = |captures: &Captures<'_, str>| format!(r#"{}="{}"#, &captures[1], "3002");
         replace_in_file_with(&file, &re, &replacement).unwrap();
         let got = fs::read_to_string(&file).unwrap();
         assert!(got.contains(r#"ODPA_BN="3001"#));
@@ -269,7 +269,7 @@ mod tests {
 
         let re = get_or_compile(r#"(?i)(odp_bn)(?-i)="\d+"#).unwrap();
 
-        let replacement = |captures: &Captures| format!(r#"{}="{}"#, &captures[1], "3002");
+        let replacement = |captures: &Captures<'_, str>| format!(r#"{}="{}"#, &captures[1], "3002");
 
         replace_all_in_directory_with(dir.path(), &re, &replacement, false);
 
