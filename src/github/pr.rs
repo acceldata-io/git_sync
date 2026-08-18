@@ -23,7 +23,23 @@ use crate::github::client::GithubClient;
 use crate::utils::pr::{CreatePrOptions, MergePrOptions};
 use crate::utils::repo::get_repo_info_from_url;
 use futures::{StreamExt, stream::FuturesUnordered};
+use serde_json::json;
 use std::collections::HashMap;
+
+/// Whether GitHub refused a merge because of a branch protection rule or a ruleset, rather than
+/// because of the state of the branches themselves. An unmet review or status check requirement
+/// comes back as a 405, and a branch that cannot be written to comes back as a 403.
+fn is_blocked_by_branch_rules(e: &octocrab::Error) -> bool {
+    let octocrab::Error::GitHub { source, .. } = e else {
+        return false;
+    };
+    if source.status_code == http::StatusCode::METHOD_NOT_ALLOWED {
+        // A conflicted pull request is reported as a 405 too, and writing to the base branch
+        // cannot resolve that.
+        return !source.message.to_lowercase().contains("not mergeable");
+    }
+    source.status_code == http::StatusCode::FORBIDDEN
+}
 
 impl GithubClient {
     /// Create a pull request for a specific repository
@@ -265,7 +281,8 @@ impl GithubClient {
     }
 
     /// Merge a pull request. This will only work if there are no merge conflicts in the pull
-    /// request.
+    /// request. If `opts.force` is set and GitHub refuses the merge because of a branch protection
+    /// rule or ruleset, this falls back to [`Self::force_merge_pr`].
     pub async fn merge_pr(&self, opts: &MergePrOptions) -> Result<(), GitError> {
         let info = get_repo_info_from_url(&opts.url)?;
         let (owner, repo) = (info.owner, info.repo_name);
@@ -296,8 +313,111 @@ impl GithubClient {
                 Ok(())
             }
             Err(e) => {
+                if opts.force && is_blocked_by_branch_rules(&e) {
+                    eprintln!(
+                        "Branch rules refused the merge of PR #{pr_number} in {owner}/{repo} ({e}); merging into the base branch directly instead"
+                    );
+                    return self.force_merge_pr(opts, &owner, &repo).await;
+                }
                 self.append_slack_error(format!(
                     "Failed to merge PR #{pr_number} in {owner}/{repo}: {e}"
+                ))
+                .await;
+                Err(GitError::PRNotMergeable(pr_number))
+            }
+        }
+    }
+
+    /// Merge the head branch of a pull request straight into its base branch, using GitHub's
+    /// "merge a branch" endpoint instead of the pull request merge endpoint.
+    ///
+    /// GitHub evaluates this as a write to the base branch rather than as a pull request merge, so
+    /// it goes through for accounts that are allowed to bypass the pull request requirements on
+    /// that branch even when the required approving review is missing. Once the head commit is
+    /// reachable from the base branch, GitHub closes the pull request as merged by itself.
+    ///
+    /// This always produces a merge commit, so the requested merge method is not honoured here.
+    async fn force_merge_pr(
+        &self,
+        opts: &MergePrOptions,
+        owner: &str,
+        repo: &str,
+    ) -> Result<(), GitError> {
+        let pr_number = opts.pr_number;
+        let octocrab = self.octocrab.clone();
+
+        let pull_request: Result<_, octocrab::Error> = async_retry!(
+            ms = 100,
+            timeout = 5000,
+            retries = 3,
+            error_predicate = |e: &octocrab::Error| is_retryable(e),
+            body = {
+                let _permit = self.semaphore.clone().acquire_owned().await;
+                octocrab.pulls(owner, repo).get(pr_number).await
+            },
+        );
+        let pull_request = pull_request.map_err(|_| GitError::PRNotMergeable(pr_number))?;
+
+        let base = pull_request.base.ref_field.clone();
+        let head_branch = pull_request.head.ref_field.clone();
+        // Prefer the SHA the merge was validated against, so that a commit pushed while this is
+        // running cannot slip into the base branch.
+        let head = opts
+            .sha
+            .clone()
+            .unwrap_or_else(|| pull_request.head.sha.clone());
+
+        let title = opts.title.as_deref().map(str::trim).filter(|t| !t.is_empty());
+        let detail = opts
+            .message
+            .as_deref()
+            .map(str::trim)
+            .filter(|m| !m.is_empty());
+        let commit_message = match (title, detail) {
+            (Some(title), Some(detail)) => format!("{title}\n\n{detail}"),
+            (Some(title), None) => title.to_string(),
+            (None, Some(detail)) => {
+                format!("Merge pull request #{pr_number} from {head_branch}\n\n{detail}")
+            }
+            (None, None) => format!("Merge pull request #{pr_number} from {head_branch}"),
+        };
+
+        let body = json!({
+            "base": &base,
+            "head": &head,
+            "commit_message": commit_message,
+        });
+
+        let response: Result<serde_json::Value, octocrab::Error> = async_retry!(
+            ms = 100,
+            timeout = 5000,
+            retries = 3,
+            error_predicate = |e: &octocrab::Error| is_retryable(e),
+            body = {
+                let _permit = self.semaphore.clone().acquire_owned().await;
+                octocrab
+                    .post::<serde_json::Value, _>(
+                        format!("/repos/{owner}/{repo}/merges"),
+                        Some(&body),
+                    )
+                    .await
+            },
+        );
+
+        match response {
+            Ok(_) => {
+                println!(
+                    "Merged '{head_branch}' into '{base}' directly for {owner}/{repo}; PR #{pr_number} will be closed as merged"
+                );
+                self.append_slack_message(format!(
+                    "PR #{pr_number} in {owner}/{repo} was merged by writing to '{base}' directly, bypassing its branch rules"
+                ))
+                .await;
+                Ok(())
+            }
+            Err(e) => {
+                self.append_slack_error(format!(
+                    "Failed to merge PR #{pr_number} in {owner}/{repo} directly into '{base}': {e}"
                 ))
                 .await;
                 Err(GitError::PRNotMergeable(pr_number))
