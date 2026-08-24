@@ -187,23 +187,36 @@ impl fmt::Display for MakeLatest {
 #[command(group(
     ArgGroup::new("target")
     .required(true)
-    .args(&["all", "repository"])
+    .args(&["all", "repository", "manifest"])
 ))]
 pub struct CreateTagCommand {
     /// The new tag's name
-    #[arg(short, long)]
-    pub tag: String,
+    #[arg(short, long, required_unless_present = "manifest")]
+    pub tag: Option<String>,
     /// The target branch
-    #[arg(short, long)]
-    pub branch: String,
+    #[arg(short, long, required_unless_present = "manifest")]
+    pub branch: Option<String>,
     /// The url of the repository to create the tag in. If --all is specified, this is
     /// not a valid option.
-    #[arg(short, long)]
+    #[arg(short, long, conflicts_with = "manifest")]
     pub repository: Option<String>,
     /// Create this tag for all configured repositories, all using the same branch.
     /// If --repository is specified, this is not a valid option.
-    #[arg(short, long, default_value_t = false)]
+    #[arg(short, long, default_value_t = false, conflicts_with = "manifest")]
     pub all: bool,
+    /// Component manifest path or HTTP(S) URL. Tags are derived and created at exact manifest SHAs.
+    #[arg(
+        long,
+        conflicts_with_all = ["tag", "branch", "repository", "all"],
+        requires_all = ["source_release_version", "new_version"]
+    )]
+    pub manifest: Option<String>,
+    /// Release version found in each source branch in the component manifest.
+    #[arg(long, requires = "manifest")]
+    pub source_release_version: Option<String>,
+    /// Version that replaces --source-release-version in each derived tag.
+    #[arg(long, requires = "manifest")]
+    pub new_version: Option<String>,
 }
 
 /// Options for the 'comparison' tag command
@@ -678,30 +691,46 @@ pub struct ChangeBranchTextCommand {
     group(
         ArgGroup::new("target")
         .required(true)
-        .args(&["all", "repository"])
+        .args(&["all", "repository", "manifest"])
     ),
     group(
         ArgGroup::new("branch_tag")
-        .required(true)
+        .required(false)
         .args(&["base_branch", "base_tag"])
     )
 )]
 pub struct CreateBranchCommand {
     /// Create a branch in this repository
-    #[arg(short, long)]
+    #[arg(short, long, conflicts_with = "manifest")]
     pub repository: Option<String>,
     /// New branch to create
-    #[arg(short, long)]
-    pub new_branch: String,
+    #[arg(short, long, required_unless_present = "manifest")]
+    pub new_branch: Option<String>,
     /// The base branch for the new branch. Not valid if --base-tag is passed
-    #[arg(short = 'b', long)]
+    #[arg(short = 'b', long, conflicts_with = "manifest")]
     pub base_branch: Option<String>,
     /// The base tag for the new branch. Not valid if --base-branch is passed
-    #[arg(short = 't', long)]
+    #[arg(short = 't', long, conflicts_with = "manifest")]
     pub base_tag: Option<String>,
     /// Create the branch for all configured repositories
-    #[arg(short, long, default_value_t = false)]
+    #[arg(short, long, default_value_t = false, conflicts_with = "manifest")]
     pub all: bool,
+    /// Component manifest path or HTTP(S) URL. Branches are derived and created at exact manifest SHAs.
+    #[arg(
+        long,
+        conflicts_with_all = ["new_branch", "base_branch", "base_tag", "repository", "all"],
+        requires_all = ["source_release_version", "new_version", "new_branch_prefix"]
+    )]
+    pub manifest: Option<String>,
+    /// Release version found in each source branch in the component manifest.
+    #[arg(long, requires = "manifest")]
+    pub source_release_version: Option<String>,
+    /// Version that replaces --source-release-version in each derived branch.
+    #[arg(long, requires = "manifest")]
+    pub new_version: Option<String>,
+    /// Prefix for each derived branch, for example "rel".
+    #[arg(long, requires = "manifest")]
+    pub new_branch_prefix: Option<String>,
 }
 
 /// Show branches. Optional regex filter
@@ -1021,4 +1050,115 @@ pub fn parse_args() -> AppArgs {
 
 pub fn cli() -> clap::Command {
     AppArgs::command()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_legacy_branch_create() {
+        let args = AppArgs::try_parse_from([
+            "git_sync",
+            "branch",
+            "create",
+            "--repository",
+            "https://github.com/acceldata-io/hadoop",
+            "--new-branch",
+            "rel/ODP-3.3.6.6-1",
+            "--base-branch",
+            "main",
+        ])
+        .unwrap();
+        let Command::Branch {
+            cmd: BranchCommand::Create(command),
+        } = args.command
+        else {
+            panic!("Expected branch create command");
+        };
+        assert_eq!(command.new_branch.as_deref(), Some("rel/ODP-3.3.6.6-1"));
+        assert!(command.manifest.is_none());
+    }
+
+    #[test]
+    fn parses_manifest_branch_create() {
+        let args = AppArgs::try_parse_from([
+            "git_sync",
+            "branch",
+            "create",
+            "--manifest",
+            "component-manifest.yaml",
+            "--source-release-version",
+            "3.3.6.5",
+            "--new-version",
+            "3.3.6.6-1",
+            "--new-branch-prefix",
+            "rel",
+        ])
+        .unwrap();
+        let Command::Branch {
+            cmd: BranchCommand::Create(command),
+        } = args.command
+        else {
+            panic!("Expected branch create command");
+        };
+        assert_eq!(command.manifest.as_deref(), Some("component-manifest.yaml"));
+        assert!(command.repository.is_none());
+    }
+
+    #[test]
+    fn parses_manifest_tag_create() {
+        let args = AppArgs::try_parse_from([
+            "git_sync",
+            "tag",
+            "create",
+            "--manifest",
+            "https://example.com/component-manifest.yaml",
+            "--source-release-version",
+            "3.3.6.5",
+            "--new-version",
+            "3.3.6.6-1",
+        ])
+        .unwrap();
+        let Command::Tag {
+            cmd: TagCommand::Create(command),
+        } = args.command
+        else {
+            panic!("Expected tag create command");
+        };
+        assert!(command.tag.is_none());
+        assert!(command.branch.is_none());
+    }
+
+    #[test]
+    fn rejects_mixed_manifest_and_legacy_arguments() {
+        let result = AppArgs::try_parse_from([
+            "git_sync",
+            "branch",
+            "create",
+            "--manifest",
+            "component-manifest.yaml",
+            "--repository",
+            "https://github.com/acceldata-io/hadoop",
+            "--source-release-version",
+            "3.3.6.5",
+            "--new-version",
+            "3.3.6.6-1",
+            "--new-branch-prefix",
+            "rel",
+        ]);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn rejects_manifest_without_naming_arguments() {
+        let result = AppArgs::try_parse_from([
+            "git_sync",
+            "branch",
+            "create",
+            "--manifest",
+            "component-manifest.yaml",
+        ]);
+        assert!(result.is_err());
+    }
 }

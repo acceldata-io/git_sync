@@ -140,6 +140,55 @@ impl GithubClient {
             }
         }
     }
+    /// Create a branch pointing at an exact commit SHA.
+    pub async fn create_branch_from_sha(
+        &self,
+        url: impl AsRef<str>,
+        sha: impl AsRef<str> + Display,
+        new_branch: impl ToString + Display,
+        quiet: bool,
+    ) -> Result<(), GitError> {
+        let info = get_repo_info_from_url(url)?;
+        let (owner, repo) = (info.owner, info.repo_name);
+        let sha = sha.as_ref().trim().to_string();
+        if sha.len() != 40 || !sha.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+            return Err(GitError::Other(format!("Invalid commit SHA '{sha}'")));
+        }
+
+        let res: Result<_, octocrab::Error> = async_retry!(
+            ms = 100,
+            timeout = 5000,
+            retries = 3,
+            error_predicate = |e: &octocrab::Error| is_retryable(e),
+            body = {
+                let _permit = self.semaphore.clone().acquire_owned().await;
+                self.octocrab
+                    .clone()
+                    .repos(&owner, &repo)
+                    .create_ref(&Reference::Branch(new_branch.to_string()), sha.clone())
+                    .await
+            },
+        );
+
+        match res {
+            Ok(_) => {
+                if !quiet {
+                    self.append_slack_message(format!(
+                        "{owner}/{repo}: New branch '{new_branch}' created from SHA {sha}"
+                    ))
+                    .await;
+                }
+                Ok(())
+            }
+            Err(error) => {
+                self.append_slack_error(format!(
+                    "{owner}/{repo}: Failed to create '{new_branch}' from SHA {sha}: {error}"
+                ))
+                .await;
+                Err(GitError::GithubApiError(error))
+            }
+        }
+    }
     /// Create a branch from some base branch in a repository
     pub async fn create_branch_from_tag(
         &self,

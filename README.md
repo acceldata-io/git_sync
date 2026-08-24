@@ -429,6 +429,12 @@ You can create and delete branches for a single repository or for all configured
 $ git_sync branch create --all --new-branch rel/ODP-3.3.6.2-101 --base-branch ODP-3.3.6.2-1
 # Or, create a branch from an existing tag
 $ git_sync branch create --all --new-branch rel/ODP-3.3.6.2-101 --base-tag ODP-3.3.6.2-1-tag
+# Or derive one branch per component from exact SHAs in a component manifest
+$ git_sync branch create \
+    --manifest https://mirror-stg.odp.acceldata.dev/staging/builds/ODP-3.3.6.5/3.3.6.5-1009/component-manifest.yaml \
+    --source-release-version 3.3.6.5 \
+    --new-version 3.3.6.6-1 \
+    --new-branch-prefix rel
 # Optionally update the ODP version for the new branch you've created
 $ git_sync branch modify --all --branch rel/ODP-3.3.6.2-101 --old 3.3.6.2-1 --new 3.3.6.2-101
 # Or update actions/upload-artifact@v3 to actions/upload-artifact@v4 for a repository
@@ -445,14 +451,25 @@ Notes for the `branch modify` command:
 - The `--not-version` flag also changes the automated commit message to be more generic for any `branch modify` subcommand
 - `--message <custom message>` can be used to specify whatever commit message you would like. Without this, a message prefixed with [Automated] will be used.
 
+Manifest mode accepts a local `component-manifest.yaml` path or an HTTP(S) URL. It uses each entry's repository URL, source branch, and exact SHA instead of repository groups from `git-manage.toml`. The source release version is replaced inside every component branch, preserving component-specific prefixes. For example, `nightly/ODP-3.5.1.3.3.6.5` becomes `rel/ODP-3.5.1.3.3.6.6-1`.
+
+Use `component-manifest.yaml`, not `rhel8-build-manifest.yaml`: the latter does not contain repository URLs. The complete plan is validated before any GitHub references are created. The `accelbuild` component is skipped. Other entries whose source branches do not contain `--source-release-version` cause the command to fail. Use the global `--dry-run` option to inspect the plan without changing GitHub.
+
 ### Managing tags
 
 Managing tags is very similar to managing branches. You can create and delete lightweight tags for a single repository or for all configured repositories. If you want to create an annotated tag, you must use git directly and create it yourself.
 
 ```shell
 git_sync tag create --tag my_tag_name --branch the_branch_the_tag_points_to -r https://github.com/my-org/my-repo
+# Or derive tags from a component manifest and point them at its exact SHAs
+git_sync tag create \
+    --manifest https://mirror-stg.odp.acceldata.dev/staging/builds/AMBARI-3.0.0.2/3.0.0.2-1/component-manifest.yaml \
+    --source-release-version 3.0.0.2-1 \
+    --new-version 3.0.0.2-2
 git_sync tag delete -t my_tag_name --all
 ```
+
+Manifest-derived tag names use the transformed component branch without its path prefix and append `-tag`. For example, `rel/ODP-AMBARI-3.0.0.2-1` becomes `ODP-AMBARI-3.0.0.2-2-tag`.
 
 Just like with branches, running `delete` will immediately delete the tag. Support for a delete queue for a 'cooling off' period will come in the future.
 

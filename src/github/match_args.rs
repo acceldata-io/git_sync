@@ -23,7 +23,9 @@ use crate::cli::{
 use crate::config::Config;
 use crate::error::GitError;
 use crate::github::client::{GithubClient, OutputMode};
+use crate::github::manifest::{create_manifest_branches, create_manifest_tags};
 use crate::init::generate_config;
+use crate::manifest::ComponentManifest;
 use crate::utils::pr::{CreatePrOptions, MergePrOptions};
 use crate::utils::repo::Checks;
 use crate::utils::repo::RepoChecks;
@@ -345,16 +347,36 @@ async fn match_tag_cmds(
             }
         }
         TagCommand::Create(create_cmd) => {
-            let tag = &create_cmd.tag;
-            let branch = &create_cmd.branch;
+            if let Some(manifest_source) = &create_cmd.manifest {
+                let source_release_version = create_cmd
+                    .source_release_version
+                    .as_deref()
+                    .ok_or_else(|| {
+                        GitError::Other(
+                            "--source-release-version is required with --manifest".to_string(),
+                        )
+                    })?;
+                let new_version = create_cmd.new_version.as_deref().ok_or_else(|| {
+                    GitError::Other("--new-version is required with --manifest".to_string())
+                })?;
+                let manifest = ComponentManifest::load(manifest_source).await?;
+                let plan = manifest.tag_plan(source_release_version, new_version)?;
+                create_manifest_tags(client, plan, dry_run).await?;
+                return Ok(());
+            }
+
+            let tag = create_cmd.tag.as_ref().ok_or_else(|| {
+                GitError::Other("--tag is required without --manifest".to_string())
+            })?;
+            let branch = create_cmd.branch.as_ref().ok_or_else(|| {
+                GitError::Other("--branch is required without --manifest".to_string())
+            })?;
             let repository = create_cmd.repository.as_ref();
 
             if create_cmd.all {
                 client.create_all_tags(tag, branch, &repos[..]).await?;
             } else if let Some(repository) = repository {
-                client
-                    .create_tag(repository, &create_cmd.tag, &create_cmd.branch)
-                    .await?;
+                client.create_tag(repository, tag, branch).await?;
             } else {
                 return Err(GitError::MissingRepositoryName);
             }
@@ -437,30 +459,61 @@ async fn match_branch_cmds(
 ) -> Result<(), GitError> {
     match cmd {
         BranchCommand::Create(create_cmd) => {
+            if let Some(manifest_source) = &create_cmd.manifest {
+                let source_release_version = create_cmd
+                    .source_release_version
+                    .as_deref()
+                    .ok_or_else(|| {
+                        GitError::Other(
+                            "--source-release-version is required with --manifest".to_string(),
+                        )
+                    })?;
+                let new_version = create_cmd.new_version.as_deref().ok_or_else(|| {
+                    GitError::Other("--new-version is required with --manifest".to_string())
+                })?;
+                let new_branch_prefix =
+                    create_cmd.new_branch_prefix.as_deref().ok_or_else(|| {
+                        GitError::Other(
+                            "--new-branch-prefix is required with --manifest".to_string(),
+                        )
+                    })?;
+                let manifest = ComponentManifest::load(manifest_source).await?;
+                let plan =
+                    manifest.branch_plan(source_release_version, new_version, new_branch_prefix)?;
+                create_manifest_branches(client, plan, quiet, dry_run).await?;
+                return Ok(());
+            }
+
             let repository = create_cmd.repository.as_ref();
             let (base_branch, base_tag, new) = (
                 create_cmd.base_branch.clone(),
                 create_cmd.base_tag.clone(),
-                create_cmd.new_branch.clone(),
+                create_cmd.new_branch.as_ref().ok_or_else(|| {
+                    GitError::Other("--new-branch is required without --manifest".to_string())
+                })?,
             );
             if let Some(base) = &base_branch {
                 if create_cmd.all {
                     client
-                        .create_all_branches(base, &String::new(), &new, &repos[..], quiet)
+                        .create_all_branches(base, &String::new(), new, &repos[..], quiet)
                         .await?;
                 } else if let Some(repository) = repository {
-                    client.create_branch(repository, &base, &new, quiet).await?;
+                    client.create_branch(repository, &base, new, quiet).await?;
                 }
             } else if let Some(tag) = &base_tag {
                 if create_cmd.all {
                     client
-                        .create_all_branches(&String::new(), tag, &new, &repos[..], quiet)
+                        .create_all_branches(&String::new(), tag, new, &repos[..], quiet)
                         .await?;
                 } else if let Some(repository) = repository {
                     client
-                        .create_branch_from_tag(repository, &tag, &new, quiet)
+                        .create_branch_from_tag(repository, &tag, new, quiet)
                         .await?;
                 }
+            } else {
+                return Err(GitError::Other(
+                    "--base-branch or --base-tag is required without --manifest".to_string(),
+                ));
             }
         }
         BranchCommand::Delete(delete_cmd) => {
