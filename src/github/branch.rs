@@ -854,7 +854,7 @@ fn replace_odp_and_bn(
             GitError::Other("Some error occurred while determining the ODP version".to_string())
         })?;
 
-        let replacement = |captures: &Captures| {
+        let replacement = |captures: &Captures<'_, str>| {
             format!(
                 r#"{}{} = "{}""#,
                 captures.name("indent").map(|m| m.as_str()).unwrap_or(""),
@@ -881,7 +881,7 @@ fn replace_odp_and_bn(
     replace_all_in_directory_with(
         repo_dir,
         &bn_regex,
-        &|caps: &Captures| {
+        &|caps: &Captures<'_, str>| {
             format!(
                 r#"{}{} = "{}";"#,
                 &caps.name("indent").map(|m| m.as_str()).unwrap_or(""),

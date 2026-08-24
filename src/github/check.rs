@@ -214,7 +214,7 @@ impl GithubClient {
         license: Option<&LicenseInfo>,
         repo: &str,
     ) {
-        if rows.is_empty() && self.is_tty {
+        if (rows.is_empty() && self.is_tty) && license.is_none() && rules.is_empty() {
             println!("No results for {repo}");
             return;
         }
