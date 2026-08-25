@@ -799,6 +799,56 @@ impl GithubClient {
         }
     }
 
+    /// Create a lightweight tag pointing at an exact commit SHA.
+    pub async fn create_tag_from_sha(
+        &self,
+        url: impl AsRef<str>,
+        tag: impl ToString + Display,
+        sha: impl AsRef<str> + Display,
+    ) -> Result<(), GitError> {
+        let info = get_repo_info_from_url(url)?;
+        let (owner, repo) = (info.owner, info.repo_name);
+        let sha = sha.as_ref().trim().to_string();
+        if sha.len() != 40 || !sha.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+            return Err(GitError::Other(format!("Invalid commit SHA '{sha}'")));
+        }
+
+        let res: Result<Ref, octocrab::Error> = async_retry!(
+            ms = 100,
+            timeout = 5000,
+            retries = 3,
+            error_predicate = |e: &octocrab::Error| is_retryable(e),
+            body = {
+                let _permit = self.semaphore.clone().acquire_owned().await;
+                self.octocrab
+                    .clone()
+                    .repos(&owner, &repo)
+                    .create_ref(&Reference::Tag(tag.to_string()), sha.clone())
+                    .await
+            },
+        );
+
+        match res {
+            Ok(_) => {
+                self.append_slack_message(format!(
+                    ":white_check_mark: Successfully created tag '{tag}' for {repo} from SHA {sha}"
+                ))
+                .await;
+                if self.is_tty {
+                    println!("Successfully created tag '{tag}' for {repo} from SHA {sha}");
+                }
+                Ok(())
+            }
+            Err(error) => {
+                self.append_slack_error(format!(
+                    ":x: Failed to create tag '{tag}' for {repo} from SHA {sha}: {error}"
+                ))
+                .await;
+                Err(GitError::GithubApiError(error))
+            }
+        }
+    }
+
     /// Create the tag for all configured repositories
     pub async fn create_all_tags<
         T: AsRef<str> + ToString + Display + Copy,

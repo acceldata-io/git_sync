@@ -28,6 +28,8 @@ pub mod client;
 /// Manages forked repositories, particularly updating the fork to match the upstream repository.
 /// Contains the Github Client implementation for fork management.
 pub mod fork;
+/// Execute branch and tag operations derived from component manifests.
+pub mod manifest;
 /// Handle passed arguments
 pub mod match_args;
 /// Used to manage pull requests for libraries. Contains the Github Client implementation for

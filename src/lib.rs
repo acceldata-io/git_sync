@@ -23,5 +23,6 @@ pub mod config;
 pub mod error;
 pub mod github;
 pub mod init;
+pub mod manifest;
 pub mod slack;
 pub mod utils;
