@@ -19,6 +19,7 @@ under the License.
 
 use crate::error::GitError;
 use crate::github::client::{GithubClient, OutputMode};
+#[cfg(feature = "aws")]
 use crate::utils::compress::compress_directory;
 use crate::utils::file_utils::copy_recursive;
 use crate::utils::repo::http_to_ssh_repo;
@@ -26,14 +27,19 @@ use futures::stream::{FuturesUnordered, StreamExt};
 use indicatif::{ProgressBar, ProgressStyle};
 use log::debug;
 use std::collections::HashSet;
+#[cfg(feature = "aws")]
 use std::fmt::Display;
 use std::path::PathBuf;
 use std::process::Command;
 use std::sync::Arc;
 use std::{path::Path, process::Stdio};
+#[cfg(feature = "aws")]
 use tokio::fs::File;
+#[cfg(feature = "aws")]
 use tokio::io::{AsyncReadExt, BufReader};
+#[cfg(feature = "aws")]
 use tokio::sync::OnceCell;
+#[cfg(feature = "aws")]
 use tokio::task::JoinHandle;
 
 #[cfg(feature = "aws")]
@@ -577,6 +583,7 @@ impl GithubClient {
         }
         Ok(())
     }
+    #[cfg(feature = "aws")]
     /// Backup all repositories to S3
     pub async fn backup_all_to_s3<T: AsRef<str> + Display>(
         &self,

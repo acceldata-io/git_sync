@@ -16,9 +16,11 @@ KIND, either express or implied.  See the License for the
 specific language governing permissions and limitations
 under the License.
 */
+#[cfg(feature = "aws")]
+use crate::cli::BackupDestination;
 use crate::cli::{
-    AppArgs, BackupCommand, BackupDestination, BranchCommand, Command, PRCommand, ReleaseCommand,
-    RepoCommand, RepositoryType, TagCommand, cli,
+    AppArgs, BackupCommand, BranchCommand, Command, PRCommand, ReleaseCommand, RepoCommand,
+    RepositoryType, TagCommand, cli,
 };
 use crate::config::Config;
 use crate::error::GitError;
@@ -931,6 +933,7 @@ async fn match_backup_cmds(
             let repository = create_cmd.repository.as_ref();
             let passed_path = create_cmd.path.as_ref();
             let current_dir;
+            #[cfg(feature = "aws")]
             let dest = create_cmd.destination;
             let atomic = create_cmd.atomic;
             // This is only a meaningful option when '--all' is passed
@@ -947,6 +950,7 @@ async fn match_backup_cmds(
                 current_dir = env::current_dir()?;
                 current_dir.as_path()
             };
+            #[cfg(feature = "aws")]
             let bucket = create_cmd.bucket.as_ref();
 
             if create_cmd.all {
@@ -954,9 +958,11 @@ async fn match_backup_cmds(
                 if !fork_workaround.is_empty() {
                     repos.extend(fork_workaround.keys().cloned());
                 }
+                #[cfg_attr(not(feature = "aws"), allow(unused_variables))]
                 let successful = client
                     .backup_all_repos(&repos[..], path, blacklist, atomic)
                     .await?;
+                #[cfg(feature = "aws")]
                 if dest == BackupDestination::S3 {
                     if let Some(bucket) = bucket {
                         client.backup_all_to_s3(successful, bucket).await?;
@@ -972,7 +978,9 @@ async fn match_backup_cmds(
                     // If this fails, we just won't get cli output.
                     let _ = client.output.set(OutputMode::Print);
                 }
+                #[cfg_attr(not(feature = "aws"), allow(unused_variables))]
                 let repo_dist = client.backup_repo(repository.clone(), path, atomic).await?;
+                #[cfg(feature = "aws")]
                 if dest == BackupDestination::S3 {
                     if let Some(bucket) = bucket {
                         client.backup_to_s3(&repo_dist, bucket).await?;
