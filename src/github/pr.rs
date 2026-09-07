@@ -55,8 +55,10 @@ impl GithubClient {
         let retries = 3;
 
         // Verify that head and base have difference. If they don't, skip creating a PR since it's
-        // not necessary
-        let difference: Result<_, octocrab::Error> = async_retry!(
+        // not necessary. Use octocrab.get() with serde_json::Value to work around octocrab 0.49.9's
+        // stricter deserialization (vs 0.45.0) that fails when GitHub's compare API omits the
+        // 'repository' field in base_commit for certain repos.
+        let compare_result: Result<serde_json::Value, octocrab::Error> = async_retry!(
             ms = 100,
             timeout = 5000,
             retries = retries,
@@ -64,15 +66,18 @@ impl GithubClient {
             body = {
                 let _permit = self.semaphore.clone().acquire_owned().await;
                 octocrab
-                    .commits(&owner, &repo)
-                    .compare(&opts.base, &opts.head)
-                    .send()
+                    .get::<serde_json::Value, _, _>(
+                        format!("/repos/{owner}/{repo}/compare/{}...{}", opts.base, opts.head),
+                        None::<&()>,
+                    )
                     .await
             },
         );
-        match difference {
+        match compare_result {
             Ok(compare) => {
-                if compare.ahead_by == 0 {
+                // ahead_by defaults to 1 if missing, so PR creation proceeds when undetermined
+                let ahead_by = compare.get("ahead_by").and_then(|v| v.as_u64()).unwrap_or(1);
+                if ahead_by == 0 {
                     eprintln!(
                         "No differences between {} and {} in {}/{} - skipping PR creation",
                         opts.head, opts.base, owner, repo
@@ -81,7 +86,10 @@ impl GithubClient {
                 }
             }
             Err(e) => {
-                eprintln!("Failed to compare branches for {owner}/{repo}: {e}");
+                eprintln!(
+                    "Failed to compare branches for {owner}/{repo}: {e}"
+                );
+                eprintln!("Proceeding with PR creation despite comparison failure");
             }
         }
 
