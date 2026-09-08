@@ -895,8 +895,13 @@ fn replace_odp_and_bn(
 
         let escaped_odp_version = fancy_regex::escape(&odp_version);
 
+        // Require the version to be the entire assignment value. A lookahead is used
+        // so a trailing semicolon stays unmatched (the replacement does not emit one).
+        // Without that check, shell lines such as ODP_VERSION=3.3.6.3-105 or
+        // ODP_VERSION="3.3.6.3-105" match the version prefix and get rewritten as
+        // ODP_VERSION = "3.3.6.3"-105.
         let odp_regex_text = format!(
-            r#"^(?<indent>\s*)(?<key>version|VERSION|ODP_VERSION|odp_version)(?![A-Za-z0-9_])\s*=\s*\"?{escaped_odp_version}"?"#
+            r#"^(?<indent>\s*)(?<key>version|VERSION|ODP_VERSION|odp_version)(?![A-Za-z0-9_])\s*=\s*\"?{escaped_odp_version}\"?(?=\s*;?\s*$)"#
         );
         let odp_version_re = get_or_compile(odp_regex_text)?;
         let new_odp_version = new_text.split('-').next().ok_or_else(|| {
@@ -1075,6 +1080,52 @@ mod tests {
 
         let got = fs::read_to_string(&file).unwrap();
         assert_eq!(got, expected_output);
+    }
+
+    #[test]
+    /// Shell assignments that embed version-BN must not be rewritten as BOM-style
+    /// `KEY = "version"` (which leaves the build number outside the quotes).
+    fn replace_odp_and_bn_does_not_rewrite_shell_version_assignments() {
+        let input = r#"	    ODP_VERSION=3.3.6.3-106 \
+	ODP_VERSION="3.3.6.3-106" PREFIX=debian/tmp bash -x debian/install_trino.sh
+        ODP_VERSION = "3.3.6.3";
+"#;
+        let expected_output = r#"	    ODP_VERSION=3.3.6.3-106 \
+	ODP_VERSION="3.3.6.3-106" PREFIX=debian/tmp bash -x debian/install_trino.sh
+        ODP_VERSION = "3.3.6.3";
+"#;
+
+        let (_dir, file) = create_test_file("rules", input);
+        let dir = file.parent().unwrap();
+
+        replace_odp_and_bn("3.3.6.3-105", "3.3.6.3-106", dir, true).unwrap();
+
+        let got = fs::read_to_string(&file).unwrap();
+        assert_eq!(got, expected_output);
+        assert!(
+            !got.contains(r#"ODP_VERSION = "3.3.6.3"-106"#),
+            "shell ODP_VERSION assignment was rewritten as BOM-style: {got}"
+        );
+    }
+
+    #[test]
+    /// After the global old→new replace, replace_odp_and_bn must still leave
+    /// start-of-line shell assignments intact.
+    fn replace_odp_and_bn_after_global_replace_preserves_shell_assignments() {
+        let input = "ODP_VERSION=3.3.6.3-105\n";
+        let (_dir, file) = create_test_file("rules", input);
+        let dir = file.parent().unwrap();
+
+        let re = get_or_compile(fancy_regex::escape("3.3.6.3-105")).unwrap();
+        replace_all_in_directory(dir, &re, "3.3.6.3-106", true);
+        replace_odp_and_bn("3.3.6.3-105", "3.3.6.3-106", dir, true).unwrap();
+
+        let got = fs::read_to_string(&file).unwrap();
+        assert_eq!(got, "ODP_VERSION=3.3.6.3-106\n");
+        assert!(
+            !got.contains(r#"ODP_VERSION = "3.3.6.3"-106"#),
+            "shell ODP_VERSION assignment was rewritten as BOM-style: {got}"
+        );
     }
 
     #[test]
