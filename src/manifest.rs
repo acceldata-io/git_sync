@@ -169,7 +169,7 @@ impl ComponentManifest {
                 )));
             }
 
-            let target_body = source_body.replacen(source_release_version, new_version, 1);
+            let target_body = derive_target_body(source_body, source_release_version, new_version);
             let target_ref = if let Some(prefix) = branch_prefix {
                 format!("{prefix}/{target_body}")
             } else {
@@ -203,6 +203,34 @@ impl ComponentManifest {
 
 fn trim_optional(value: Option<String>) -> Option<String> {
     value.map(|value| value.trim().to_string())
+}
+
+/// `ODP-main-{x.y.z}` becomes `ODP-{x.y.z}.{new_version}`.
+/// Plain `ODP-main` and every other source keep a single replacement of
+/// `source_release_version`.
+fn derive_target_body(
+    source_body: &str,
+    source_release_version: &str,
+    new_version: &str,
+) -> String {
+    if let Some(component_version) = source_body.strip_prefix("ODP-main-") {
+        if is_dotted_version(component_version) {
+            let odp_version = new_version.strip_prefix("ODP-").unwrap_or(new_version);
+            return format!("ODP-{component_version}.{odp_version}");
+        }
+    }
+    source_body.replacen(source_release_version, new_version, 1)
+}
+
+fn is_dotted_version(value: &str) -> bool {
+    let mut parts = 0usize;
+    for part in value.split('.') {
+        if part.is_empty() || !part.bytes().all(|byte| byte.is_ascii_digit()) {
+            return false;
+        }
+        parts += 1;
+    }
+    parts >= 2
 }
 
 fn required_value<'a>(value: &'a str, message: &str) -> Result<&'a str, GitError> {
@@ -321,6 +349,28 @@ repos:
     sha: 2f596b80bbf467fedbb608f37d48bb7ebd6719a9
 "#;
 
+    const ODP_MAIN_MANIFEST: &str = r#"
+build_artifact_path: 3.3.6.6-1001
+release_version: 3.3.6.6-1001
+repos:
+  hadoop:
+    url: git@github.com:acceldata-io/hadoop.git
+    branch: ODP-main
+    sha: 68e511577e6e77e3f47427d05643d076bfe896ca
+  spark3_3_3_3:
+    url: https://github.com/acceldata-io/spark3.git
+    branch: ODP-main-3.3.3
+    sha: e646270c889c18d24f4801a7c8617bf5e84527d9
+  spark3_3_5_1:
+    url: https://github.com/acceldata-io/spark3.git
+    branch: ODP-main-3.5.1
+    sha: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+  ozone2:
+    url: https://github.com/acceldata-io/ozone.git
+    branch: ODP-main-2.1.0
+    sha: bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+"#;
+
     #[test]
     fn parses_and_normalizes_odp_manifest() {
         let manifest = ComponentManifest::from_yaml(ODP_MANIFEST).unwrap();
@@ -393,6 +443,57 @@ repos:
         assert!(
             plan.iter()
                 .all(|operation| operation.component != "accelbuild")
+        );
+    }
+
+    #[test]
+    fn derives_odp_main_nightlies_with_stacked_component_versions() {
+        let manifest = ComponentManifest::from_yaml(ODP_MAIN_MANIFEST).unwrap();
+        let plan = manifest
+            .branch_plan("ODP-main", "ODP-3.3.6.6", "nightly")
+            .unwrap();
+        assert_eq!(plan.len(), 4);
+        assert_eq!(plan[0].source_branch, "ODP-main");
+        assert_eq!(plan[0].target_ref, "nightly/ODP-3.3.6.6");
+        assert_eq!(plan[1].source_branch, "ODP-main-2.1.0");
+        assert_eq!(plan[1].target_ref, "nightly/ODP-2.1.0.3.3.6.6");
+        assert_eq!(plan[2].source_branch, "ODP-main-3.3.3");
+        assert_eq!(plan[2].target_ref, "nightly/ODP-3.3.3.3.3.6.6");
+        assert_eq!(plan[3].source_branch, "ODP-main-3.5.1");
+        assert_eq!(plan[3].target_ref, "nightly/ODP-3.5.1.3.3.6.6");
+    }
+
+    #[test]
+    fn derives_odp_main_nightlies_when_new_version_has_no_odp_prefix() {
+        let manifest = ComponentManifest::from_yaml(ODP_MAIN_MANIFEST).unwrap();
+        let plan = manifest
+            .branch_plan("main", "3.3.6.6", "nightly")
+            .unwrap();
+        assert_eq!(plan[0].target_ref, "nightly/ODP-3.3.6.6");
+        assert_eq!(plan[2].target_ref, "nightly/ODP-3.3.3.3.3.6.6");
+    }
+
+    #[test]
+    fn derives_odp_main_tags_with_stacked_component_versions() {
+        let manifest = ComponentManifest::from_yaml(ODP_MAIN_MANIFEST).unwrap();
+        let plan = manifest.tag_plan("ODP-main", "ODP-3.3.6.6").unwrap();
+        assert_eq!(plan[0].target_ref, "ODP-3.3.6.6-tag");
+        assert_eq!(plan[2].target_ref, "ODP-3.3.3.3.3.6.6-tag");
+    }
+
+    #[test]
+    fn derive_target_body_keeps_plain_odp_main_replacement() {
+        assert_eq!(
+            derive_target_body("ODP-main", "ODP-main", "ODP-3.3.6.6"),
+            "ODP-3.3.6.6"
+        );
+        assert_eq!(
+            derive_target_body("ODP-3.5.1.3.3.6.5", "3.3.6.5", "3.3.6.6-1"),
+            "ODP-3.5.1.3.3.6.6-1"
+        );
+        assert_eq!(
+            derive_target_body("ODP-main-3.2.x", "ODP-main", "ODP-3.3.6.6"),
+            "ODP-3.3.6.6-3.2.x"
         );
     }
 

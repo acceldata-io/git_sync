@@ -453,6 +453,8 @@ Notes for the `branch modify` command:
 
 Manifest mode accepts a local `component-manifest.yaml` path or an HTTP(S) URL. It uses each entry's repository URL, source branch, and exact SHA instead of repository groups from `git-manage.toml`. The source release version is replaced inside every component branch, preserving component-specific prefixes. For example, `nightly/ODP-3.5.1.3.3.6.5` becomes `rel/ODP-3.5.1.3.3.6.6-1`.
 
+When the source branch is `ODP-main`, that same replacement is used (`ODP-main` → `nightly/ODP-3.3.6.6`). When it is `ODP-main-{component_version}`, the component version is stacked in front of the new ODP version: `ODP-main-3.3.3` becomes `nightly/ODP-3.3.3.3.3.6.6`, not `nightly/ODP-3.3.6.6-3.3.3`.
+
 Use `component-manifest.yaml`, not `rhel8-build-manifest.yaml`: the latter does not contain repository URLs. The complete plan is validated before any GitHub references are created. The `accelbuild` component is skipped. Other entries whose source branches do not contain `--source-release-version` cause the command to fail. Use the global `--dry-run` option to inspect the plan without changing GitHub.
 
 ### Managing tags

@@ -726,6 +726,7 @@ pub struct CreateBranchCommand {
     #[arg(long, requires = "manifest")]
     pub source_release_version: Option<String>,
     /// Version that replaces --source-release-version in each derived branch.
+    /// For ODP-main-{x.y.z} sources, stacked as ODP-{x.y.z}.{this value}.
     #[arg(long, requires = "manifest")]
     pub new_version: Option<String>,
     /// Prefix for each derived branch, for example "rel".
