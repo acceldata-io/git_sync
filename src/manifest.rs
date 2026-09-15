@@ -150,7 +150,7 @@ impl ComponentManifest {
         let mut targets: HashMap<(String, String), String> = HashMap::new();
 
         for (component, entry) in &self.repos {
-            if component.eq_ignore_ascii_case("accelbuild") {
+            if should_skip_manifest_component(component, entry, branch_prefix.is_some()) {
                 eprintln!("Skipping component '{component}'");
                 continue;
             }
@@ -199,6 +199,29 @@ impl ComponentManifest {
 
         Ok(plan)
     }
+}
+
+fn should_skip_manifest_component(
+    component: &str,
+    entry: &ManifestRepository,
+    creating_branches: bool,
+) -> bool {
+    component.eq_ignore_ascii_case("accelbuild")
+        || (creating_branches && is_ambari_mpacks(component, &entry.url))
+}
+
+fn is_ambari_mpacks(component: &str, url: &str) -> bool {
+    component.eq_ignore_ascii_case("ambari-mpacks")
+        || repository_name(&url.to_ascii_lowercase()).is_some_and(|name| name == "ambari-mpacks")
+}
+
+fn repository_name(url: &str) -> Option<&str> {
+    let trimmed = url.trim().trim_end_matches('/');
+    let without_git = trimmed.strip_suffix(".git").unwrap_or(trimmed);
+    without_git
+        .rsplit(['/', ':'])
+        .next()
+        .filter(|name| !name.is_empty())
 }
 
 fn trim_optional(value: Option<String>) -> Option<String> {
@@ -347,6 +370,10 @@ repos:
     url: git@github.com:acceldata-io/odp-ambari-infra.git
     branch: rel/ODP-AMBARI-3.0.0.2-1
     sha: 2f596b80bbf467fedbb608f37d48bb7ebd6719a9
+  ambari-mpacks:
+    url: git@github.com:acceldata-io/ambari-mpacks.git
+    branch: rel/ODP-AMBARI-3.0.0.2-1
+    sha: 1111111111111111111111111111111111111111
 "#;
 
     const ODP_MAIN_MANIFEST: &str = r#"
@@ -390,7 +417,7 @@ repos:
         let manifest = ComponentManifest::load(path.to_str().unwrap())
             .await
             .unwrap();
-        assert_eq!(manifest.repos.len(), 1);
+        assert_eq!(manifest.repos.len(), 2);
     }
 
     #[test]
@@ -432,8 +459,45 @@ repos:
             .branch_plan("3.0.0.2-1", "3.0.0.2-2", "rel")
             .unwrap();
         let tag_plan = manifest.tag_plan("3.0.0.2-1", "3.0.0.2-2").unwrap();
+        assert_eq!(branch_plan.len(), 1);
+        assert_eq!(tag_plan.len(), 2);
+        assert_eq!(branch_plan[0].component, "ambari-infra");
         assert_eq!(branch_plan[0].target_ref, "rel/ODP-AMBARI-3.0.0.2-2");
+        assert_eq!(tag_plan[0].component, "ambari-infra");
         assert_eq!(tag_plan[0].target_ref, "ODP-AMBARI-3.0.0.2-2-tag");
+        assert_eq!(tag_plan[1].component, "ambari-mpacks");
+        assert_eq!(tag_plan[1].target_ref, "ODP-AMBARI-3.0.0.2-2-tag");
+        assert_eq!(
+            tag_plan[1].repository,
+            "https://github.com/acceldata-io/ambari-mpacks"
+        );
+    }
+
+    #[test]
+    fn skips_ambari_mpacks_for_branches_even_when_branch_does_not_match() {
+        let yaml = AMBARI_MANIFEST.replace(
+            "branch: rel/ODP-AMBARI-3.0.0.2-1\n    sha: 1111111111111111111111111111111111111111",
+            "branch: main\n    sha: not-a-sha",
+        );
+        let manifest = ComponentManifest::from_yaml(&yaml).unwrap();
+        let plan = manifest
+            .branch_plan("3.0.0.2-1", "3.0.0.2-2", "rel")
+            .unwrap();
+        assert_eq!(plan.len(), 1);
+        assert!(plan.iter().all(|operation| {
+            operation.component != "ambari-mpacks"
+                && !operation.repository.ends_with("/ambari-mpacks")
+        }));
+    }
+
+    #[test]
+    fn includes_ambari_mpacks_when_creating_tags() {
+        let manifest = ComponentManifest::from_yaml(AMBARI_MANIFEST).unwrap();
+        let plan = manifest.tag_plan("3.0.0.2-1", "3.0.0.2-2").unwrap();
+        assert!(
+            plan.iter()
+                .any(|operation| operation.component == "ambari-mpacks")
+        );
     }
 
     #[test]
@@ -466,9 +530,7 @@ repos:
     #[test]
     fn derives_odp_main_nightlies_when_new_version_has_no_odp_prefix() {
         let manifest = ComponentManifest::from_yaml(ODP_MAIN_MANIFEST).unwrap();
-        let plan = manifest
-            .branch_plan("main", "3.3.6.6", "nightly")
-            .unwrap();
+        let plan = manifest.branch_plan("main", "3.3.6.6", "nightly").unwrap();
         assert_eq!(plan[0].target_ref, "nightly/ODP-3.3.6.6");
         assert_eq!(plan[2].target_ref, "nightly/ODP-3.3.3.3.3.6.6");
     }
