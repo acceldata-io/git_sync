@@ -207,7 +207,15 @@ fn should_skip_manifest_component(
     creating_branches: bool,
 ) -> bool {
     component.eq_ignore_ascii_case("accelbuild")
+        || is_odp_build_configs(component, &entry.url)
         || (creating_branches && is_ambari_mpacks(component, &entry.url))
+}
+
+fn is_odp_build_configs(component: &str, url: &str) -> bool {
+    component.eq_ignore_ascii_case("odp-build-configs")
+        || repository_name(&url.to_ascii_lowercase()).is_some_and(|name| {
+            name == "odp-build-configs" || name == "ambari-build-configs"
+        })
 }
 
 fn is_ambari_mpacks(component: &str, url: &str) -> bool {
@@ -374,6 +382,10 @@ repos:
     url: git@github.com:acceldata-io/ambari-mpacks.git
     branch: rel/ODP-AMBARI-3.0.0.2-1
     sha: 1111111111111111111111111111111111111111
+  odp-build-configs:
+    url: git@github.com:acceldata-io/ambari-build-configs.git
+    branch: nightly/ambari-3.0.0.3
+    sha: not-a-sha
 "#;
 
     const ODP_MAIN_MANIFEST: &str = r#"
@@ -417,7 +429,7 @@ repos:
         let manifest = ComponentManifest::load(path.to_str().unwrap())
             .await
             .unwrap();
-        assert_eq!(manifest.repos.len(), 2);
+        assert_eq!(manifest.repos.len(), 3);
     }
 
     #[test]
@@ -498,6 +510,23 @@ repos:
             plan.iter()
                 .any(|operation| operation.component == "ambari-mpacks")
         );
+    }
+
+    #[test]
+    fn skips_odp_build_configs_even_when_branch_does_not_match() {
+        let manifest = ComponentManifest::from_yaml(AMBARI_MANIFEST).unwrap();
+        let branch_plan = manifest
+            .branch_plan("3.0.0.2-1", "3.0.0.2-2", "rel")
+            .unwrap();
+        let tag_plan = manifest.tag_plan("3.0.0.2-1", "3.0.0.2-2").unwrap();
+        assert!(branch_plan.iter().all(|operation| {
+            operation.component != "odp-build-configs"
+                && !operation.repository.ends_with("/ambari-build-configs")
+        }));
+        assert!(tag_plan.iter().all(|operation| {
+            operation.component != "odp-build-configs"
+                && !operation.repository.ends_with("/ambari-build-configs")
+        }));
     }
 
     #[test]
