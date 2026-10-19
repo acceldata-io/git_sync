@@ -162,14 +162,19 @@ impl ComponentManifest {
                 .split_once('/')
                 .map_or(entry.branch.as_str(), |(_, body)| body);
 
-            if !source_body.contains(source_release_version) {
+            let target_body = if source_body.contains(source_release_version) {
+                derive_target_body(source_body, source_release_version, new_version)
+            } else if branch_prefix.is_none() && is_ambari_mpacks(component, &entry.url) {
+                let ambari_version = new_version
+                    .strip_prefix("ODP-AMBARI-")
+                    .unwrap_or(new_version);
+                format!("ODP-AMBARI-{ambari_version}")
+            } else {
                 return Err(GitError::Other(format!(
                     "Component '{component}' branch '{}' does not contain source release version '{source_release_version}'",
                     entry.branch
                 )));
-            }
-
-            let target_body = derive_target_body(source_body, source_release_version, new_version);
+            };
             let target_ref = if let Some(prefix) = branch_prefix {
                 format!("{prefix}/{target_body}")
             } else {
@@ -510,6 +515,23 @@ repos:
             plan.iter()
                 .any(|operation| operation.component == "ambari-mpacks")
         );
+    }
+
+    #[test]
+    fn tags_ambari_mpacks_even_when_branch_does_not_match() {
+        let yaml = AMBARI_MANIFEST.replace(
+            "branch: rel/ODP-AMBARI-3.0.0.2-1\n    sha: 1111111111111111111111111111111111111111",
+            "branch: ODP-3.4.x-main\n    sha: 1111111111111111111111111111111111111111",
+        );
+        let manifest = ComponentManifest::from_yaml(&yaml).unwrap();
+        let plan = manifest.tag_plan("3.0.0.2-1", "3.0.0.2-2").unwrap();
+        let mpacks = plan
+            .iter()
+            .find(|operation| operation.component == "ambari-mpacks")
+            .unwrap();
+        assert_eq!(mpacks.source_branch, "ODP-3.4.x-main");
+        assert_eq!(mpacks.target_ref, "ODP-AMBARI-3.0.0.2-2-tag");
+        assert_eq!(mpacks.sha, "1111111111111111111111111111111111111111");
     }
 
     #[test]
