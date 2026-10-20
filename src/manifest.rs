@@ -240,17 +240,37 @@ fn trim_optional(value: Option<String>) -> Option<String> {
 }
 
 /// `ODP-main-{x.y.z}` becomes `ODP-{x.y.z}.{new_version}`.
-/// Plain `ODP-main` and every other source keep a single replacement of
-/// `source_release_version`.
+/// When `new_version` is a main line such as `3.4.x-main`, the reverse applies:
+/// `ODP-{source}` becomes `ODP-3.4.x-main` and `ODP-{x.y.z}.{source}` becomes
+/// `ODP-3.4.x-main-{x.y.z}`.
+/// Every other source keeps a single replacement of `source_release_version`.
 fn derive_target_body(
     source_body: &str,
     source_release_version: &str,
     new_version: &str,
 ) -> String {
+    let odp_version = new_version.strip_prefix("ODP-").unwrap_or(new_version);
     if let Some(component_version) = source_body.strip_prefix("ODP-main-") {
         if is_dotted_version(component_version) {
-            let odp_version = new_version.strip_prefix("ODP-").unwrap_or(new_version);
             return format!("ODP-{component_version}.{odp_version}");
+        }
+    }
+    if odp_version.ends_with("-main") {
+        let source_version = source_release_version
+            .strip_prefix("ODP-")
+            .unwrap_or(source_release_version);
+        if let Some(stacked) = source_body.strip_prefix("ODP-") {
+            if stacked == source_version {
+                return format!("ODP-{odp_version}");
+            }
+            if let Some(component_version) = stacked
+                .strip_suffix(source_version)
+                .and_then(|rest| rest.strip_suffix('.'))
+            {
+                if is_dotted_version(component_version) {
+                    return format!("ODP-{odp_version}-{component_version}");
+                }
+            }
         }
     }
     source_body.replacen(source_release_version, new_version, 1)
@@ -616,6 +636,22 @@ repos:
         assert_eq!(
             derive_target_body("ODP-main-3.2.x", "ODP-main", "ODP-3.3.6.6"),
             "ODP-3.3.6.6-3.2.x"
+        );
+    }
+
+    #[test]
+    fn derive_target_body_unstacks_component_versions_for_main_lines() {
+        assert_eq!(
+            derive_target_body("ODP-3.4.3.0", "3.4.3.0", "3.4.x-main"),
+            "ODP-3.4.x-main"
+        );
+        assert_eq!(
+            derive_target_body("ODP-4.3.1.3.4.3.0", "3.4.3.0", "ODP-3.4.x-main"),
+            "ODP-3.4.x-main-4.3.1"
+        );
+        assert_eq!(
+            derive_target_body("ODP-2.5.146.3.4.3.0", "3.4.3.0", "3.4.x-main"),
+            "ODP-3.4.x-main-2.5.146"
         );
     }
 
