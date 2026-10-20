@@ -142,9 +142,7 @@ impl ComponentManifest {
             "Source release version must not be empty",
         )?;
         let new_version = required_value(new_version, "New version must not be empty")?;
-        let branch_prefix = branch_prefix
-            .map(|prefix| required_value(prefix, "New branch prefix must not be empty"))
-            .transpose()?;
+        let branch_prefix = branch_prefix.map(|prefix| prefix.trim().trim_matches('/'));
 
         let mut plan = Vec::with_capacity(self.repos.len());
         let mut targets: HashMap<(String, String), String> = HashMap::new();
@@ -175,10 +173,10 @@ impl ComponentManifest {
                     entry.branch
                 )));
             };
-            let target_ref = if let Some(prefix) = branch_prefix {
-                format!("{prefix}/{target_body}")
-            } else {
-                format!("{target_body}-tag")
+            let target_ref = match branch_prefix {
+                Some("") => target_body,
+                Some(prefix) => format!("{prefix}/{target_body}"),
+                None => format!("{target_body}-tag"),
             };
             validate_ref_name(component, &target_ref)?;
 
@@ -515,6 +513,17 @@ repos:
             plan.iter()
                 .any(|operation| operation.component == "ambari-mpacks")
         );
+    }
+
+    #[test]
+    fn derives_unprefixed_branches_for_empty_prefix() {
+        let manifest = ComponentManifest::from_yaml(AMBARI_MANIFEST).unwrap();
+        let plan = manifest
+            .branch_plan("ODP-AMBARI-3.0.0.2-1", "ODP-3.4.x-main", "")
+            .unwrap();
+        assert_eq!(plan.len(), 1);
+        assert_eq!(plan[0].component, "ambari-infra");
+        assert_eq!(plan[0].target_ref, "ODP-3.4.x-main");
     }
 
     #[test]

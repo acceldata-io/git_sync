@@ -729,7 +729,7 @@ pub struct CreateBranchCommand {
     /// For ODP-main-{x.y.z} sources, stacked as ODP-{x.y.z}.{this value}.
     #[arg(long, requires = "manifest")]
     pub new_version: Option<String>,
-    /// Prefix for each derived branch, for example "rel".
+    /// Prefix for each derived branch, for example "rel". An empty value creates unprefixed branches.
     #[arg(long, requires = "manifest")]
     pub new_branch_prefix: Option<String>,
 }
@@ -1105,6 +1105,31 @@ mod tests {
         };
         assert_eq!(command.manifest.as_deref(), Some("component-manifest.yaml"));
         assert!(command.repository.is_none());
+    }
+
+    #[test]
+    fn parses_manifest_branch_create_with_empty_prefix() {
+        let args = AppArgs::try_parse_from([
+            "git_sync",
+            "branch",
+            "create",
+            "--manifest",
+            "component-manifest.yaml",
+            "--source-release-version",
+            "ODP-AMBARI-3.0.1.0-1",
+            "--new-version",
+            "ODP-3.4.x-main",
+            "--new-branch-prefix",
+            "",
+        ])
+        .unwrap();
+        let Command::Branch {
+            cmd: BranchCommand::Create(command),
+        } = args.command
+        else {
+            panic!("Expected branch create command");
+        };
+        assert_eq!(command.new_branch_prefix.as_deref(), Some(""));
     }
 
     #[test]
