@@ -25,7 +25,9 @@ use crate::cli::{
 use crate::config::Config;
 use crate::error::GitError;
 use crate::github::client::{GithubClient, OutputMode};
-use crate::github::manifest::{create_manifest_branches, create_manifest_tags};
+use crate::github::manifest::{
+    ManifestModifyOptions, create_manifest_branches, create_manifest_tags, modify_manifest_branches,
+};
 use crate::init::generate_config;
 use crate::manifest::ComponentManifest;
 use crate::utils::pr::{CreatePrOptions, MergePrOptions};
@@ -563,11 +565,52 @@ async fn match_branch_cmds(
             let message = modify_cmd.message.clone();
             // Awkwardly named, I know, but since it's a boolean we don't have too many options
             let is_version = !modify_cmd.not_version;
-            let (branch, old_text, new_text) = (
-                modify_cmd.branch.clone(),
-                modify_cmd.old.clone(),
-                modify_cmd.new.clone(),
-            );
+            let (old_text, new_text) = (modify_cmd.old.clone(), modify_cmd.new.clone());
+
+            if let Some(manifest_source) = &modify_cmd.manifest {
+                let manifest = ComponentManifest::load(manifest_source).await?;
+                // By default the branches listed in the manifest are changed as they are. The
+                // three version options together switch to the branches `branch create` would
+                // derive from it.
+                let plan = match (
+                    modify_cmd.source_release_version.as_deref(),
+                    modify_cmd.new_version.as_deref(),
+                    modify_cmd.new_branch_prefix.as_deref(),
+                ) {
+                    (None, None, None) => manifest.source_branch_plan()?,
+                    (Some(source_release_version), Some(new_version), Some(new_branch_prefix)) => {
+                        manifest.edit_branch_plan(
+                            source_release_version,
+                            new_version,
+                            new_branch_prefix,
+                        )?
+                    }
+                    _ => {
+                        return Err(GitError::Other(
+                            "--source-release-version, --new-version and --new-branch-prefix must be given together, or all left out to change the manifest's own branches"
+                                .to_string(),
+                        ));
+                    }
+                };
+                modify_manifest_branches(
+                    client,
+                    plan,
+                    ManifestModifyOptions {
+                        old_text,
+                        new_text,
+                        message,
+                        dry_run,
+                        is_version,
+                        quiet,
+                    },
+                )
+                .await?;
+                return Ok(());
+            }
+
+            let branch = modify_cmd.branch.clone().ok_or_else(|| {
+                GitError::Other("--branch is required without --manifest".to_string())
+            })?;
             if modify_cmd.all {
                 client
                     .modify_all_branches(

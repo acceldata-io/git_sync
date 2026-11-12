@@ -437,6 +437,17 @@ $ git_sync branch create \
     --new-branch-prefix rel
 # Optionally update the ODP version for the new branch you've created
 $ git_sync branch modify --all --branch rel/ODP-3.3.6.2-101 --old 3.3.6.2-1 --new 3.3.6.2-101
+# Or bump 3.3.6.5-SNAPSHOT to 3.3.6.6-SNAPSHOT in every branch listed in a component manifest, in a single run
+$ git_sync branch modify \
+    --manifest https://mirror-stg.odp.acceldata.dev/staging/builds/ODP-3.4.3.1/3.4.3.1-1001/component-manifest.yaml \
+    --old 3.3.6.5-SNAPSHOT --new 3.3.6.6-SNAPSHOT
+# Or change the branches that `branch create --manifest` would derive from that manifest instead
+$ git_sync branch modify \
+    --manifest https://mirror-stg.odp.acceldata.dev/staging/builds/ODP-3.3.6.6/3.3.6.6-1001/component-manifest.yaml \
+    --source-release-version ODP-main \
+    --new-version ODP-3.3.6.6 \
+    --new-branch-prefix nightly \
+    --old 3.3.6.5-SNAPSHOT --new 3.3.6.6-SNAPSHOT
 # Or update actions/upload-artifact@v3 to actions/upload-artifact@v4 for a repository
 $ git_sync branch modify -r https://github.com/acceldata-io/nifi --not-version --branch my_branch --old actions/upload-artifact@v3 --new actions/upload-artifact@v4
 # Delete a branch
@@ -454,6 +465,8 @@ Notes for the `branch modify` command:
 Manifest mode accepts a local `component-manifest.yaml` path or an HTTP(S) URL. It uses each entry's repository URL, source branch, and exact SHA instead of repository groups from `git-manage.toml`. The source release version is replaced inside every component branch, preserving component-specific prefixes. For example, `nightly/ODP-3.5.1.3.3.6.5` becomes `rel/ODP-3.5.1.3.3.6.6-1`.
 
 When the source branch is `ODP-main`, that same replacement is used (`ODP-main` → `nightly/ODP-3.3.6.6`). When it is `ODP-main-{component_version}`, the component version is stacked in front of the new ODP version: `ODP-main-3.3.3` becomes `nightly/ODP-3.3.3.3.3.6.6`, not `nightly/ODP-3.3.6.6-3.3.3`.
+
+`branch modify --manifest` applies one `--old`/`--new` text replacement to every component branch in a single run. By default the branch for each component is the one listed in its own manifest entry, so a repository that appears with several versions (for example livy with `nightly/ODP-3.3.3.3.3.6.7` and `nightly/ODP-3.5.1.3.3.6.7`) has each of its branches changed together, and aliases that resolve to the same repository and branch are changed once. The branches must already exist. To change the branches that `branch create --manifest` would derive instead, pass `--source-release-version`, `--new-version` and `--new-branch-prefix` together (run `branch create --manifest` first). The manifest can be a local file, so you can copy `component-manifest.yaml`, delete the components you do not want to touch, or point an entry at a different branch, and pass your edited copy. `branch modify` never uses the `sha` values, so an edited manifest may drop or change them; `branch create` and `tag create` still require valid ones. With `--dry-run`, branches that exist are cloned and edited locally but not pushed, and branches that do not exist yet are reported and skipped. Failures are collected per branch, so one bad branch does not stop the others, but the command exits non-zero when any branch fails.
 
 Use `component-manifest.yaml`, not `rhel8-build-manifest.yaml`: the latter does not contain repository URLs. The complete plan is validated before any GitHub references are created. The `accelbuild` and `odp-build-configs` components are always skipped. `ambari-mpacks` is skipped when creating branches and included when creating tags. Other entries whose source branches do not contain `--source-release-version` cause the command to fail. Use the global `--dry-run` option to inspect the plan without changing GitHub.
 

@@ -646,27 +646,46 @@ pub struct DownloadBranchCommand {
     group(
         ArgGroup::new("target")
         .required(true)
-        .args(&["all", "repository"])
+        .args(&["all", "repository", "manifest"])
     ),
     long_about = "
 Examples:
     # Change the version from 3.3.6.2-1 to 3.3.6.2-101
-    git_sync branch change --all --branch ODP-3.3.6.2-1 --old 3.3.6.2-1 --new 3.3.6.2-101
+    git_sync branch modify --all --branch ODP-3.3.6.2-1 --old 3.3.6.2-1 --new 3.3.6.2-101
+
+    # Change the version in every branch listed in a component manifest, in one run.
+    # Each component's branch is taken from its own manifest entry, so repositories with
+    # several versions of the same component (for example livy or spark3) are all handled.
+    git_sync branch modify --manifest component-manifest.yaml \\
+        --old 3.3.6.5-SNAPSHOT --new 3.3.6.6-SNAPSHOT
+
+    # Change the branches that `branch create --manifest` would derive from the manifest
+    git_sync branch modify --manifest component-manifest.yaml \\
+        --source-release-version ODP-main --new-version ODP-3.3.6.6 --new-branch-prefix nightly \\
+        --old 3.3.6.5-SNAPSHOT --new 3.3.6.6-SNAPSHOT
 Notes:
     This action is a regex match and replace, so be careful what you pass as the old version.
     Strictly speaking, this can be used to replace any matching regex within a repository
 
     If you run this against odp-bigtop in order to update its version, make sure that `--not-version` is *not* specified.
     This ensures that it will correctly update filenames and other odp-bigtop specific changes.
+
+    With --manifest, the branches must already exist. The `accelbuild`, `odp-build-configs` and
+    `ambari-mpacks` components are skipped, matching `branch create --manifest`.
 "
 )]
 pub struct ChangeBranchTextCommand {
     /// Change text of a branch in a repository
-    #[arg(short, long)]
+    #[arg(short, long, conflicts_with = "manifest")]
     pub repository: Option<String>,
     /// Branch to change text in
-    #[arg(short, long)]
-    pub branch: String,
+    #[arg(
+        short,
+        long,
+        required_unless_present = "manifest",
+        conflicts_with = "manifest"
+    )]
+    pub branch: Option<String>,
     /// The old text you wish to change
     #[arg(short, long)]
     pub old: String,
@@ -678,11 +697,32 @@ pub struct ChangeBranchTextCommand {
     #[arg(long, default_value_t = false)]
     pub not_version: bool,
     /// Change the text for the specified branch across all configured repositories
-    #[arg(short, long, default_value_t = false)]
+    #[arg(short, long, default_value_t = false, conflicts_with = "manifest")]
     pub all: bool,
     /// An optional commit message to override the automatic commit message
     #[arg(short, long)]
     pub message: Option<String>,
+    /// Component manifest path or HTTP(S) URL. The branch to change in each component is taken
+    /// from the manifest, so every component and version is handled in one run.
+    #[arg(long, conflicts_with_all = ["branch", "repository", "all"])]
+    pub manifest: Option<String>,
+    /// Release version found in each source branch in the component manifest. Used with
+    /// --manifest, together with --new-version and --new-branch-prefix, to change the branches
+    /// `branch create --manifest` would derive instead of the manifest's own branches.
+    #[arg(long, requires = "manifest", conflicts_with = "source_branches")]
+    pub source_release_version: Option<String>,
+    /// Version that replaces --source-release-version in each derived branch. Used with
+    /// --manifest. For ODP-main-{x.y.z} sources, stacked as ODP-{x.y.z}.{this value}.
+    #[arg(long, requires = "manifest", conflicts_with = "source_branches")]
+    pub new_version: Option<String>,
+    /// Prefix for each derived branch, for example "rel". An empty value selects unprefixed
+    /// branches. Used with --manifest.
+    #[arg(long, requires = "manifest", conflicts_with = "source_branches")]
+    pub new_branch_prefix: Option<String>,
+    /// Change the branches recorded in the manifest as they are. This is already the default with
+    /// --manifest when the version options are not given.
+    #[arg(long, requires = "manifest", default_value_t = false)]
+    pub source_branches: bool,
 }
 
 /// Create a new branch.
@@ -1172,6 +1212,178 @@ mod tests {
             "3.3.6.6-1",
             "--new-branch-prefix",
             "rel",
+        ]);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn parses_legacy_branch_modify() {
+        let args = AppArgs::try_parse_from([
+            "git_sync",
+            "branch",
+            "modify",
+            "--all",
+            "--branch",
+            "rel/ODP-3.3.6.2-101",
+            "--old",
+            "3.3.6.2-1",
+            "--new",
+            "3.3.6.2-101",
+        ])
+        .unwrap();
+        let Command::Branch {
+            cmd: BranchCommand::Modify(command),
+        } = args.command
+        else {
+            panic!("Expected branch modify command");
+        };
+        assert_eq!(command.branch.as_deref(), Some("rel/ODP-3.3.6.2-101"));
+        assert!(command.manifest.is_none());
+    }
+
+    #[test]
+    fn parses_manifest_branch_modify() {
+        let args = AppArgs::try_parse_from([
+            "git_sync",
+            "branch",
+            "modify",
+            "--manifest",
+            "component-manifest.yaml",
+            "--source-release-version",
+            "3.3.6.5",
+            "--new-version",
+            "3.3.6.6-1",
+            "--new-branch-prefix",
+            "rel",
+            "--old",
+            "3.3.6.5",
+            "--new",
+            "3.3.6.6-1",
+        ])
+        .unwrap();
+        let Command::Branch {
+            cmd: BranchCommand::Modify(command),
+        } = args.command
+        else {
+            panic!("Expected branch modify command");
+        };
+        assert_eq!(command.manifest.as_deref(), Some("component-manifest.yaml"));
+        assert_eq!(command.new_branch_prefix.as_deref(), Some("rel"));
+        assert!(command.branch.is_none());
+        assert!(!command.source_branches);
+    }
+
+    #[test]
+    fn parses_manifest_branch_modify_with_only_a_manifest() {
+        let args = AppArgs::try_parse_from([
+            "git_sync",
+            "branch",
+            "modify",
+            "--manifest",
+            "https://example.com/component-manifest.yaml",
+            "--old",
+            "3.3.6.5-SNAPSHOT",
+            "--new",
+            "3.3.6.6-SNAPSHOT",
+        ])
+        .unwrap();
+        let Command::Branch {
+            cmd: BranchCommand::Modify(command),
+        } = args.command
+        else {
+            panic!("Expected branch modify command");
+        };
+        assert!(command.branch.is_none());
+        assert!(command.source_release_version.is_none());
+        assert!(command.new_version.is_none());
+        assert!(command.new_branch_prefix.is_none());
+    }
+
+    #[test]
+    fn parses_manifest_branch_modify_of_source_branches() {
+        let args = AppArgs::try_parse_from([
+            "git_sync",
+            "branch",
+            "modify",
+            "--manifest",
+            "component-manifest.yaml",
+            "--source-branches",
+            "--old",
+            "3.3.6.5",
+            "--new",
+            "3.3.6.501",
+        ])
+        .unwrap();
+        let Command::Branch {
+            cmd: BranchCommand::Modify(command),
+        } = args.command
+        else {
+            panic!("Expected branch modify command");
+        };
+        assert!(command.source_branches);
+        assert!(command.source_release_version.is_none());
+    }
+
+    #[test]
+    fn rejects_manifest_branch_modify_mixed_with_legacy_arguments() {
+        for extra in [
+            ["--branch", "rel/ODP-3.3.6.6-1"],
+            ["--repository", "https://github.com/acceldata-io/livy"],
+        ] {
+            let result = AppArgs::try_parse_from([
+                "git_sync",
+                "branch",
+                "modify",
+                "--manifest",
+                "component-manifest.yaml",
+                "--source-branches",
+                "--old",
+                "3.3.6.5",
+                "--new",
+                "3.3.6.501",
+                extra[0],
+                extra[1],
+            ]);
+            assert!(result.is_err());
+        }
+        let result = AppArgs::try_parse_from([
+            "git_sync",
+            "branch",
+            "modify",
+            "--manifest",
+            "component-manifest.yaml",
+            "--all",
+            "--old",
+            "3.3.6.5",
+            "--new",
+            "3.3.6.501",
+        ]);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn rejects_manifest_branch_modify_with_derived_and_source_branches() {
+        let result = AppArgs::try_parse_from([
+            "git_sync",
+            "branch",
+            "modify",
+            "--manifest",
+            "component-manifest.yaml",
+            "--source-branches",
+            "--new-version",
+            "3.3.6.6-1",
+            "--old",
+            "3.3.6.5",
+            "--new",
+            "3.3.6.501",
+        ]);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn rejects_branch_modify_without_a_branch() {
+        let result = AppArgs::try_parse_from([
+            "git_sync", "branch", "modify", "--all", "--old", "a", "--new", "b",
         ]);
         assert!(result.is_err());
     }

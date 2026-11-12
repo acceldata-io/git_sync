@@ -21,7 +21,7 @@ under the License.
 
 use crate::error::GitError;
 use serde::Deserialize;
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fs;
 use std::path::Path;
 
@@ -43,7 +43,9 @@ pub struct ManifestRepository {
     pub url: String,
     /// Source branch used by the build.
     pub branch: String,
-    /// Exact commit used by the build.
+    /// Exact commit used by the build. Required to create branches and tags, and ignored when
+    /// editing branches in place, so a hand-edited manifest may leave it out for that.
+    #[serde(default)]
     pub sha: String,
 }
 
@@ -119,7 +121,29 @@ impl ComponentManifest {
         new_version: &str,
         new_branch_prefix: &str,
     ) -> Result<Vec<ManifestRefPlan>, GitError> {
-        self.build_plan(source_release_version, new_version, Some(new_branch_prefix))
+        self.build_plan(
+            source_release_version,
+            new_version,
+            Some(new_branch_prefix),
+            true,
+        )
+    }
+
+    /// Build the branches that [`Self::branch_plan`] would create, for editing them in place
+    /// (for example `branch modify`). Names are derived identically, but commit SHAs are not
+    /// needed or checked, so a hand-edited manifest may omit them.
+    pub fn edit_branch_plan(
+        &self,
+        source_release_version: &str,
+        new_version: &str,
+        new_branch_prefix: &str,
+    ) -> Result<Vec<ManifestRefPlan>, GitError> {
+        self.build_plan(
+            source_release_version,
+            new_version,
+            Some(new_branch_prefix),
+            false,
+        )
     }
 
     /// Build and validate tag creation operations for all manifest entries.
@@ -128,7 +152,44 @@ impl ComponentManifest {
         source_release_version: &str,
         new_version: &str,
     ) -> Result<Vec<ManifestRefPlan>, GitError> {
-        self.build_plan(source_release_version, new_version, None)
+        self.build_plan(source_release_version, new_version, None, true)
+    }
+
+    /// Build the list of branches recorded in the manifest, without deriving new names.
+    ///
+    /// This is for operations that edit a branch in place (for example `branch modify`) rather
+    /// than creating one. The component skip rules match [`Self::branch_plan`], so a component
+    /// that never gets a derived branch is not edited here either. Entries that share a
+    /// repository and branch, such as aliases of the same component, appear once.
+    /// `target_ref` and `source_branch` are both the manifest branch. Commit SHAs are not needed
+    /// or checked.
+    pub fn source_branch_plan(&self) -> Result<Vec<ManifestRefPlan>, GitError> {
+        let mut plan = Vec::with_capacity(self.repos.len());
+        let mut seen: HashSet<(String, String)> = HashSet::new();
+
+        for (component, entry) in &self.repos {
+            if should_skip_manifest_component(component, entry, true) {
+                eprintln!("Skipping component '{component}'");
+                continue;
+            }
+
+            validate_entry(component, entry, false)?;
+            let repository = normalize_github_url(&entry.url)?;
+            validate_ref_name(component, &entry.branch)?;
+
+            if !seen.insert((repository.clone(), entry.branch.clone())) {
+                continue;
+            }
+            plan.push(ManifestRefPlan {
+                component: component.clone(),
+                repository,
+                source_branch: entry.branch.clone(),
+                target_ref: entry.branch.clone(),
+                sha: entry.sha.clone(),
+            });
+        }
+
+        Ok(plan)
     }
 
     fn build_plan(
@@ -136,6 +197,7 @@ impl ComponentManifest {
         source_release_version: &str,
         new_version: &str,
         branch_prefix: Option<&str>,
+        require_sha: bool,
     ) -> Result<Vec<ManifestRefPlan>, GitError> {
         let source_release_version = required_value(
             source_release_version,
@@ -153,7 +215,7 @@ impl ComponentManifest {
                 continue;
             }
 
-            validate_entry(component, entry)?;
+            validate_entry(component, entry, require_sha)?;
             let repository = normalize_github_url(&entry.url)?;
             let source_body = entry
                 .branch
@@ -182,7 +244,7 @@ impl ComponentManifest {
 
             let key = (repository.clone(), target_ref.clone());
             if let Some(existing_sha) = targets.get(&key) {
-                if existing_sha != &entry.sha {
+                if require_sha && existing_sha != &entry.sha {
                     return Err(GitError::Other(format!(
                         "Manifest target collision for {repository} '{target_ref}': {existing_sha} and {}",
                         entry.sha
@@ -216,9 +278,8 @@ fn should_skip_manifest_component(
 
 fn is_odp_build_configs(component: &str, url: &str) -> bool {
     component.eq_ignore_ascii_case("odp-build-configs")
-        || repository_name(&url.to_ascii_lowercase()).is_some_and(|name| {
-            name == "odp-build-configs" || name == "ambari-build-configs"
-        })
+        || repository_name(&url.to_ascii_lowercase())
+            .is_some_and(|name| name == "odp-build-configs" || name == "ambari-build-configs")
 }
 
 fn is_ambari_mpacks(component: &str, url: &str) -> bool {
@@ -314,7 +375,11 @@ fn required_value<'a>(value: &'a str, message: &str) -> Result<&'a str, GitError
     }
 }
 
-fn validate_entry(component: &str, entry: &ManifestRepository) -> Result<(), GitError> {
+fn validate_entry(
+    component: &str,
+    entry: &ManifestRepository,
+    require_sha: bool,
+) -> Result<(), GitError> {
     if entry.url.is_empty() {
         return Err(GitError::Other(format!(
             "Component '{component}' has an empty repository URL"
@@ -325,7 +390,9 @@ fn validate_entry(component: &str, entry: &ManifestRepository) -> Result<(), Git
             "Component '{component}' has an empty branch"
         )));
     }
-    if entry.sha.len() != 40 || !entry.sha.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+    if require_sha
+        && (entry.sha.len() != 40 || !entry.sha.bytes().all(|byte| byte.is_ascii_hexdigit()))
+    {
         return Err(GitError::Other(format!(
             "Component '{component}' has invalid commit SHA '{}'",
             entry.sha
@@ -686,6 +753,119 @@ repos:
         assert_eq!(
             derive_target_body("ODP-3.4.x-main-2.5.146", "3.4.x-main", "3.4.3.1"),
             "ODP-2.5.146.3.4.3.1"
+        );
+    }
+
+    const MULTI_VERSION_MANIFEST: &str = r#"
+build_artifact_path: 3.3.6.7-1001
+release_version: 3.3.6.7-1001
+repos:
+  livy3_3_3:
+    url: git@github.com:acceldata-io/livy.git
+    branch: nightly/ODP-3.3.3.3.3.6.7
+    sha: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+  livy3_5_1:
+    url: git@github.com:acceldata-io/livy.git
+    branch: nightly/ODP-3.5.1.3.3.6.7
+    sha: bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+  livy3_5_1_alias:
+    url: https://github.com/acceldata-io/livy.git
+    branch: nightly/ODP-3.5.1.3.3.6.7
+    sha: bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+  hadoop:
+    url: git@github.com:acceldata-io/hadoop.git
+    branch: nightly/ODP-3.3.6.7
+    sha: cccccccccccccccccccccccccccccccccccccccc
+  accelbuild:
+    url: git@github.com:acceldata-io/accelbuild.git
+    branch: main
+    sha: dddddddddddddddddddddddddddddddddddddddd
+"#;
+
+    #[test]
+    fn source_branch_plan_lists_every_version_of_a_repository_once() {
+        let manifest = ComponentManifest::from_yaml(MULTI_VERSION_MANIFEST).unwrap();
+        let plan = manifest.source_branch_plan().unwrap();
+        let targets: Vec<(&str, &str)> = plan
+            .iter()
+            .map(|operation| (operation.repository.as_str(), operation.target_ref.as_str()))
+            .collect();
+        assert_eq!(
+            targets,
+            [
+                (
+                    "https://github.com/acceldata-io/hadoop",
+                    "nightly/ODP-3.3.6.7"
+                ),
+                (
+                    "https://github.com/acceldata-io/livy",
+                    "nightly/ODP-3.3.3.3.3.6.7"
+                ),
+                (
+                    "https://github.com/acceldata-io/livy",
+                    "nightly/ODP-3.5.1.3.3.6.7"
+                ),
+            ]
+        );
+        assert!(
+            plan.iter()
+                .all(|operation| operation.target_ref == operation.source_branch)
+        );
+    }
+
+    #[test]
+    fn source_branch_plan_skips_excluded_components() {
+        let manifest = ComponentManifest::from_yaml(AMBARI_MANIFEST).unwrap();
+        let plan = manifest.source_branch_plan().unwrap();
+        assert_eq!(plan.len(), 1);
+        assert_eq!(plan[0].component, "ambari-infra");
+    }
+
+    #[test]
+    fn editing_in_place_does_not_need_commit_shas() {
+        let yaml = ODP_MANIFEST.replace("68e511577e6e77e3f47427d05643d076bfe896ca", "not-a-sha");
+        let manifest = ComponentManifest::from_yaml(&yaml).unwrap();
+        assert!(manifest.source_branch_plan().is_ok());
+        assert!(
+            manifest
+                .edit_branch_plan("3.3.6.5", "3.3.6.6-1", "rel")
+                .is_ok()
+        );
+        // Creating refs still requires a valid SHA.
+        assert!(manifest.branch_plan("3.3.6.5", "3.3.6.6-1", "rel").is_err());
+        assert!(manifest.tag_plan("3.3.6.5", "3.3.6.6-1").is_err());
+    }
+
+    #[test]
+    fn a_manifest_without_shas_can_edit_but_not_create() {
+        let yaml = "repos:\n  livy:\n    url: git@github.com:acceldata-io/livy.git\n    branch: nightly/ODP-3.3.6.5\n";
+        let manifest = ComponentManifest::from_yaml(yaml).unwrap();
+        let plan = manifest.source_branch_plan().unwrap();
+        assert_eq!(plan[0].target_ref, "nightly/ODP-3.3.6.5");
+        assert!(
+            manifest
+                .branch_plan("3.3.6.5", "3.3.6.6", "nightly")
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn derived_branch_plan_covers_every_version_in_one_pass() {
+        let manifest = ComponentManifest::from_yaml(MULTI_VERSION_MANIFEST).unwrap();
+        let plan = manifest
+            .branch_plan("3.3.6.7", "3.3.6.8", "nightly")
+            .unwrap();
+        let targets: Vec<&str> = plan
+            .iter()
+            .map(|operation| operation.target_ref.as_str())
+            .collect();
+        assert_eq!(
+            targets,
+            [
+                "nightly/ODP-3.3.6.8",
+                "nightly/ODP-3.3.3.3.3.6.8",
+                "nightly/ODP-3.5.1.3.3.6.8",
+            ]
         );
     }
 
