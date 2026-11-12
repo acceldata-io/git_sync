@@ -255,10 +255,28 @@ fn derive_target_body(
             return format!("ODP-{component_version}.{odp_version}");
         }
     }
+    let source_version = source_release_version
+        .strip_prefix("ODP-")
+        .unwrap_or(source_release_version);
+    // Versioned main line (for example `ODP-3.4.x-main`) cut into a release:
+    // `ODP-3.4.x-main` becomes `ODP-{new}` and `ODP-3.4.x-main-{x.y.z}`
+    // becomes `ODP-{x.y.z}.{new}`.
+    if source_version.ends_with("-main") && !odp_version.ends_with("-main") {
+        if let Some(stacked) = source_body.strip_prefix("ODP-") {
+            if stacked == source_version {
+                return format!("ODP-{odp_version}");
+            }
+            if let Some(component_version) = stacked
+                .strip_prefix(source_version)
+                .and_then(|rest| rest.strip_prefix('-'))
+            {
+                if is_dotted_version(component_version) {
+                    return format!("ODP-{component_version}.{odp_version}");
+                }
+            }
+        }
+    }
     if odp_version.ends_with("-main") {
-        let source_version = source_release_version
-            .strip_prefix("ODP-")
-            .unwrap_or(source_release_version);
         if let Some(stacked) = source_body.strip_prefix("ODP-") {
             if stacked == source_version {
                 return format!("ODP-{odp_version}");
@@ -652,6 +670,22 @@ repos:
         assert_eq!(
             derive_target_body("ODP-2.5.146.3.4.3.0", "3.4.3.0", "3.4.x-main"),
             "ODP-3.4.x-main-2.5.146"
+        );
+    }
+
+    #[test]
+    fn derive_target_body_cuts_release_from_versioned_main_line() {
+        assert_eq!(
+            derive_target_body("ODP-3.4.x-main", "ODP-3.4.x-main", "ODP-3.4.3.1"),
+            "ODP-3.4.3.1"
+        );
+        assert_eq!(
+            derive_target_body("ODP-3.4.x-main-4.3.1", "ODP-3.4.x-main", "ODP-3.4.3.1"),
+            "ODP-4.3.1.3.4.3.1"
+        );
+        assert_eq!(
+            derive_target_body("ODP-3.4.x-main-2.5.146", "3.4.x-main", "3.4.3.1"),
+            "ODP-2.5.146.3.4.3.1"
         );
     }
 
