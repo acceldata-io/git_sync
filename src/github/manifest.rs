@@ -22,6 +22,7 @@ under the License.
 use crate::error::GitError;
 use crate::github::client::GithubClient;
 use crate::manifest::ManifestRefPlan;
+use crate::utils::pr::{CreatePrOptions, MergeMethod, MergePrOptions};
 use futures::{StreamExt, stream::FuturesUnordered};
 use std::future::Future;
 
@@ -197,6 +198,145 @@ async fn branch_exists(
             Ok(false)
         }
         Err(error) => Err(error),
+    }
+}
+
+/// Pull request settings applied to every branch in a manifest plan.
+///
+/// `--head` is the branch recorded for that component. `--base` is the same for every component.
+#[derive(Clone, Debug)]
+pub struct ManifestPrOptions {
+    /// Branch the pull requests merge into.
+    pub base: String,
+    /// Title used for every pull request. When empty, each one is named from its own head and base.
+    pub title: Option<String>,
+    /// Body used for every pull request.
+    pub body: Option<String>,
+    /// Reviewers requested on every pull request.
+    pub reviewers: Option<Vec<String>>,
+    /// Merge each pull request after creating it.
+    pub merge: bool,
+    /// Title of the merge commit, when merging.
+    pub merge_title: Option<String>,
+    /// Extra detail appended to the merge commit, when merging.
+    pub merge_message: Option<String>,
+    /// Merge method. The direct-write fallback used by `force_merge` always creates a merge commit.
+    pub merge_method: MergeMethod,
+    /// If branch rules refuse the pull request merge, write the head into the base directly.
+    pub force_merge: bool,
+    /// Print the plan and do not open pull requests.
+    pub dry_run: bool,
+}
+
+/// Open a pull request from every branch in a validated component-manifest plan into one base.
+///
+/// A repository that appears with several versions (for example livy) gets one pull request per
+/// branch. Entries that share a repository and branch are opened once.
+pub async fn open_manifest_prs(
+    client: &GithubClient,
+    plan: Vec<ManifestRefPlan>,
+    options: ManifestPrOptions,
+) -> Result<(), GitError> {
+    if options.dry_run {
+        print_pr_plan(&plan, &options);
+        return Ok(());
+    }
+
+    let mut futures = FuturesUnordered::new();
+    for operation in plan {
+        let options = options.clone();
+        futures.push(async move {
+            let result = open_one(client, &operation, &options).await;
+            (operation, result)
+        });
+    }
+
+    let mut errors = Vec::new();
+    while let Some((operation, result)) = futures.next().await {
+        if let Err(error) = result {
+            eprintln!(
+                "Failed to open a pull request for {} ({}) from '{}' into '{}': {error}",
+                operation.component, operation.repository, operation.source_branch, options.base
+            );
+            errors.push((
+                format!(
+                    "{} ({} -> {})",
+                    operation.component, operation.source_branch, options.base
+                ),
+                error,
+            ));
+        }
+    }
+
+    if errors.is_empty() {
+        Ok(())
+    } else {
+        // Every branch in a manifest is part of the same release, so any failed pull request
+        // must fail the run. `ErrorWithRepoInfo` exits 0 when fewer errors than repositories
+        // were reported, so report the error count as the repository count to always exit
+        // non-zero.
+        let failed = errors.len();
+        Err(GitError::ErrorWithRepoInfo(
+            Box::new(GitError::MultipleErrors(errors)),
+            failed,
+        ))
+    }
+}
+
+async fn open_one(
+    client: &GithubClient,
+    operation: &ManifestRefPlan,
+    options: &ManifestPrOptions,
+) -> Result<(), GitError> {
+    let title = options.title.clone().unwrap_or_else(|| {
+        format!(
+            "Merge '{}' into '{}'",
+            operation.source_branch, options.base
+        )
+    });
+    let created = client
+        .create_pr(&CreatePrOptions {
+            url: operation.repository.clone(),
+            head: operation.source_branch.clone(),
+            base: options.base.clone(),
+            title,
+            body: options.body.clone(),
+            reviewers: options.reviewers.clone(),
+            should_merge: options.merge,
+        })
+        .await?;
+    let Some((pr_number, sha)) = created else {
+        return Ok(());
+    };
+    client
+        .merge_pr(&MergePrOptions {
+            url: operation.repository.clone(),
+            pr_number,
+            method: options.merge_method,
+            title: options.merge_title.clone(),
+            message: options.merge_message.clone(),
+            sha: Some(sha),
+            force: options.force_merge,
+        })
+        .await
+}
+
+fn print_pr_plan(plan: &[ManifestRefPlan], options: &ManifestPrOptions) {
+    let action = if options.merge {
+        "opened and merged"
+    } else {
+        "opened"
+    };
+    println!(
+        "DRY RUN: {} pull request(s) would be {action} into '{}'",
+        plan.len(),
+        options.base
+    );
+    for operation in plan {
+        println!(
+            "{}\t{}\t{} -> {}",
+            operation.component, operation.repository, operation.source_branch, options.base
+        );
     }
 }
 

@@ -439,14 +439,14 @@ pub struct CheckRepoCommand {
     group(
         ArgGroup::new("target")
         .required(true)
-        .args(&["all", "repository"])
+        .args(&["all", "repository", "manifest"])
     ),
     group(
         ArgGroup::new("all_sha")
         .required(false)
         .args(&["all", "sha"])
     ),
-    long_about = "Create a Pull Request and optionally try to merge it automatically. You can target a single repository, or all configured repositories",
+    long_about = "Create a Pull Request and optionally try to merge it automatically. You can target a single repository, all configured repositories, or every component branch in a component manifest",
     after_help="\
 EXAMPLES:
     # Open a pull request for a single repository
@@ -455,6 +455,8 @@ EXAMPLES:
     git_sync pr open -r https://github.com/my-org/my-repo --head my_feature_branch --base my_base_branch --merge
     # For all repositories
     git_sync pr open --all --head my_feature_branch --base my_base_branch --merge
+    # Merge every branch listed in a component manifest into one base, in a single run
+    git_sync pr open --manifest component-manifest.yaml --base ODP-main --merge
 
 NOTES:
     Not all Pull Requests can be merged automatically. If there are merge conflicts,\
@@ -464,18 +466,28 @@ NOTES:
     If you do not specify it, it will be fetched automatically.
 
     You can also specify a title with --title \"<TITLE>\". If you don't, a title will be generated automatically based off of HEAD and BASE.
+
+    With --manifest, --head is taken from each component entry, so a repository that lists several branches is handled in one run. --base is the same for every component.
 "
 )]
 pub struct CreatePRCommand {
     /// Repository for which you are creating a PR
-    #[arg(short, long)]
+    #[arg(short, long, conflicts_with = "manifest")]
     pub repository: Option<String>,
     /// Create a PR for all configured repositories
-    #[arg(short, long, default_value_t = false)]
+    #[arg(short, long, default_value_t = false, conflicts_with = "manifest")]
     pub all: bool,
     /// The name of the branch where your changes are implemented
+    #[arg(
+        long,
+        required_unless_present = "manifest",
+        conflicts_with = "manifest"
+    )]
+    pub head: Option<String>,
+    /// Component manifest path or HTTP(S) URL. A pull request is opened from the branch listed
+    /// for each component into --base, so every component and version is handled in one run.
     #[arg(long)]
-    pub head: String,
+    pub manifest: Option<String>,
     /// The name of the branch you want the changes merged into
     #[arg(short, long)]
     pub base: String,
@@ -1384,6 +1396,88 @@ mod tests {
     fn rejects_branch_modify_without_a_branch() {
         let result = AppArgs::try_parse_from([
             "git_sync", "branch", "modify", "--all", "--old", "a", "--new", "b",
+        ]);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn parses_legacy_pr_open() {
+        let args = AppArgs::try_parse_from([
+            "git_sync",
+            "pr",
+            "open",
+            "--repository",
+            "https://github.com/acceldata-io/livy",
+            "--head",
+            "nightly/ODP-3.3.6.7",
+            "--base",
+            "ODP-main",
+            "--merge",
+        ])
+        .unwrap();
+        let Command::PR {
+            cmd: PRCommand::Open(command),
+        } = args.command
+        else {
+            panic!("Expected pr open command");
+        };
+        assert_eq!(command.head.as_deref(), Some("nightly/ODP-3.3.6.7"));
+        assert!(command.manifest.is_none());
+    }
+
+    #[test]
+    fn parses_manifest_pr_open() {
+        let args = AppArgs::try_parse_from([
+            "git_sync",
+            "pr",
+            "open",
+            "--manifest",
+            "component-manifest.yaml",
+            "--base",
+            "ODP-main",
+            "--merge",
+            "--force-merge",
+        ])
+        .unwrap();
+        let Command::PR {
+            cmd: PRCommand::Open(command),
+        } = args.command
+        else {
+            panic!("Expected pr open command");
+        };
+        assert_eq!(command.manifest.as_deref(), Some("component-manifest.yaml"));
+        assert_eq!(command.base, "ODP-main");
+        assert!(command.head.is_none());
+        assert!(command.merge);
+        assert!(command.force_merge);
+    }
+
+    #[test]
+    fn rejects_manifest_pr_open_mixed_with_a_head() {
+        let result = AppArgs::try_parse_from([
+            "git_sync",
+            "pr",
+            "open",
+            "--manifest",
+            "component-manifest.yaml",
+            "--head",
+            "nightly/ODP-3.3.6.7",
+            "--base",
+            "ODP-main",
+        ]);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn rejects_pr_open_without_a_target() {
+        let result = AppArgs::try_parse_from([
+            "git_sync",
+            "pr",
+            "open",
+            "--head",
+            "nightly/ODP-3.3.6.7",
+            "--base",
+            "ODP-main",
         ]);
         assert!(result.is_err());
     }

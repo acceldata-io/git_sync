@@ -26,7 +26,8 @@ use crate::config::Config;
 use crate::error::GitError;
 use crate::github::client::{GithubClient, OutputMode};
 use crate::github::manifest::{
-    ManifestModifyOptions, create_manifest_branches, create_manifest_tags, modify_manifest_branches,
+    ManifestModifyOptions, ManifestPrOptions, create_manifest_branches, create_manifest_tags,
+    modify_manifest_branches, open_manifest_prs,
 };
 use crate::init::generate_config;
 use crate::manifest::ComponentManifest;
@@ -165,7 +166,7 @@ pub async fn match_arguments(app: &AppArgs, config: Config) -> Result<(), GitErr
         }
         Command::Branch { cmd } => match_branch_cmds(&client, repos, cmd, quiet, dry_run).await,
         Command::Release { cmd } => match_release_cmds(&client, repos, config, cmd).await,
-        Command::PR { cmd } => match_pr_cmds(&client, repos, config, cmd).await,
+        Command::PR { cmd } => match_pr_cmds(&client, repos, config, cmd, dry_run).await,
         Command::Backup { cmd } => {
             match_backup_cmds(&client, repos, config, cmd, fork_workaround_repositories).await
         }
@@ -862,24 +863,51 @@ async fn match_pr_cmds(
     repos: Vec<String>,
     _config: Config,
     cmd: &PRCommand,
+    dry_run: bool,
 ) -> Result<(), GitError> {
     match cmd {
         PRCommand::Open(open_cmd) => {
+            if let Some(manifest_source) = &open_cmd.manifest {
+                let manifest = ComponentManifest::load(manifest_source).await?;
+                let plan = manifest.source_branch_plan()?;
+                open_manifest_prs(
+                    client,
+                    plan,
+                    ManifestPrOptions {
+                        base: open_cmd.base.clone(),
+                        title: open_cmd.title.clone(),
+                        body: open_cmd.body.clone(),
+                        reviewers: open_cmd.reviewers.clone(),
+                        merge: open_cmd.merge,
+                        merge_title: open_cmd.merge_title.clone(),
+                        merge_message: open_cmd.merge_body.clone(),
+                        merge_method: open_cmd.merge_method,
+                        force_merge: open_cmd.force_merge,
+                        dry_run,
+                    },
+                )
+                .await?;
+                return Ok(());
+            }
+
             let repository = open_cmd
                 .repository
                 .clone()
                 .unwrap_or_default()
                 .trim()
                 .to_owned();
+            let head = open_cmd.head.clone().ok_or_else(|| {
+                GitError::Other("--head is required without --manifest".to_string())
+            })?;
             let merge = open_cmd.merge;
             let title = if let Some(t) = &open_cmd.title {
                 t.clone()
             } else {
-                format!("Merge '{}' into '{}'", open_cmd.head, open_cmd.base)
+                format!("Merge '{head}' into '{}'", open_cmd.base)
             };
             let opts = CreatePrOptions {
                 url: repository.clone(),
-                head: open_cmd.head.clone(),
+                head,
                 base: open_cmd.base.clone(),
                 title,
                 body: open_cmd.body.clone(),
