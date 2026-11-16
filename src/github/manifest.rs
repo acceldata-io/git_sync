@@ -244,6 +244,7 @@ pub async fn open_manifest_prs(
         return Ok(());
     }
 
+    let total = plan.len();
     verify_pr_bases(client, &plan).await?;
 
     let mut futures = FuturesUnordered::new();
@@ -256,21 +257,46 @@ pub async fn open_manifest_prs(
     }
 
     let mut errors = Vec::new();
+    let mut up_to_date = 0usize;
+    let mut opened = 0usize;
     while let Some((operation, result)) = futures.next().await {
-        if let Err(error) = result {
-            eprintln!(
-                "Failed to open a pull request for {} ({}) from '{}' into '{}': {error}",
-                operation.component, operation.repository, operation.head, operation.base
-            );
-            errors.push((
-                format!(
-                    "{} ({} -> {})",
-                    operation.component, operation.head, operation.base
-                ),
-                error,
-            ));
+        let repository = repo_label(&operation.repository);
+        match result {
+            Ok(PrOutcome::Merged) => {
+                client
+                    .append_slack_message(format!(
+                        "{repository}: merged '{}' into '{}'",
+                        operation.head, operation.base
+                    ))
+                    .await;
+            }
+            Ok(PrOutcome::Opened) => opened += 1,
+            Ok(PrOutcome::UpToDate) => up_to_date += 1,
+            Ok(PrOutcome::SkippedMissingHead) => {
+                client
+                    .append_slack_message(format!(
+                        "{repository}: skipped '{}', the branch no longer exists and its commit is already in '{}'",
+                        operation.head, operation.base
+                    ))
+                    .await;
+            }
+            Err(error) => {
+                eprintln!(
+                    "Failed to open a pull request for {} ({}) from '{}' into '{}': {error}",
+                    operation.component, operation.repository, operation.head, operation.base
+                );
+                errors.push((
+                    format!(
+                        "{} ({} -> {})",
+                        operation.component, operation.head, operation.base
+                    ),
+                    error,
+                ));
+            }
         }
     }
+
+    queue_pr_summary(client, total, up_to_date, opened, &errors).await;
 
     if errors.is_empty() {
         Ok(())
@@ -285,6 +311,79 @@ pub async fn open_manifest_prs(
             failed,
         ))
     }
+}
+
+/// Queue the Slack lines that summarize a manifest pull request run.
+///
+/// Per-branch successes are queued as they happen. Branches with nothing to merge are only
+/// counted, so a run where most branches are already merged does not bury the few that were. The
+/// failures that come from creating or merging a pull request are already queued with their
+/// details. The final line makes sure every failure is reported, including the ones that are not,
+/// such as a missing head branch, and says which components were affected.
+async fn queue_pr_summary(
+    client: &GithubClient,
+    total: usize,
+    up_to_date: usize,
+    opened: usize,
+    errors: &[(String, GitError)],
+) {
+    if up_to_date > 0 {
+        client
+            .append_slack_message(format!(
+                "{up_to_date} branch(es) already in their base, nothing to merge"
+            ))
+            .await;
+    }
+    if opened > 0 {
+        client
+            .append_slack_message(format!(
+                "Opened pull requests for {opened} branch(es), merging was not requested"
+            ))
+            .await;
+    }
+    if !errors.is_empty() {
+        let failed = errors
+            .iter()
+            .map(|(context, error)| format!("{context}: {}", first_line(error)))
+            .collect::<Vec<_>>()
+            .join("; ");
+        client
+            .append_slack_error(format!(
+                "{} of {total} pull request(s) failed: {failed}",
+                errors.len()
+            ))
+            .await;
+    }
+}
+
+/// What happened to one pull request in a manifest run.
+enum PrOutcome {
+    /// The pull request was opened and merged.
+    Merged,
+    /// The pull request was opened and merging was not requested. A branch with nothing to merge
+    /// also ends up here, because `create_pr` does not say which it was.
+    Opened,
+    /// The head has no commits that are not already in the base.
+    UpToDate,
+    /// The head branch no longer exists, and its commit is already in the base.
+    SkippedMissingHead,
+}
+
+/// `owner/repository` for a normalized HTTPS repository URL.
+fn repo_label(repository: &str) -> &str {
+    repository.trim_start_matches("https://github.com/")
+}
+
+/// The first line of an error, limited in length, so it fits on one Slack line.
+fn first_line(error: &GitError) -> String {
+    error
+        .to_string()
+        .lines()
+        .next()
+        .unwrap_or_default()
+        .chars()
+        .take(140)
+        .collect()
 }
 
 /// Check that every distinct base branch in a pull request plan exists, and fail listing all the
@@ -321,6 +420,14 @@ async fn verify_pr_bases(client: &GithubClient, plan: &[ManifestPrPlan]) -> Resu
         return Ok(());
     }
     problems.sort();
+    // Slack only shows the first line of an error, so queue the details on a single line.
+    client
+        .append_slack_error(format!(
+            "No pull requests were opened, {} base branch(es) could not be confirmed: {}",
+            problems.len(),
+            problems.join("; ")
+        ))
+        .await;
     Err(GitError::Other(format!(
         "No pull requests were opened because {} base branch(es) could not be confirmed:\n  {}",
         problems.len(),
@@ -332,7 +439,7 @@ async fn open_one(
     client: &GithubClient,
     operation: &ManifestPrPlan,
     options: &ManifestPrOptions,
-) -> Result<(), GitError> {
+) -> Result<PrOutcome, GitError> {
     // A head branch can be deleted or renamed after the manifest is generated, typically once it
     // has been merged. That is only fine to skip when the commit the manifest recorded is already
     // in the base. Anything else is a real problem and fails the run.
@@ -350,7 +457,7 @@ async fn open_one(
                 operation.sha,
                 operation.base
             );
-            return Ok(());
+            return Ok(PrOutcome::SkippedMissingHead);
         }
         return Err(GitError::NoSuchBranch(operation.head.clone()));
     }
@@ -371,7 +478,13 @@ async fn open_one(
         })
         .await?;
     let Some((pr_number, sha)) = created else {
-        return Ok(());
+        // Without a merge, `create_pr` never returns the pull request. With one, it only returns
+        // nothing when the head has no commits that are not already in the base.
+        return Ok(if options.merge {
+            PrOutcome::UpToDate
+        } else {
+            PrOutcome::Opened
+        });
     };
     client
         .merge_pr(&MergePrOptions {
@@ -383,7 +496,8 @@ async fn open_one(
             sha: Some(sha),
             force: options.force_merge,
         })
-        .await
+        .await?;
+    Ok(PrOutcome::Merged)
 }
 
 fn print_pr_plan(plan: &[ManifestPrPlan], options: &ManifestPrOptions) {
@@ -474,6 +588,22 @@ fn print_plan(kind: &str, plan: &[ManifestRefPlan]) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn repo_label_drops_the_host() {
+        assert_eq!(
+            repo_label("https://github.com/acceldata-io/livy"),
+            "acceldata-io/livy"
+        );
+    }
+
+    #[test]
+    fn first_line_keeps_one_short_line() {
+        let error = GitError::Other(format!("{}\nsecond line", "x".repeat(300)));
+        let line = first_line(&error);
+        assert!(!line.contains('\n'));
+        assert_eq!(line.chars().count(), 140);
+    }
 
     #[test]
     fn dry_run_plan_does_not_require_a_client() {

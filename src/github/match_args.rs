@@ -868,12 +868,26 @@ async fn match_pr_cmds(
     match cmd {
         PRCommand::Open(open_cmd) => {
             if let Some(manifest_source) = &open_cmd.manifest {
-                let manifest = ComponentManifest::load(manifest_source).await?;
                 let release = open_cmd
                     .source_release_version
                     .as_deref()
                     .unwrap_or_default();
-                let plan = manifest.pr_plan(&open_cmd.base, release)?;
+                // Nothing has been opened yet if either of these fail, so report it to Slack here.
+                let planned = match ComponentManifest::load(manifest_source).await {
+                    Ok(manifest) => manifest.pr_plan(&open_cmd.base, release),
+                    Err(error) => Err(error),
+                };
+                let plan = match planned {
+                    Ok(plan) => plan,
+                    Err(error) => {
+                        client
+                            .append_slack_error(format!(
+                                "No pull requests were opened, the manifest plan failed: {error}"
+                            ))
+                            .await;
+                        return Err(error);
+                    }
+                };
                 open_manifest_prs(
                     client,
                     plan,
