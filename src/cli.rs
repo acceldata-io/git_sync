@@ -455,8 +455,8 @@ EXAMPLES:
     git_sync pr open -r https://github.com/my-org/my-repo --head my_feature_branch --base my_base_branch --merge
     # For all repositories
     git_sync pr open --all --head my_feature_branch --base my_base_branch --merge
-    # Merge every branch listed in a component manifest into one base, in a single run
-    git_sync pr open --manifest component-manifest.yaml --base ODP-main --merge
+    # Merge every branch listed in a component manifest into its main, in a single run
+    git_sync pr open --manifest component-manifest.yaml --source-release-version 3.2.3.701-2 --base ODP-3.2.x-main --merge
 
 NOTES:
     Not all Pull Requests can be merged automatically. If there are merge conflicts,\
@@ -467,7 +467,7 @@ NOTES:
 
     You can also specify a title with --title \"<TITLE>\". If you don't, a title will be generated automatically based off of HEAD and BASE.
 
-    With --manifest, --head is taken from each component entry, so a repository that lists several branches is handled in one run. --base is the same for every component.
+    With --manifest, --head is taken from each component entry, so a repository that lists several branches is handled in one run. --base is the main line for the release. A variant branch, such as hf/ODP-3.5.1.3.2.3.701-2 for release 3.2.3.701-2, is merged into the matching variant of it (ODP-3.2.x-main-3.5.1 for --base ODP-3.2.x-main). Every base branch is checked to exist before any pull request is opened.
 "
 )]
 pub struct CreatePRCommand {
@@ -485,9 +485,15 @@ pub struct CreatePRCommand {
     )]
     pub head: Option<String>,
     /// Component manifest path or HTTP(S) URL. A pull request is opened from the branch listed
-    /// for each component into --base, so every component and version is handled in one run.
-    #[arg(long)]
+    /// for each component, so every component and version is handled in one run. Requires
+    /// --source-release-version.
+    #[arg(long, requires = "source_release_version")]
     pub manifest: Option<String>,
+    /// Release version found in each branch in the component manifest (for example
+    /// 3.2.3.701-2). A plain branch such as hf/ODP-3.2.3.701-2 is merged into --base, and a
+    /// variant such as hf/ODP-3.5.1.3.2.3.701-2 into --base-3.5.1. Used with --manifest.
+    #[arg(long, conflicts_with_all = ["repository", "all"])]
+    pub source_release_version: Option<String>,
     /// The name of the branch you want the changes merged into
     #[arg(short, long)]
     pub base: String,
@@ -1433,8 +1439,10 @@ mod tests {
             "open",
             "--manifest",
             "component-manifest.yaml",
+            "--source-release-version",
+            "3.2.3.701-2",
             "--base",
-            "ODP-main",
+            "ODP-3.2.x-main",
             "--merge",
             "--force-merge",
         ])
@@ -1446,10 +1454,46 @@ mod tests {
             panic!("Expected pr open command");
         };
         assert_eq!(command.manifest.as_deref(), Some("component-manifest.yaml"));
-        assert_eq!(command.base, "ODP-main");
+        assert_eq!(
+            command.source_release_version.as_deref(),
+            Some("3.2.3.701-2")
+        );
+        assert_eq!(command.base, "ODP-3.2.x-main");
         assert!(command.head.is_none());
         assert!(command.merge);
         assert!(command.force_merge);
+    }
+
+    #[test]
+    fn rejects_manifest_pr_open_without_a_release_version() {
+        let result = AppArgs::try_parse_from([
+            "git_sync",
+            "pr",
+            "open",
+            "--manifest",
+            "component-manifest.yaml",
+            "--base",
+            "ODP-3.2.x-main",
+        ]);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn rejects_a_release_version_without_a_manifest() {
+        let result = AppArgs::try_parse_from([
+            "git_sync",
+            "pr",
+            "open",
+            "--repository",
+            "https://github.com/acceldata-io/livy",
+            "--head",
+            "hf/ODP-3.2.3.701-2",
+            "--base",
+            "ODP-3.2.x-main",
+            "--source-release-version",
+            "3.2.3.701-2",
+        ]);
+        assert!(result.is_err());
     }
 
     #[test]
@@ -1460,6 +1504,8 @@ mod tests {
             "open",
             "--manifest",
             "component-manifest.yaml",
+            "--source-release-version",
+            "3.3.6.7",
             "--head",
             "nightly/ODP-3.3.6.7",
             "--base",

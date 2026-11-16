@@ -222,6 +222,37 @@ impl GithubClient {
         }
         Ok(Some((pr_number, sha)))
     }
+    /// Whether every commit up to `sha` is already in `branch`, so merging `sha` into it would
+    /// change nothing.
+    pub async fn commit_is_in_branch(
+        &self,
+        url: &str,
+        branch: &str,
+        sha: &str,
+    ) -> Result<bool, GitError> {
+        let info = get_repo_info_from_url(url)?;
+        let (owner, repo) = (info.owner, info.repo_name);
+        let octocrab = self.octocrab.clone();
+
+        let compare: Result<_, octocrab::Error> = async_retry!(
+            ms = 100,
+            timeout = 5000,
+            retries = 3,
+            error_predicate = |e: &octocrab::Error| is_retryable(e),
+            body = {
+                let _permit = self.semaphore.clone().acquire_owned().await;
+                octocrab
+                    .commits(&owner, &repo)
+                    .compare(branch, sha)
+                    .send()
+                    .await
+            },
+        );
+        compare
+            .map(|compare| compare.ahead_by == 0)
+            .map_err(GitError::GithubApiError)
+    }
+
     /// Create a pull request for all configured repositories, and optionally merge them
     /// automatically, if possible
     pub async fn create_all_prs(

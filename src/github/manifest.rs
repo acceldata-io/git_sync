@@ -21,9 +21,10 @@ under the License.
 
 use crate::error::GitError;
 use crate::github::client::GithubClient;
-use crate::manifest::ManifestRefPlan;
+use crate::manifest::{ManifestPrPlan, ManifestRefPlan};
 use crate::utils::pr::{CreatePrOptions, MergeMethod, MergePrOptions};
 use futures::{StreamExt, stream::FuturesUnordered};
+use std::collections::BTreeSet;
 use std::future::Future;
 
 /// Create all branches in a validated component-manifest plan.
@@ -201,13 +202,10 @@ async fn branch_exists(
     }
 }
 
-/// Pull request settings applied to every branch in a manifest plan.
-///
-/// `--head` is the branch recorded for that component. `--base` is the same for every component.
+/// Pull request settings applied to every branch in a manifest plan. The head and base of each
+/// pull request come from the plan itself.
 #[derive(Clone, Debug)]
 pub struct ManifestPrOptions {
-    /// Branch the pull requests merge into.
-    pub base: String,
     /// Title used for every pull request. When empty, each one is named from its own head and base.
     pub title: Option<String>,
     /// Body used for every pull request.
@@ -228,19 +226,25 @@ pub struct ManifestPrOptions {
     pub dry_run: bool,
 }
 
-/// Open a pull request from every branch in a validated component-manifest plan into one base.
+/// Open a pull request from every branch in a validated component-manifest plan into its base.
 ///
 /// A repository that appears with several versions (for example livy) gets one pull request per
-/// branch. Entries that share a repository and branch are opened once.
+/// branch, each into the base of its own version. Entries that share a repository and branch are
+/// opened once.
+///
+/// Before anything is opened, every base branch is checked to exist, so a missing base fails the
+/// run without leaving a half-merged release. A dry run only prints the plan.
 pub async fn open_manifest_prs(
     client: &GithubClient,
-    plan: Vec<ManifestRefPlan>,
+    plan: Vec<ManifestPrPlan>,
     options: ManifestPrOptions,
 ) -> Result<(), GitError> {
     if options.dry_run {
         print_pr_plan(&plan, &options);
         return Ok(());
     }
+
+    verify_pr_bases(client, &plan).await?;
 
     let mut futures = FuturesUnordered::new();
     for operation in plan {
@@ -256,12 +260,12 @@ pub async fn open_manifest_prs(
         if let Err(error) = result {
             eprintln!(
                 "Failed to open a pull request for {} ({}) from '{}' into '{}': {error}",
-                operation.component, operation.repository, operation.source_branch, options.base
+                operation.component, operation.repository, operation.head, operation.base
             );
             errors.push((
                 format!(
                     "{} ({} -> {})",
-                    operation.component, operation.source_branch, options.base
+                    operation.component, operation.head, operation.base
                 ),
                 error,
             ));
@@ -283,22 +287,83 @@ pub async fn open_manifest_prs(
     }
 }
 
+/// Check that every distinct base branch in a pull request plan exists, and fail listing all the
+/// ones that do not, so nothing is opened for a plan that cannot be completed.
+async fn verify_pr_bases(client: &GithubClient, plan: &[ManifestPrPlan]) -> Result<(), GitError> {
+    let bases: BTreeSet<(&str, &str)> = plan
+        .iter()
+        .map(|operation| (operation.repository.as_str(), operation.base.as_str()))
+        .collect();
+
+    let futures = FuturesUnordered::new();
+    for (repository, base) in bases {
+        futures.push(async move {
+            (
+                repository,
+                base,
+                branch_exists(client, repository, base).await,
+            )
+        });
+    }
+    let results: Vec<_> = futures.collect().await;
+
+    let mut problems: Vec<String> = results
+        .into_iter()
+        .filter_map(|(repository, base, result)| match result {
+            Ok(true) => None,
+            Ok(false) => Some(format!("{repository}: base branch '{base}' does not exist")),
+            Err(error) => Some(format!(
+                "{repository}: could not check base branch '{base}': {error}"
+            )),
+        })
+        .collect();
+    if problems.is_empty() {
+        return Ok(());
+    }
+    problems.sort();
+    Err(GitError::Other(format!(
+        "No pull requests were opened because {} base branch(es) could not be confirmed:\n  {}",
+        problems.len(),
+        problems.join("\n  ")
+    )))
+}
+
 async fn open_one(
     client: &GithubClient,
-    operation: &ManifestRefPlan,
+    operation: &ManifestPrPlan,
     options: &ManifestPrOptions,
 ) -> Result<(), GitError> {
-    let title = options.title.clone().unwrap_or_else(|| {
-        format!(
-            "Merge '{}' into '{}'",
-            operation.source_branch, options.base
-        )
-    });
+    // A head branch can be deleted or renamed after the manifest is generated, typically once it
+    // has been merged. That is only fine to skip when the commit the manifest recorded is already
+    // in the base. Anything else is a real problem and fails the run.
+    if !branch_exists(client, &operation.repository, &operation.head).await? {
+        if !operation.sha.is_empty()
+            && client
+                .commit_is_in_branch(&operation.repository, &operation.base, &operation.sha)
+                .await?
+        {
+            println!(
+                "Skipping {} ({}): branch '{}' no longer exists, and its manifest commit {} is already in '{}'",
+                operation.component,
+                operation.repository,
+                operation.head,
+                operation.sha,
+                operation.base
+            );
+            return Ok(());
+        }
+        return Err(GitError::NoSuchBranch(operation.head.clone()));
+    }
+
+    let title = options
+        .title
+        .clone()
+        .unwrap_or_else(|| format!("Merge '{}' into '{}'", operation.head, operation.base));
     let created = client
         .create_pr(&CreatePrOptions {
             url: operation.repository.clone(),
-            head: operation.source_branch.clone(),
-            base: options.base.clone(),
+            head: operation.head.clone(),
+            base: operation.base.clone(),
             title,
             body: options.body.clone(),
             reviewers: options.reviewers.clone(),
@@ -321,21 +386,20 @@ async fn open_one(
         .await
 }
 
-fn print_pr_plan(plan: &[ManifestRefPlan], options: &ManifestPrOptions) {
+fn print_pr_plan(plan: &[ManifestPrPlan], options: &ManifestPrOptions) {
     let action = if options.merge {
         "opened and merged"
     } else {
         "opened"
     };
     println!(
-        "DRY RUN: {} pull request(s) would be {action} into '{}'",
-        plan.len(),
-        options.base
+        "DRY RUN: {} pull request(s) would be {action}. Base branches are checked when it runs for real.",
+        plan.len()
     );
     for operation in plan {
         println!(
             "{}\t{}\t{} -> {}",
-            operation.component, operation.repository, operation.source_branch, options.base
+            operation.component, operation.repository, operation.head, operation.base
         );
     }
 }

@@ -869,12 +869,15 @@ async fn match_pr_cmds(
         PRCommand::Open(open_cmd) => {
             if let Some(manifest_source) = &open_cmd.manifest {
                 let manifest = ComponentManifest::load(manifest_source).await?;
-                let plan = manifest.source_branch_plan()?;
+                let release = open_cmd
+                    .source_release_version
+                    .as_deref()
+                    .unwrap_or_default();
+                let plan = manifest.pr_plan(&open_cmd.base, release)?;
                 open_manifest_prs(
                     client,
                     plan,
                     ManifestPrOptions {
-                        base: open_cmd.base.clone(),
                         title: open_cmd.title.clone(),
                         body: open_cmd.body.clone(),
                         reviewers: open_cmd.reviewers.clone(),

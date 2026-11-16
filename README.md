@@ -531,14 +531,16 @@ You can specify the title for your PR with `--title <TITLE>`, but if it is not s
 ```bash
 git_sync pr open -r https://github.com/my-org/my-repo --base main --head my_feature_branch --merge
 git_sync pr open --all --base MY_MAIN_BRANCH --head my_feature_branch --merge
-# Merge every branch listed in a component manifest into one base, in a single run.
-# livy with nightly/ODP-3.3.6.7 and nightly/ODP-3.5.1.3.3.6.7 gets one pull request per branch.
+# Merge every branch listed in a component manifest into its main, in a single run.
 git_sync pr open \
-    --manifest https://mirror-stg.odp.acceldata.dev/staging/builds/ODP-3.3.6.7/3.3.6.7-1001/component-manifest.yaml \
-    --base ODP-main --merge
+    --manifest https://mirror-stg.odp.acceldata.dev/staging/builds/ODP-3.2.3.701-2/3.2.3.701-2001/component-manifest.yaml \
+    --source-release-version 3.2.3.701-2 \
+    --base ODP-3.2.x-main --merge
 ```
 
-`pr open --manifest` uses each component's own branch as the pull request head and the same `--base` for every component. Aliases that resolve to the same repository and branch are opened once. The `accelbuild`, `odp-build-configs` and `ambari-mpacks` components are skipped, matching `branch modify --manifest`. The manifest `sha` is not used: the pull request is opened from the branch tip, so commits made after the manifest was generated are included. A branch that is already contained in `--base` is skipped. With `--dry-run` the plan is printed and no pull requests are opened. Failures are collected per branch, and the command exits non-zero when any branch fails.
+`pr open --manifest` uses each component's own branch as the pull request head. `--base` is the main line for the release, and `--source-release-version` is the release in the branch names. A plain branch such as `hf/ODP-3.2.3.701-2` is merged into `--base`. A variant, where a component version sits in front of the release, goes to the matching variant of the base: `hf/ODP-3.5.1.3.2.3.701-2` is merged into `ODP-3.2.x-main-3.5.1`, and `nightly/ODP-4.3.0.3.3.6.7` with `--base ODP-main` into `ODP-main-4.3.0`. A branch that is neither fails the run, naming the component, before anything is opened. Every base branch is then checked to exist, and the run stops and lists any that do not, so a release is not left half merged.
+
+Aliases that resolve to the same repository and branch are opened once. The `accelbuild`, `odp-build-configs` and `ambari-mpacks` components are skipped, matching `branch modify --manifest`. The manifest `sha` is not used: the pull request is opened from the branch tip, so commits made after the manifest was generated are included. A branch that is already contained in its base is skipped. A head branch that no longer exists (for example one deleted or renamed after the manifest was generated) is skipped only when the commit the manifest recorded for it is already in the base; otherwise that component fails the run with "No such branch". With `--dry-run` the plan, including each base, is printed and no pull requests are opened. Failures are collected per branch, and the command exits non-zero when any branch fails.
 
 ### Check repositories
 

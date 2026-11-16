@@ -64,6 +64,22 @@ pub struct ManifestRefPlan {
     pub sha: String,
 }
 
+/// One validated pull request: a component branch merged into its own base branch.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ManifestPrPlan {
+    /// Manifest component name.
+    pub component: String,
+    /// Normalized HTTPS GitHub repository URL.
+    pub repository: String,
+    /// Branch recorded in the manifest, which holds the changes.
+    pub head: String,
+    /// Branch the changes are merged into.
+    pub base: String,
+    /// Commit the manifest recorded for the head. May be empty in a hand-edited manifest. It is
+    /// only used to tell that a head branch that no longer exists was already merged.
+    pub sha: String,
+}
+
 impl ComponentManifest {
     /// Parse a component manifest from YAML.
     pub fn from_yaml(yaml: &str) -> Result<Self, GitError> {
@@ -189,6 +205,45 @@ impl ComponentManifest {
             });
         }
 
+        Ok(plan)
+    }
+
+    /// Build one pull request per branch recorded in the manifest, each into its own base.
+    ///
+    /// `base` is the main line for the release, for example `ODP-3.2.x-main`. A branch that
+    /// carries a component version in front of the release, such as `hf/ODP-3.5.1.3.2.3.701-2`
+    /// with release `3.2.3.701-2`, is a variant of that component and is merged into the matching
+    /// variant of the base, `ODP-3.2.x-main-3.5.1`. Without this, a variant would be merged into
+    /// the plain main line. A branch that does not contain the release version fails the plan, so
+    /// nothing is opened for a manifest that does not match the release.
+    pub fn pr_plan(
+        &self,
+        base: &str,
+        source_release_version: &str,
+    ) -> Result<Vec<ManifestPrPlan>, GitError> {
+        let base = required_value(base, "Base branch must not be empty")?;
+        let release = required_value(
+            source_release_version,
+            "Source release version must not be empty",
+        )?;
+
+        let mut plan = Vec::new();
+        for operation in self.source_branch_plan()? {
+            let pr_base = derive_pr_base(
+                &operation.component,
+                &operation.source_branch,
+                base,
+                release,
+            )?;
+            validate_ref_name(&operation.component, &pr_base)?;
+            plan.push(ManifestPrPlan {
+                component: operation.component,
+                repository: operation.repository,
+                head: operation.source_branch,
+                base: pr_base,
+                sha: operation.sha,
+            });
+        }
         Ok(plan)
     }
 
@@ -353,6 +408,36 @@ fn derive_target_body(
         }
     }
     source_body.replacen(source_release_version, new_version, 1)
+}
+
+/// The base a component branch is merged into.
+///
+/// `ODP-{release}` is the plain line and goes to `base`. `ODP-{variant}.{release}` is a variant of
+/// the component and goes to `{base}-{variant}`. The leading `nightly/` or `hf/` is ignored.
+fn derive_pr_base(
+    component: &str,
+    branch: &str,
+    base: &str,
+    release: &str,
+) -> Result<String, GitError> {
+    let body = branch.split_once('/').map_or(branch, |(_, body)| body);
+    let release_name = release.strip_prefix("ODP-").unwrap_or(release);
+
+    if body == format!("ODP-{release_name}") || body == release_name {
+        return Ok(base.to_string());
+    }
+    if let Some(variant) = body
+        .strip_suffix(release_name)
+        .and_then(|rest| rest.strip_suffix('.'))
+    {
+        let variant = variant.strip_prefix("ODP-").unwrap_or(variant);
+        if is_dotted_version(variant) {
+            return Ok(format!("{base}-{variant}"));
+        }
+    }
+    Err(GitError::Other(format!(
+        "Component '{component}' branch '{branch}' is neither 'ODP-{release_name}' nor a variant of it ('ODP-<version>.{release_name}'), so its base branch cannot be worked out"
+    )))
 }
 
 fn is_dotted_version(value: &str) -> bool {
@@ -811,6 +896,61 @@ repos:
             plan.iter()
                 .all(|operation| operation.target_ref == operation.source_branch)
         );
+    }
+
+    #[test]
+    fn pr_plan_sends_each_variant_to_its_own_base() {
+        let manifest = ComponentManifest::from_yaml(MULTI_VERSION_MANIFEST).unwrap();
+        let plan = manifest.pr_plan("ODP-main", "3.3.6.7").unwrap();
+        let pairs: Vec<(&str, &str, &str)> = plan
+            .iter()
+            .map(|pr| {
+                (
+                    pr.repository.rsplit('/').next().unwrap(),
+                    pr.head.as_str(),
+                    pr.base.as_str(),
+                )
+            })
+            .collect();
+        assert_eq!(
+            pairs,
+            [
+                ("hadoop", "nightly/ODP-3.3.6.7", "ODP-main"),
+                ("livy", "nightly/ODP-3.3.3.3.3.6.7", "ODP-main-3.3.3"),
+                ("livy", "nightly/ODP-3.5.1.3.3.6.7", "ODP-main-3.5.1"),
+            ]
+        );
+    }
+
+    #[test]
+    fn pr_plan_handles_hotfix_branches_and_a_versioned_main() {
+        let yaml = "repos:\n  spark3:\n    url: git@github.com:acceldata-io/spark3.git\n    branch: hf/ODP-3.2.3.701-2\n  spark3_3_5_1:\n    url: git@github.com:acceldata-io/spark3.git\n    branch: hf/ODP-3.5.1.3.2.3.701-2\n";
+        let manifest = ComponentManifest::from_yaml(yaml).unwrap();
+        let plan = manifest.pr_plan("ODP-3.2.x-main", "3.2.3.701-2").unwrap();
+        let bases: Vec<&str> = plan.iter().map(|pr| pr.base.as_str()).collect();
+        assert_eq!(bases, ["ODP-3.2.x-main", "ODP-3.2.x-main-3.5.1"]);
+    }
+
+    #[test]
+    fn pr_plan_rejects_a_branch_that_is_not_part_of_the_release() {
+        let manifest = ComponentManifest::from_yaml(MULTI_VERSION_MANIFEST).unwrap();
+        let error = manifest.pr_plan("ODP-main", "3.3.6.8").unwrap_err();
+        assert!(error.to_string().contains("cannot be worked out"));
+    }
+
+    #[test]
+    fn pr_plan_keeps_the_manifest_commit_of_each_head() {
+        let manifest = ComponentManifest::from_yaml(MULTI_VERSION_MANIFEST).unwrap();
+        let plan = manifest.pr_plan("ODP-main", "3.3.6.7").unwrap();
+        assert_eq!(plan[0].sha, "cccccccccccccccccccccccccccccccccccccccc");
+        assert_eq!(plan[1].sha, "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+    }
+
+    #[test]
+    fn pr_plan_requires_a_base_and_a_release() {
+        let manifest = ComponentManifest::from_yaml(MULTI_VERSION_MANIFEST).unwrap();
+        assert!(manifest.pr_plan("", "3.3.6.7").is_err());
+        assert!(manifest.pr_plan("ODP-main", " ").is_err());
     }
 
     #[test]
